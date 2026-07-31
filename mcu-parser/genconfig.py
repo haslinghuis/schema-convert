@@ -37,7 +37,8 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 import netmap  # noqa: E402
-from netmap import Link, Result, Word, extract_words, find_net_labels, find_symbol  # noqa: E402
+from netmap import (Link, Result, Symbol, Word, extract_words,  # noqa: E402
+                    find_net_labels, find_symbol)
 
 DATA_DIR = Path(__file__).parent / "data"
 ALIAS_FILE = DATA_DIR / "aliases.json"
@@ -462,6 +463,278 @@ def read_connector_roles(words: Sequence[Word]) -> Tuple[Dict[str, str], List[st
 
 
 # --------------------------------------------------------------------------- #
+# HSE crystal
+# --------------------------------------------------------------------------- #
+
+# A crystal marking carries its frequency, but so does a ferrite bead's impedance
+# spec (`/200R@100MHZ`). Anything outside the range real MCU/peripheral crystals
+# are cut in is a different kind of part, not a crystal.
+XTAL_MIN_MHZ, XTAL_MAX_MHZ = 4.0, 50.0
+
+# Values seen across the 619-board config corpus plus the rest of the standard
+# crystal series. A detected frequency outside this set is still emitted - it may
+# be a genuinely unusual board - but it is called out, because a misread digit
+# looks exactly like this.
+HSE_TYPICAL_MHZ = {8, 12, 16, 24, 25, 26, 27, 32, 48}
+
+FREQ_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?M(?:HZ|H)\b", re.I)
+
+# The MCU symbol's own OSC pin names: 'PH0/OSC-IN', 'PF0-OSC_OUT'. The port-pin
+# prefix is what makes this the MCU rather than some other chip with an OSCIN
+# pin, and OSC32 is deliberately not matched - that is the 32.768 kHz LSE.
+OSC_PIN_RE = re.compile(r"^P[A-K]\d{1,2}[-/]OSC[-_]?(IN|OUT)$", re.I)
+
+# The net drawn between crystal and MCU, when the sheet uses one instead of
+# wiring the two symbols side by side: OSCI/OSC_I/OSC_IN/XTAL_IN/HSE_IN.
+OSC_NET_RE = re.compile(r"^(?:MCU[-_]?)?(?:X?OSC|XTAL|HSE)[-_]?(IN|OUT|I|O)$", re.I)
+
+REFDES_RE = re.compile(r"^[XY]\d{1,3}$")
+
+# Not every symbol spells the function out - plenty label the row just `PH0`.
+# Which port pin is the oscillator is family-dependent, but it does not need a
+# hand-written table: the firmware's own capability map answers it. A pin the
+# tables route nothing to is not a GPIO on this part, and among these candidates
+# that leaves the oscillator. PH0/PH1 appear in no STM32 table at all; PF0/PF1
+# are real GPIOs on F4/F7/H5/H7 and the oscillator on G4.
+OSC_PIN_CANDIDATES = ("PH0", "PH1", "PF0", "PF1", "PD0", "PD1")
+
+# Families whose clock tree really is derived from SYSTEM_HSE_MHZ, checked
+# against the firmware rather than the one-line comment in config.c.
+#
+# Two independent mechanisms, and `config.c`'s "Only used for F4 and G4 targets"
+# describes just the first:
+#
+#   runtime       config.c seeds systemConfig()->hseMhz, fc/init.c hands it to
+#                 systemClockSetHSEValue(), which persists it and re-derives the
+#                 PLL M/N dividers on the next boot. Guarded by
+#                 PLATFORM_TRAIT_CONFIG_HSE, defined for STM32F4 and STM32G4
+#                 (src/platform/STM32/include/platform/platform.h) and
+#                 unconditionally for APM32.
+#
+#   compile time  mk/config.mk preprocesses the define out of config.h and
+#                 passes it as -DHSE_VALUE. H5 and C5 select PLL ratios from a
+#                 whitelist of HSE_VALUE and #error on anything else; H7 and N6
+#                 compute the PLL N divider by dividing a fixed VCO target by it.
+#
+# The second mechanism is the reason omitting the define is not a safe no-op:
+# the top-level Makefile ends `HSE_VALUE ?= 8000000`, so a config with no
+# SYSTEM_HSE_MHZ builds as though the board had an 8 MHz crystal. On a 25 MHz H5
+# that silently asks PLL1 for a 1.5 GHz VCO.
+HSE_FAMILIES = {"STM32F4", "STM32G4", "STM32H5", "STM32H7", "STM32C5", "STM32N6"}
+
+# F7 is the exception that motivated dropping the define in the first place, and
+# it stays dropped: system_stm32f7xx.c hardcodes PLL_M to 8 and only reads
+# HSE_VALUE to fill in SystemCoreClock for reporting. Emitting it there would
+# suggest the PLL had been retuned when it has not - but a non-8 MHz F7 crystal
+# is still worth saying out loud, because that board needs a firmware change.
+HSE_COSMETIC_FAMILIES = {"STM32F7": 8}
+
+
+@dataclass
+class Crystal:
+    mhz: float
+    marking: str        # the token as printed, e.g. '3X2.1X1_8MHZ'
+    refdes: str         # Y1 / X3, when one sits next to it
+    x0: float
+    x1: float
+    y: float
+
+
+def _gap(a: Word, b: Word) -> float:
+    """Distance between two text boxes, not between their origins.
+
+    Pin names and crystal markings are long strings; measuring origin-to-origin
+    makes a wide label look further away than a narrow one at the same place.
+    """
+    dx = max(0.0, b.x0 - a.x1, a.x0 - b.x1)
+    dy = abs(a.y0 - b.y0)
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def find_crystals(words: Sequence[Word]) -> List[Crystal]:
+    """Every crystal marking on the sheet, with its designator when there is one."""
+    out: List[Crystal] = []
+    for w in words:
+        if "@" in w.text:          # 200R@100MHZ - a ferrite bead, not a crystal
+            continue
+        m = None
+        for m in FREQ_RE.finditer(w.text):
+            pass                   # keep the last: '3X2.1X1_8MHZ' is an 8 MHz part
+        if not m:
+            continue
+        mhz = float(m.group(1))
+        if not XTAL_MIN_MHZ <= mhz <= XTAL_MAX_MHZ:
+            continue
+        near = [v for v in words if REFDES_RE.match(v.text) and _gap(w, v) < 20]
+        ref = min(near, key=lambda v: _gap(w, v)).text if near else ""
+        out.append(Crystal(mhz, w.text, ref, w.x0, w.x1, w.y0))
+    return out
+
+
+def _osc_nets_near(words: Sequence[Word], anchors: Sequence[Word],
+                   radius: float) -> Set[str]:
+    """Canonical OSC net names within `radius` of any anchor: {'IN', 'OUT'}."""
+    found: Set[str] = set()
+    for w in words:
+        m = OSC_NET_RE.match(w.text)
+        if not m:
+            continue
+        if any(_gap(w, a) <= radius for a in anchors):
+            found.add("IN" if m.group(1).upper() in ("IN", "I") else "OUT")
+    return found
+
+
+def osc_anchors(words: Sequence[Word], sym: Symbol, caps: dict) -> List[Word]:
+    """Where the MCU's OSC_IN/OSC_OUT pins sit on the sheet."""
+    named = [w for w in words if OSC_PIN_RE.match(w.text)]
+    if named:
+        return named
+    routed: Set[str] = set()
+    for table in ("timers", "uart", "spi", "i2c", "adc"):
+        routed |= set(caps[table])
+    out: List[Word] = []
+    for r in sym.rows:
+        if r.pin not in OSC_PIN_CANDIDATES or r.pin in routed:
+            continue
+        # A row carries no x of its own, only its side; the edge it is aligned
+        # to is what a crystal drawn outside the symbol is measured from.
+        edge = sym.left_edge if r.side == "L" else sym.right_edge
+        out.append(Word(r.pin, edge, r.y, edge, r.y))
+    return out
+
+
+def find_mcu_crystal(words: Sequence[Word], sym: Symbol, caps: dict
+                     ) -> Tuple[Optional[Crystal], List[str]]:
+    """
+    Which crystal on this sheet clocks the MCU.
+
+    A flight controller carries several: the MCU's HSE, the OSD chip's 27 MHz,
+    sometimes an RF module's. Taking the first one found gives a 27 MHz HSE and a
+    clock tree three times too fast, so the crystal has to be tied to the MCU's
+    own OSC_IN/OSC_OUT pins before its frequency means anything.
+
+    Two ways a sheet expresses that connection, and both are checked:
+
+      * a net name shared by both ends (`OSCI` at the crystal, `OSC_I` in the
+        MCU's gutter) - unambiguous, so it wins outright;
+      * the crystal drawn hard up against the MCU's OSC pins with no net label at
+        all, which is the more common layout. Distance is then the only evidence,
+        so it must also be decisive: the winner has to be far nearer than any
+        other crystal, or nothing is claimed.
+
+    Returns (crystal, evidence). A None crystal means the caller must not guess.
+    """
+    notes: List[str] = []
+    crystals = find_crystals(words)
+    if not crystals:
+        return None, ["no crystal frequency marking found on the sheet"]
+
+    anchors = osc_anchors(words, sym, caps)
+    if not anchors:
+        return None, ["the MCU symbol has no OSC_IN/OSC_OUT row, so no crystal "
+                      "can be tied to the MCU"]
+
+    # Sheet scale varies by an octave between vendors; the symbol's own row pitch
+    # is the natural unit for "next to the MCU" and travels across scales.
+    direct_max = 30 * sym.pitch
+
+    at_mcu = _osc_nets_near(words, anchors, radius=100.0)
+    boxes = [Word(c.marking, c.x0, c.y, c.x1, c.y) for c in crystals]
+    linked = [c for c, b in zip(crystals, boxes)
+              if at_mcu & _osc_nets_near(words, [b], radius=40.0)]
+    if len(linked) == 1:
+        c = linked[0]
+        return c, [f"{c.refdes or 'crystal'} {c.marking} -> {c.mhz:g} MHz, tied to "
+                   f"the MCU by its OSC net label"]
+    if len(linked) > 1:
+        notes.append("more than one crystal carries an OSC net label: "
+                     + ", ".join(f"{c.refdes or '?'} {c.marking}" for c in linked))
+
+    ranked = sorted(((min(_gap(b, a) for a in anchors), c)
+                     for c, b in zip(crystals, boxes)), key=lambda t: t[0])
+    near = [(d, c) for d, c in ranked if d <= direct_max]
+    if not near:
+        return None, notes + [
+            f"the nearest crystal ({ranked[0][1].refdes or '?'} "
+            f"{ranked[0][1].marking}) is {ranked[0][0]:.0f}pt from the MCU's OSC "
+            "pins, too far to attribute to them"]
+    if len(near) > 1 and near[1][0] < 3 * near[0][0]:
+        return None, notes + [
+            "two crystals sit equally close to the MCU's OSC pins: "
+            + ", ".join(f"{c.refdes or '?'} {c.marking} ({d:.0f}pt)"
+                        for d, c in near[:2])]
+    d, c = near[0]
+    return c, notes + [f"{c.refdes or 'crystal'} {c.marking} -> {c.mhz:g} MHz, "
+                       f"{d:.0f}pt from the MCU's OSC pins"]
+
+
+def resolve_hse(words: Sequence[Word], sym: Symbol, caps: dict,
+                override: Optional[int], cfg: "Config") -> Optional[int]:
+    """The SYSTEM_HSE_MHZ value to emit, or None. Records its reasoning in `cfg`."""
+    family = caps["family"]
+    needed = family in HSE_FAMILIES
+    if override is not None:
+        if not needed:
+            cfg.warnings.append(
+                f"--hse-mhz {override} ignored: {family}'s clock tree does not "
+                "derive from SYSTEM_HSE_MHZ, so the define would be inert")
+            return None
+        cfg.notes.append(f"SYSTEM_HSE_MHZ {override} given on the command line")
+        _check_plausible(override, family, cfg)
+        return override
+
+    xtal, why = find_mcu_crystal(words, sym, caps)
+
+    if not needed:
+        cosmetic = HSE_COSMETIC_FAMILIES.get(family)
+        if xtal and cosmetic is not None and xtal.mhz != cosmetic:
+            cfg.warnings.append(
+                f"this board's HSE crystal is {xtal.mhz:g} MHz, but {family}'s "
+                f"clock setup hardcodes a {cosmetic} MHz PLL input - the firmware "
+                "needs a code change; SYSTEM_HSE_MHZ alone would not fix it")
+        return None
+
+    if not xtal:
+        cfg.warnings.append(
+            f"SYSTEM_HSE_MHZ omitted: {'; '.join(why)}. {family} derives its "
+            "clock tree from this value and the build defaults to 8 MHz when it "
+            "is absent, so confirm the crystal with the vendor and re-run with "
+            "--hse-mhz")
+        return None
+
+    cfg.notes.extend(why)
+    if xtal.mhz != int(xtal.mhz):
+        cfg.warnings.append(
+            f"SYSTEM_HSE_MHZ omitted: the crystal reads {xtal.mhz:g} MHz and the "
+            "define is a whole number of MHz - set it by hand with --hse-mhz")
+        return None
+    mhz = int(xtal.mhz)
+    _check_plausible(mhz, family, cfg)
+    return mhz
+
+
+# Families that reject a zero HSE at compile time rather than falling back to the
+# internal oscillator: H5 #errors on an unlisted HSE_VALUE and H7 divides its VCO
+# target by it. G4, C5 and N6 do treat 0 as "no crystal, run from HSI".
+HSE_ZERO_UNSUPPORTED = {"STM32H5", "STM32H7"}
+
+
+def _check_plausible(mhz: int, family: str, cfg: "Config") -> None:
+    if mhz == 0:
+        # Not a crystal frequency - the explicit "this board has no HSE" value.
+        if family in HSE_ZERO_UNSUPPORTED:
+            cfg.warnings.append(
+                f"SYSTEM_HSE_MHZ 0 will not compile on {family}; its clock setup "
+                "has no HSI fallback path")
+        return
+    if mhz not in HSE_TYPICAL_MHZ:
+        cfg.warnings.append(
+            f"SYSTEM_HSE_MHZ {mhz} is not a value any board in the config repo "
+            f"uses ({', '.join(str(v) for v in sorted(HSE_TYPICAL_MHZ))}) - "
+            "verify it before shipping")
+
+
+# --------------------------------------------------------------------------- #
 # Part detection
 # --------------------------------------------------------------------------- #
 
@@ -557,7 +830,8 @@ HEADER = """/*
 def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
           gyro_align: str, args_trust: bool = False,
           reference: Optional[str] = None,
-          version: Optional[str] = None) -> Tuple[Config, dict]:
+          version: Optional[str] = None,
+          hse_mhz: Optional[int] = None) -> Tuple[Config, dict]:
     fw = json.loads((DATA_DIR / "firmware.json").read_text())
     aliases = json.loads(ALIAS_FILE.read_text())
 
@@ -948,6 +1222,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cfg.define(f"{adc_dev}_DMA_OPT", str(adc_opt), width=29)
         cfg.add()
 
+    # The hand-written configs put this straight after the DMA options.
+    hse = resolve_hse(words, sym, caps, hse_mhz, cfg)
+    if hse is not None:
+        cfg.define("SYSTEM_HSE_MHZ", str(hse), width=29)
+        cfg.add()
+
     if "beeper" in simple:
         # An NPN/transistor low-side driver sounds when the pin is driven high,
         # which is what BEEPER_INVERTED selects. Bare open-drain buzzers are the
@@ -1038,6 +1318,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         "links": [vars(l) for l in res.links],
         "unmapped": res.unmapped,
         "timers": [vars(p) for p in picks],
+        "hse_mhz": hse,
         "firmware": fw["firmware"],
     }
     return cfg, meta
@@ -1056,6 +1337,11 @@ def main() -> int:
     ap.add_argument("--manufacturer", required=True, help="MANUFACTURER_ID (4 chars)")
     ap.add_argument("--target", help="FC_TARGET_MCU (auto-detected if omitted)")
     ap.add_argument("--gyro-align", default="CW0_DEG")
+    ap.add_argument("--hse-mhz", type=int,
+                    help="HSE crystal frequency in MHz, when the vendor states "
+                         "it and the sheet does not let it be read. Overrides "
+                         "detection; ignored on families whose clock tree does "
+                         "not derive from SYSTEM_HSE_MHZ.")
     ap.add_argument("--reference",
                     help="the sha256_... REFERENCE token issued by the Betaflight "
                          "team for a reviewed target. Cannot be computed locally; "
@@ -1079,7 +1365,7 @@ def main() -> int:
 
     cfg, meta = build(args.pdf, args.board, args.manufacturer,
                       args.target, args.gyro_align, args.trust_symbol,
-                      args.reference, args.fw_version)
+                      args.reference, args.fw_version, args.hse_mhz)
     text = "\n".join(cfg.lines).rstrip() + "\n"
 
     if args.to_stdout or not args.outdir:
