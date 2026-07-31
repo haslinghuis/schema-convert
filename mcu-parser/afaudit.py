@@ -625,6 +625,47 @@ class Finding:
     note: str = ""
 
 
+WAIVER_FILE = Path(__file__).parent / "data" / "af-waivers.json"
+
+
+@dataclass(frozen=True)
+class Waiver:
+    datasheet: str
+    peripheral: str
+    signal: str
+    pin: str
+    reason: str
+
+    def matches(self, f: "Finding", datasheet_stem: str) -> bool:
+        return (datasheet_stem.lower().startswith(self.datasheet.lower())
+                and f.peripheral.lower() == self.peripheral.lower()
+                and f.signal.upper() == self.signal.upper()
+                and f.pin.upper() == self.pin.upper())
+
+
+def load_waivers(path: Path = WAIVER_FILE) -> List[Waiver]:
+    """
+    Known divergences that must not fail the run.
+
+    One firmware table serves a family; a datasheet describes one part. Where
+    two parts genuinely differ, no single table satisfies both and the audit is
+    permanently red on one of them - and a check that can never go green stops
+    being read. A waiver silences one exact finding, never a category.
+    """
+    if not path.exists():
+        return []
+    doc = json.loads(path.read_text())
+    out = []
+    for w in doc.get("waivers", []):
+        missing = [k for k in ("datasheet", "peripheral", "signal", "pin", "reason")
+                   if not w.get(k)]
+        if missing:
+            raise SystemExit(f"{path}: waiver missing {', '.join(missing)}: {w}")
+        out.append(Waiver(w["datasheet"], w["peripheral"], w["signal"],
+                          w["pin"], w["reason"]))
+    return out
+
+
 @dataclass
 class Audit:
     findings: List[Finding] = field(default_factory=list)
@@ -886,6 +927,8 @@ def main() -> int:
     ap.add_argument("--dump-af", type=Path,
                     help="write the extracted pin -> {function: AF} map as JSON")
     ap.add_argument("--json", type=Path, help="write findings as JSON")
+    ap.add_argument("--no-waivers", action="store_true",
+                    help="ignore data/af-waivers.json and report every finding")
     args = ap.parse_args()
 
     if not args.datasheet.exists():
@@ -980,7 +1023,35 @@ def main() -> int:
             "findings": [f.__dict__ for f in result.findings],
         }, indent=1) + "\n")
 
-    return 1 if result.failures else 0
+    # Waivers are applied last, so the report above always shows the raw truth
+    # and only the exit status is softened.
+    waivers = [] if args.no_waivers else load_waivers()
+    stem = args.datasheet.stem
+    failures = result.failures
+    waived, unwaived = [], []
+    for f in failures:
+        hit = next((w for w in waivers if w.matches(f, stem)), None)
+        (waived if hit else unwaived).append((f, hit))
+
+    # A waiver that no longer matches anything has either been fixed or has
+    # rotted. Either way it must be seen: a stale waiver silently hiding a
+    # future finding is exactly the failure this mechanism could introduce.
+    stale = [w for w in waivers
+             if w.datasheet.lower() in stem.lower()
+             and not any(w.matches(f, stem) for f in failures)]
+
+    if waived:
+        print(f"\nWAIVED  {len(waived)} known divergence(s), see "
+              f"{WAIVER_FILE.name}:")
+        for f, w in waived:
+            print(f"  {f.signal:14} {f.pin:5} {w.reason[:96]}")
+    if stale:
+        print(f"\nSTALE WAIVER  {len(stale)} waiver(s) matched nothing - firmware "
+              "may have changed; remove them or re-verify:")
+        for w in stale:
+            print(f"  {w.signal:14} {w.pin:5} ({w.datasheet})")
+
+    return 1 if (unwaived or stale) else 0
 
 
 if __name__ == "__main__":

@@ -1,0 +1,45 @@
+{
+ "_comment": [
+  "Known, accepted divergences between a firmware pin table and a datasheet.",
+  "",
+  "One firmware table serves a whole MCU family, but a datasheet describes one",
+  "part. Where two parts of a family genuinely differ, no single table can",
+  "satisfy both datasheets and the audit is permanently red on one of them - and",
+  "a check that can never go green stops being read.",
+  "",
+  "A waiver silences one exact (peripheral, signal, pin, datasheet) finding and",
+  "nothing else. It does NOT suppress a category. If firmware changes so the",
+  "waived finding no longer occurs, the waiver is reported as stale and the run",
+  "still fails: a waiver that has quietly stopped applying is as much a problem",
+  "as an unwaived defect.",
+  "",
+  "Every entry needs a reason a reviewer can check. 'known issue' is not one."
+ ],
+
+ "waivers": [
+  {
+   "datasheet": "stm32g474",
+   "peripheral": "i2c",
+   "signal": "I2C3_SCL",
+   "pin": "PA10",
+   "reason": "Valid on STM32G473 (DS12712 Rev 5, Table 13: PA10 AF2 = I2C3_SCL) but not on STM32G474 (DS12288 Rev 6, where PA10 AF2 is empty and I2C3_SCL is PA8). The STM32G474 target serves boards built on either part, so the entry has to stay for G473 boards.",
+   "verified": "2026-07-31, read from the rendered AF tables of both datasheets"
+  },
+  {
+   "datasheet": "stm32g473",
+   "peripheral": "i2c",
+   "signal": "I2C1_SCL",
+   "pin": "PA13",
+   "reason": "Valid on STM32G474 (DS12288 Rev 6, Table 13: PA13 AF4 = I2C1_SCL) but absent from the STM32G473 datasheet (DS12712 Rev 5). Shared target, so the entry stays for G474 boards.",
+   "verified": "2026-07-31, read from the rendered AF tables of both datasheets"
+  },
+  {
+   "datasheet": "stm32g473",
+   "peripheral": "i2c",
+   "signal": "I2C4_SCL",
+   "pin": "PA13",
+   "reason": "As above: PA13 AF3 = I2C4_SCL on STM32G474, absent on STM32G473.",
+   "verified": "2026-07-31, read from the rendered AF tables of both datasheets"
+  }
+ ]
+}

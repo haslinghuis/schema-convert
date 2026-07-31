@@ -118,7 +118,7 @@ warning; an unassociable crystal emits nothing and warns rather than guessing.
 Verified against hand-written references: G4 → 8 (matches `SDMODELG473`), F4 → 8
 (matches `JHEF405PRO`), H5 → 25 (matches `NUCLEOH563ZI`), F7 → unchanged.
 
-### 1.3 Fixed-mapping timer DMA options are never de-duplicated
+### 1.3 Fixed-mapping timer DMA options are never de-duplicated — ADDRESSED
 
 On DMAMUX parts every timer gets a distinct `dmaopt` (§ below). On **fixed-mapping**
 parts (F4, F7) nothing checks the timers against each other. One F7 board has
@@ -131,18 +131,38 @@ It becomes real the moment a board wants `DSHOT_DMAR_OFF` without bitbang. The
 ADC allocation already dodges streams the timers claimed — the timers just do not
 dodge each other.
 
-Found by the regression suite, which asserts the *designed* property here rather
-than the current behaviour, so this is not encoded as a passing test.
+Found by the regression suite, which asserted the *designed* property rather than
+the behaviour of the day.
 
-### 1.4 `seed_firmware._eval` mishandles arithmetic guards
+**Fixed by** giving each timer row a stream nobody else holds, and saying why in
+the report rather than silently renumbering:
+
+```
+MOTOR2_PIN takes DMA option 1 (DMA2_S3_C7): option 0 is DMA2_S2_C0,
+and DMA2_S2 is taken by MOTOR1_PIN
+```
+
+That F7 board now lands on DMA2_S2 / S3 / S4 / S7 instead of three motors on
+DMA2_S2. This diverges from the hand-written configs, which all use option 0 —
+inert while `DSHOT_BITBANG_ON` is emitted, correct the moment it is not.
+
+Burst DShot is *detected* but deliberately not enabled: all four motors being on
+one timer is the case for it, yet nothing here can check that timer's update-DMA
+stream is free, so it says so and leaves the choice to a human.
+
+### 1.4 `seed_firmware._eval` mishandles arithmetic guards — FIXED
 
 The comment says arithmetic guards such as `TARGET_FLASH_SIZE > 512` are treated
 as "no obstacle", and the fallback that would do so only fires when `eval`
 *raises*. It does not raise: the identifier resolves to `False`, so
 `False > 512` evaluates to `False` and silently gates the line off.
 
-Latent — no table currently parsed uses such a guard. The regression suite pins
-the real behaviour rather than the documented one, so a fix has to update both.
+**Fixed** by making a macro name answer only the question the harvest can
+answer. In a boolean context it still reports whether the macro is defined, which
+is what `#ifdef`-style guards ask; a comparison or arithmetic use asks for its
+*value*, which is never harvested, so it yields an unknown that the guard solver
+tries both ways rather than resolving to `False` by accident. The test that
+pinned the old behaviour was updated in the same change.
 
 ---
 
@@ -154,12 +174,12 @@ set against the corpus.
 | Define | Boards | Note |
 |---|---|---|
 | `DEFAULT_CURRENT_METER_SCALE` | 61% | ESC-dependent; see §3.2 |
-| `RX_PPM_PIN` | 54% | no rule in `ROLE_RULES` at all |
-| `DEFAULT_DSHOT_BURST` | 51% | never emitted; see §2.1 |
-| `GYRO_2_*` (`CS`/`EXTI`/`SPI_INSTANCE`) | 25% | dual-gyro boards unhandled |
-| `ESCSERIAL_PIN` | 18% | no rule |
+| ~~`RX_PPM_PIN`~~ | 54% | done |
+| ~~`DEFAULT_DSHOT_BURST`~~ | 51% | done, with `TIMUPn_DMA_OPT` |
+| ~~`GYRO_2_*`~~ | 25% | done — **unproven on hardware**, no dual-gyro board in the corpus |
+| ~~`ESCSERIAL_PIN`~~ | 18% | done |
 | `DEFAULT_VOLTAGE_METER_SCALE` | 15% | computable; see §3.2 |
-| `USE_SDCARD` | 15% | `sdcard_cs` role exists but the feature define is not emitted |
+| ~~`USE_SDCARD`~~ | 15% | done — **unproven**, no SD-card board in the corpus |
 
 `MOTOR5-8`, `UART6+`, `SPI4`, `ADC_RSSI_PIN` show up as absent only because the
 three test boards lack them — those are built generically and do work.
@@ -270,7 +290,7 @@ and TIM14 are single-channel timers with no complementary output at all, so a
 `CH1N` cannot exist on them. The same two rows appear in the H7 block they were
 copied from.
 
-Not yet raised upstream.
+**Raised and merged upstream** as #15506 (H5) and #15508 (G4/N6). The H5 `TIM13_CH1N`/`TIM14_CH1N` pair is still only reasoned, not read, so it was not included in either.
 
 Category-2 findings on H7, F7 and C5 are mostly peripherals a *sibling* part has
 (UART9/USART10 on H723, I2C4 on F76x, USART6/7 on C591); the report names the
@@ -331,19 +351,19 @@ deterministic, which makes this straightforward. Also worth asserting the
 invariants that already exist informally: agreement is 100%, no net is dropped
 silently, every emitted pin is firmware-validated.
 
-### 4.2 `MANUFACTURER_ID` is not validated
+### 4.2 `MANUFACTURER_ID` is not validated — FIXED
 
 The ID must appear in the config repo's `Manufacturers.md`. This was checked by
 hand for both boards converted so far. The file is a parseable markdown table —
 validate against it and fail loudly on an unregistered ID.
 
-### 4.3 Firmware array limits are invisible
+### 4.3 Firmware array limits are invisible — FIXED
 
 `UARTHARDWARE_MAX_PINS` is 5 on H5 and 4 on F4/F7. A pin sweep hit that ceiling
 and the generator has no idea the limit exists — it would happily reference a
 pin the firmware table has no room for. Seed the limits and check against them.
 
-### 4.4 `genconfig` does not surface which page it read
+### 4.4 `genconfig` does not surface which page it read — FIXED
 
 `netmap` now reports `31 pins on page 4 of 5` and exposes `sym.page`,
 `sym.pages`, `sym.split`, `sym.ignored_pages` and `describe_pages()`, but
@@ -356,7 +376,7 @@ read, and a rival symbol on another page is never mentioned. Small wiring job.
 The config repo allows an optional `config.c` next to `config.h` for
 board-specific init. Not emitted, and not detected when one would be needed.
 
-### 4.6 Provenance is weak
+### 4.6 Provenance is weak — FIXED
 
 The schematic sha256 is recorded, but nothing ties a generated config to the
 firmware revision it was validated against. A config generated against a patched
@@ -368,14 +388,19 @@ seeder's firmware rev in the generated header.
 
 ## Suggested order
 
-1. ~~§1.1 multi-page~~ — done
-2. ~~§1.2 `SYSTEM_HSE_MHZ`~~ — done
-3. ~~§4.1 tests~~ — done (124 tests, stdlib, ~4s)
-4. **§4.2 / §4.3 / §4.5** — small, high signal-to-noise
-5. **§2 coverage** — mechanical, mostly new `ROLE_RULES` entries
-6. **§3.1 datasheet verification** — tool landed; next is verifying its findings
-   on G4/N6/H5 by hand and raising the confirmed ones. Highest value, and pays off
-   across Betaflight itself rather than just here. Build it as a CI-able check
-   from the start; sourcing an F4 datasheet is the blocking gap for the family
-   that matters most by board count
-7. **§3.2 circuit analysis** — highest effort; start with the VBAT divider alone
+1. ~~§1.1 multi-page~~, ~~§1.2 `SYSTEM_HSE_MHZ`~~, ~~§4.1 tests~~ — done
+2. ~~§4.2 / §4.3 / §4.4 / §4.6~~, ~~§1.3 / §1.4~~, ~~§2 coverage~~ — done
+3. **Validate what is unproven.** `GYRO_2_*`, `USE_SDCARD`, `RX_PPM`, `ESCSERIAL`
+   and burst DShot are implemented and unit-tested, but no board in the corpus
+   exercises any of them. A schematic with a second IMU is the single most
+   valuable input: 25% of shipped configs have one, and the SPI solver's
+   shared-bus path is where it is most likely to be wrong.
+4. **§3.1 audit the remaining families.** H5, G4 and N6 are clean against their
+   datasheets. F7, H7 and C5 still report findings that nobody has read against
+   a rendered table — treat them as unverified, not as defects. No F4 datasheet
+   is available at all, and F4 is the largest family by board count.
+5. **§4.5 `config.c`** — still unsupported.
+6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
+7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
+   only on a board whose ratio is *not* 100K/10K: the one known divider gives
+   exactly the default 110, so a wrong implementation would look correct.
