@@ -19,9 +19,17 @@ What it cannot know is called out in the emitted header and on stderr: gyro
 orientation is a board-layout property, and the current-sense scale depends on
 the ESC. Those need the vendor.
 
+The header also carries the provenance: which sheet of the submission the pin
+map was read from, and which Betaflight revision validated the pins against.
+The second one matters because a config generated against a patched tree looks
+exactly like one generated against a release, and does not behave like it.
+MANUFACTURER_ID is checked against the config repo's registry - loudly, but
+never fatally; see resolve_manufacturer().
+
 Usage:
     python genconfig.py <schematic.pdf> --board NAME --manufacturer ID [-o DIR]
     python genconfig.py <schematic.pdf> --board NAME --manufacturer ID --print
+    python genconfig.py <schematic.pdf> ... --page 4    # multi-page submission
 """
 
 import argparse
@@ -36,6 +44,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
+import manufacturers  # noqa: E402
 import netmap  # noqa: E402
 from netmap import (Link, Result, Symbol, Word, extract_words,  # noqa: E402
                     find_net_labels, find_symbol)
@@ -55,10 +64,18 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
     (re.compile(r"^SERVO(\d+)$"), "servo"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_]?CS\d?$"), "gyro_cs"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
-    (re.compile(r"^(?:GYRO|IMU)\d?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "gyro_spi"),
+    # A PPM receiver and the ESC 1-wire passthrough both drive a timer input
+    # capture, so the pin has to have a timer channel - checked in build().
+    (re.compile(r"^(?:RX[-_]?)?PPM(?:[-_]?(?:IN|SIG|SIGNAL))?$"), "rx_ppm"),
+    (re.compile(r"^ESC[-_]?SERIAL$"), "escserial"),
+    # The device index is captured on both sides of the name: sheets write the
+    # second IMU as GYRO2-CS and as GYRO-CS2, and both mean GYRO_2_CS_PIN.
+    # classify() folds it into the role, so a caller never has to remember which
+    # group carried it.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
+    (re.compile(r"^(?:GYRO|IMU)(\d)?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "gyro_spi"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_]?CS$"), "osd_cs"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),
     (re.compile(r"^FLASH[-_]?CS$"), "flash_cs"),
@@ -66,6 +83,9 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^BARO[-_]?CS$"), "baro_cs"),
     (re.compile(r"^BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
     (re.compile(r"^SD(?:CARD)?[-_]?CS$"), "sdcard_cs"),
+    # Without the data nets the card is a CS with nowhere to go, so
+    # SDCARD_SPI_INSTANCE - and with it USE_SDCARD_SPI - can never be resolved.
+    (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),
     (re.compile(r"^(?:.*[-_])?TX(\d)(?:[-_]?R)?$"), "uart_tx"),
     (re.compile(r"^(?:.*[-_])?RX(\d)(?:[-_]?R)?$"), "uart_rx"),
     (re.compile(r"^I2C(\d)[-_]SCL$"), "i2c_scl"),
@@ -91,9 +111,16 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
 
 def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    'GYRO-SCK' -> ('gyro_spi', None, 'sck')
-    'TX4'      -> ('uart_tx', '4', None)
+    'GYRO-SCK'  -> ('gyro_spi', None, 'sck')
+    'GYRO2-SCK' -> ('gyro2_spi', None, 'sck')
+    'TX4'       -> ('uart_tx', '4', None)
     Returns (role, index, sub).
+
+    A gyro's device index is folded into the role rather than returned as the
+    index, because it names a different device, not a different instance of the
+    same one: GYRO_2_CS_PIN is a second IMU with its own bus, chip select and
+    interrupt. Everything downstream - including the regression suite's own
+    re-derivation of the SPI groups - then keys off the role alone.
     """
     n = net.upper().strip()
     for rx, role in ROLE_RULES:
@@ -109,8 +136,199 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
             sub = "sdi"
         if sub in ("mosi",):
             sub = "sdo"
+        if role.startswith("gyro"):
+            if idx and idx != "1":
+                role = f"gyro{idx}{role[len('gyro'):]}"
+            idx = None
         return role, idx, sub
     return None, None, None
+
+
+# The gyro owners this generator emits, in classify()'s vocabulary. Betaflight's
+# gyrodev.c carries GYRO_1..GYRO_4, but only a second IMU is common enough to be
+# worth inferring, and nothing in reach can be used to check a third.
+GYRO_OWNERS = frozenset({"gyro", "gyro2"})
+
+
+# --------------------------------------------------------------------------- #
+# Firmware array limits
+# --------------------------------------------------------------------------- #
+#
+# Betaflight's pin tables are fixed-size arrays, and the size is part of what
+# "firmware is the single source of truth" means. `uartHardware[].txPins[]` is
+# UARTHARDWARE_MAX_PINS long - 5 on H5, 4 on F4/F7, 3 on G4 - so a UART whose
+# list is already full has nowhere to put another pin, however capable the
+# silicon is and however clearly the datasheet lists it.
+#
+# That is not hypothetical: an H5 UART4 already carries 5 tx and 5 rx pins, so
+# two perfectly valid datasheet pins cannot be added to that family without
+# raising the macro for every UART on it. The advice "add the pin to the
+# firmware table" is wrong there, and a reviewer should learn that before
+# starting rather than after.
+#
+# seed_firmware.py harvests the ceilings; older data has no `limits` key at all,
+# so every read goes through `limit()` and a missing value simply switches the
+# check off rather than inventing one.
+
+def limit(caps: dict, macro: str) -> Optional[int]:
+    """A harvested firmware array ceiling, or None when the data cannot say."""
+    value = (caps.get("limits") or {}).get(macro)
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _uart_pins(caps: dict, dev: str, direction: str) -> List[str]:
+    return sorted(p for p, ents in caps["uart"].items()
+                  if any(e["dev"] == dev and e["dir"] == direction for e in ents))
+
+
+def _i2c_pins(caps: dict, dev: str, role: str) -> List[str]:
+    return sorted(p for p, ents in caps["i2c"].items()
+                  if any(e["dev"] == dev and e["role"] == role for e in ents))
+
+
+def seed_exceeds_limits(caps: dict) -> List[str]:
+    """
+    Peripherals whose seeded pin list is longer than the firmware array holding
+    it. Empty on every target today, and that is the point: it is a check on the
+    capability data rather than on the board.
+
+    A table that overflows its own array means the harvest is counting rows this
+    build cannot compile - most likely rows from a guarded variant of the table
+    for a sibling MCU - and every pin it offers for that peripheral is suspect.
+    Reported, not acted on: the fix is in seed_firmware.py, not here.
+    """
+    out: List[str] = []
+    for macro, table, key, kinds in (
+            ("UARTHARDWARE_MAX_PINS", "uart", "dir", ("tx", "rx")),
+            ("I2C_PIN_SEL_MAX", "i2c", "role", ("scl", "sda"))):
+        ceiling = limit(caps, macro)
+        if ceiling is None:
+            continue
+        counts: Dict[Tuple[str, str], int] = defaultdict(int)
+        for entries in caps[table].values():
+            for e in entries:
+                if e[key] in kinds:
+                    counts[(e["dev"], e[key])] += 1
+        for (dev, kind), n in sorted(counts.items()):
+            if n > ceiling:
+                out.append(
+                    f"the seeded tables give {dev} {n} {kind} pins but {macro} is "
+                    f"{ceiling}: either the firmware table initialises more rows "
+                    f"than its array holds - in which case the surplus never "
+                    f"reaches the build - or the harvest is merging two guarded "
+                    f"variants of it. {dev}'s pin list cannot be trusted either "
+                    "way; resolve it before using this board's "
+                    f"{kind.upper()} pins")
+    return out
+
+
+def table_is_full(caps: dict, net: str) -> Optional[str]:
+    """
+    Why a rejected net may be more than a missing table row, or None.
+
+    A pin Betaflight's tables lack is usually a one-line addition. It is not when
+    the array the row would go into is already at its compile-time ceiling: that
+    is a change to every target in the family, not to one table. Reported as
+    part of the rejection, since it changes what the fix is.
+
+    Only the peripherals whose ceiling is harvested are answerable - UART and
+    I2C. A net of any other kind returns None rather than a guess.
+    """
+    role, idx, _sub = classify(net)
+    if role in ("uart_tx", "uart_rx"):
+        # uartHardware[].txPins[UARTHARDWARE_MAX_PINS], and the macro is set per
+        # family in platform.h - so raising it moves every UART on that family.
+        direction = role[-2:]
+        dev, macro = f"UART{idx or '1'}", "UARTHARDWARE_MAX_PINS"
+        pins, array = _uart_pins(caps, dev, direction), f"{direction}Pins[]"
+        scope = f"every UART on {caps['family']}"
+    elif role in ("i2c_scl", "i2c_sda"):
+        # i2cHardware[].sclPins[I2C_PIN_SEL_MAX], in drivers/bus_i2c_impl.h,
+        # which is one value for every STM32 family at once.
+        sub = role[-3:]
+        dev, macro = f"I2C{idx or '1'}", "I2C_PIN_SEL_MAX"
+        pins, array = _i2c_pins(caps, dev, sub), f"{sub}Pins[]"
+        scope = "every I2C bus Betaflight builds"
+    else:
+        return None
+
+    ceiling = limit(caps, macro)
+    if ceiling is None or len(pins) < ceiling:
+        return None
+    if len(pins) > ceiling:
+        # The seeded table can never legitimately exceed the array it was read
+        # out of. If it does, the harvest is picking up rows this build cannot
+        # compile, and the capability data - not the board - is what to look at.
+        return (f"{dev}'s {array} is seeded with {len(pins)} pins but {macro} is "
+                f"{ceiling}; the capability data is reading rows the firmware "
+                "array cannot hold, so re-seed before trusting any of this")
+    return (f"{dev}'s {array} is full - it holds all {ceiling} pins {macro} "
+            f"allows - so this is not a row to add: it needs {macro} raised for "
+            f"{scope}, which is a much larger firmware change")
+
+
+# --------------------------------------------------------------------------- #
+# MANUFACTURER_ID
+# --------------------------------------------------------------------------- #
+
+def resolve_manufacturer(raw: str, cfg: "Config") -> Tuple[str, str]:
+    """
+    Check --manufacturer against the committed registry snapshot.
+
+    Returns (id to emit, one line for the generated header).
+
+    Never fatal, and that is a decision rather than an omission. Rejecting an
+    unregistered id would be wrong in both directions:
+
+      * `CUST` and its siblings are registered placeholders - homebrew targets
+        are supposed to use them, and this tool's own examples do;
+      * the registry here is a *snapshot*. A manufacturer that registered after
+        it was taken is legitimately absent, and so is one whose registration
+        PR is travelling alongside the board submission. Failing hard would
+        block a real board on stale local data.
+
+    What it must not do is stay quiet. The configurator will not offer a target
+    whose id is not in the registry, so an unregistered id produces a board
+    nobody can install - and that surfaces only after the config has merged.
+    So: loud, specific, with near-misses and with the snapshot's own date, which
+    is the fact that decides whether the answer is "fix the id" or "refresh the
+    snapshot".
+    """
+    normalised = manufacturers.normalise(raw)
+    try:
+        reg = manufacturers.load()
+    except manufacturers.RegistryError as exc:
+        cfg.warnings.append(
+            f"MANUFACTURER_ID {normalised or raw!r} was not checked against the "
+            f"registry: {' '.join(str(exc).split())}")
+        return normalised or raw, f"Manufacturer: {normalised or raw} (not validated)"
+
+    src = reg.source
+    where = (f"betaflight/config {manufacturers.REGISTRY_FILE} @ "
+             f"{src.get('rev', '?')} ({src.get('commit_date', '?')})")
+    res = reg.check(raw)
+
+    if res.ok and not res.reserved:
+        cfg.notes.append(f"MANUFACTURER_ID {res.id} = {res.name}, registered in {where}")
+        return res.id, f"Manufacturer: {res.id} - {res.name}"
+
+    if res.ok:
+        cfg.notes.append(
+            f"MANUFACTURER_ID {res.id} is one of the registry's placeholder ids "
+            f"({', '.join(manufacturers.RESERVED_IDS)}) - right for a homebrew "
+            "target, but a board built by a manufacturer wants that "
+            "manufacturer's own registered id")
+        return res.id, f"Manufacturer: {res.id} - {res.name} (registry placeholder)"
+
+    cfg.warnings.append(
+        f"{res.message()}. The configurator only offers targets whose "
+        f"MANUFACTURER_ID is registered, so this target would be invisible once "
+        f"merged. Snapshot: {where} - if the manufacturer registered after that, "
+        f"or is registering with this submission, refresh it "
+        f"(mcu-parser/manufacturers.py --refresh) rather than changing the id; "
+        f"otherwise use the registered id, or CUST for a homebrew board. "
+        f"Emitted as given - nothing here can decide which of those it is")
+    return res.id or normalised or raw, f"Manufacturer: {res.id} - NOT REGISTERED in {where}"
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +499,7 @@ ADVANCED = ("TIM1", "TIM8", "TIM20")
 # Device owner -> the config.h define naming its SPI bus.
 INSTANCE_DEFINE = {
     "gyro": "GYRO_1_SPI_INSTANCE",
+    "gyro2": "GYRO_2_SPI_INSTANCE",
     "osd": "MAX7456_SPI_INSTANCE",
     "flash": "FLASH_SPI_INSTANCE",
     "baro": "BARO_SPI_INSTANCE",
@@ -406,17 +625,28 @@ def choose_adc(caps: dict, pins: Sequence[str], claimed: Set[str],
     if not common:
         return None, None, notes + ["no single ADC instance covers all ADC pins"]
 
+    # An ADC row is a peripheral row, so its ceiling is MAX_PERIPHERAL_DMA_OPTIONS
+    # rather than the timers' MAX_TIMER_DMA_OPTIONS - the two are different
+    # arrays and differ on the fixed-mapping families (3 against 2 on F4/F7).
+    per_max = limit(caps, "MAX_PERIPHERAL_DMA_OPTIONS")
+
     if caps["dma"]["style"] == "mux":
         dev = f"ADC{sorted(common)[0]}"
         pool = caps["dma"]["mux_options"] or 0
-        if pool and mux_next >= pool:
+        bounds = [(n, why) for n, why in ((pool, f"the part has {pool} DMA channels"),
+                                          (per_max, f"MAX_PERIPHERAL_DMA_OPTIONS is "
+                                                    f"{per_max}")) if n]
+        ceiling, reason = min(bounds) if bounds else (0, "")
+        if ceiling and mux_next >= ceiling:
             return dev, None, notes + [
-                f"{dev}: no DMA channel left on this part ({pool} total)"]
+                f"{dev}: no DMA channel left to give it - {reason}"]
         return dev, mux_next, notes
 
     for n in sorted(common):
         dev = f"ADC{n}"
         opts = caps["dma"]["peripheral"].get(dev) or []
+        if per_max:
+            opts = opts[:per_max]
         for opt, stream in enumerate(opts):
             if _stream_of(stream) not in claimed:
                 return dev, opt, notes
@@ -429,6 +659,137 @@ def _stream_of(spec: str) -> str:
     """'DMA2_S4_C7' -> 'DMA2_S4' (the contended resource is the stream)."""
     m = re.match(r"(DMA\d+_S\d+)", spec)
     return m.group(1) if m else spec
+
+
+def assign_fixed_dma_options(cfg: "Config", caps: dict, picks: List["TimerPick"],
+                             claimed: Set[str], target: str) -> None:
+    """
+    Give each timer row on a fixed-mapping part a DMA stream nobody else holds.
+
+    `dmaopt` means something different here than on a DMAMUX part: it indexes
+    that channel's own short list of possible streams, so repeated numbers are
+    not in themselves wrong. What may not repeat is the *stream* they resolve
+    to - and emitting 0 everywhere, which is what "the numbers are independent"
+    invites, put MOTOR1/2/3 of one F7 board on TIM8_CH1/CH2/CH3 at option 0,
+    all three of which are DMA2_S2_C0. With bitbang off, dmaAllocate() gives
+    DMA2_S2 to the first motor and the other two never come up.
+
+    Whether to renumber at all was the real question, because a generator that
+    quietly disagrees with the hand-written configs is a problem of its own. The
+    corpus settles it: across the 289 fixed-mapping configs in the config repo
+    only 4 contain a stream collision, and their options are spread 0/1/2 (121,
+    28 and 10 rows) - dodging is the convention, not a departure from it.
+    SIMPLIFLYF405, a hand-written F4 config, has the layout that produced the
+    collision - three motors on TIM8_CH1..CH3 - and writes option 1 on all
+    three. Lowest-free gives 0/1/1 instead. Both resolve to three distinct
+    streams, which is the property that matters; the numbers themselves do not.
+
+    Rows are served most-constrained-first so a channel with a single option is
+    not starved by one that had alternatives, and a row that cannot be given a
+    free stream keeps option 0 and is reported. Silently writing -1 there would
+    turn a stream conflict into a "no DMA" with nothing to explain it.
+    """
+    table = caps["dma"]["timer"]
+    ceiling = limit(caps, "MAX_TIMER_DMA_OPTIONS")
+    owner: Dict[str, str] = {s: "an earlier allocation" for s in claimed}
+
+    def options(p: "TimerPick") -> List[str]:
+        opts = table.get(p.channel) or []
+        return opts[:ceiling] if ceiling else opts
+
+    for i in sorted((i for i, p in enumerate(picks) if p.dmaopt >= 0),
+                    key=lambda i: (len(options(picks[i])), i)):
+        p = picks[i]
+        opts = options(p)
+        choice = next((n for n, spec in enumerate(opts)
+                       if _stream_of(spec) not in owner), None)
+        if choice is None:
+            if not opts:
+                cfg.warnings.append(
+                    f"{p.label}: Betaflight's {target} table lists no DMA stream for "
+                    f"{p.channel}, so its dmaopt 0 resolves to nothing. PWM and "
+                    "bitbang DShot are unaffected; DMA-driven output on that pin is "
+                    "not available")
+            else:
+                taken = ", ".join(sorted({f"{_stream_of(s)} is "
+                                          f"{owner[_stream_of(s)]}'s" for s in opts}))
+                cfg.warnings.append(
+                    f"{p.label} on {p.channel}: every DMA option it has is already "
+                    f"taken - {taken}. Option 0 is emitted anyway; DShot bitbang "
+                    "(the emitted default) does not use timer DMA, but with "
+                    "DSHOT_BITBANG_OFF this output would lose the stream race and "
+                    "stay dead")
+            p.dmaopt = 0
+            continue
+        p.dmaopt = choice
+        if choice:
+            cfg.notes.append(
+                f"{p.label} takes DMA option {choice} ({opts[choice]}): option 0 is "
+                f"{opts[0]}, and {_stream_of(opts[0])} is taken by "
+                f"{owner[_stream_of(opts[0])]}")
+        owner[_stream_of(opts[choice])] = p.label
+
+    # What the ADC allocator must then dodge.
+    claimed.update(owner)
+
+
+# --------------------------------------------------------------------------- #
+# Burst DShot
+# --------------------------------------------------------------------------- #
+
+def _note_dshot_burst(cfg: "Config", caps: dict,
+                      tplan: Dict[str, Tuple[int, str, str]], target: str) -> None:
+    """
+    Say whether burst DShot is a candidate. Deliberately do not decide it.
+
+    `DEFAULT_DSHOT_BURST` is used by 51% of the corpus and this generator emits
+    none of it, which looks like a plain gap. It is not, and the reason is worth
+    keeping, because "four motors on one timer, therefore burst" is exactly the
+    inference that does not survive reading the firmware:
+
+      * Burst drives TIMx_DMAR from the timer's *update* request, so the DMA it
+        needs is `timerHardware->dmaTimUPRef` (pwm_output_dshot_hal.c). That
+        field is filled in by the `upopt` argument of `DEF_TIM(...)` in
+        `src/platform/STM32/timer_stm32*.c`, and every row of every STM32 table
+        passes 0. On a DMAMUX part variant 0 of `DEF_TIM_DMA_FULL` is the same
+        channel for every timer, so two burst timers collide - the second motor
+        fails `dmaAllocate()` and never comes up.
+
+      * `TIMUPn_DMA_OPT` is what a hand-written config uses to move that
+        channel, and on STM32 it does not reach the driver. It feeds
+        `timerUpConfig()` via `src/main/pg/timerup.c`, and the only readers of
+        that PG are `cli.c`'s `dma` command and the X32 platform. The STM32
+        DShot path never consults it. Emitting it would be emitting a value the
+        build does not honour - the one thing this tool must not do - so it is
+        left to a human, who can at least verify it against the board.
+
+      * The hand-written reference for one of the boards in this corpus puts
+        four motors on a single timer and still sets `DSHOT_DMAR_OFF` with
+        `DSHOT_BITBANG_ON`. Across the corpus `DSHOT_DMAR_ON` appears on 6 of
+        ~200 DMAMUX-family boards, against 185 on F4/F7 where each TIMx_UP has
+        its own fixed stream.
+
+    So the shared-timer layout is reported as an opportunity, with the caveat,
+    and `DSHOT_BITBANG_ON` - which does not use timer DMA at all - stays the
+    emitted default.
+    """
+    timers = {ch.split("_")[0] for _occ, ch, _src in tplan.values()}
+    if len(timers) != 1 or len(tplan) < 2:
+        return
+    only = next(iter(timers))
+    if caps["dma"]["style"] == "mux":
+        cfg.notes.append(
+            f"all {len(tplan)} motors are on {only}, the layout burst DShot "
+            f"exists for - but on {target} every timer's update-DMA defaults to "
+            "the same channel and TIMUPn_DMA_OPT does not reach the STM32 DShot "
+            "driver, so DEFAULT_DSHOT_BURST is not emitted; bitbang is the "
+            "default instead")
+    else:
+        cfg.notes.append(
+            f"all {len(tplan)} motors are on {only}, so DEFAULT_DSHOT_BURST "
+            "DSHOT_DMAR_ON is worth considering by hand; it is not emitted "
+            "because nothing here can check that timer's update-DMA stream is "
+            "free, and bitbang (the emitted default) does not need it")
 
 
 # --------------------------------------------------------------------------- #
@@ -875,11 +1236,55 @@ HEADER = """/*
 """
 
 
+# A branch whose tables can be taken as shipped or about to ship: master, and
+# the release/maintenance branches (`4.6.0-maintenance`, `release/4.6`).
+# Anything else is somebody's working tree, which is the case worth flagging.
+RELEASE_BRANCH_RE = re.compile(r"^(?:master|main|release[/-].*|\d[\d.]*(?:[-_].*)?)$")
+
+
+def firmware_provenance(fw: dict, trusted: Sequence[str]) -> List[str]:
+    """
+    Header lines recording which firmware these pins were validated against.
+
+    A generated config is only as good as the pin tables it was checked against,
+    and two runs of this tool a week apart can disagree about whether a pin
+    exists. Recording the revision costs one line and answers "does this target
+    need firmware that has not shipped yet?" - which has already been the
+    question once, for a board that depended on an unmerged pin-table fix.
+
+    The seeder also records the local path of the tree it read. That is left out
+    on purpose: it identifies a developer's machine rather than the firmware,
+    and this file travels.
+    """
+    info = fw.get("firmware") or {}
+    rev = info.get("rev") or "unknown"
+    branch = info.get("branch") or ""
+    seeded = info.get("date") or ""
+    stamp = ", ".join(p for p in (f"branch {branch}" if branch else "",
+                                  f"seeded {seeded}" if seeded else "") if p)
+    out = [f"Pin tables validated against Betaflight {rev}"
+           + (f" ({stamp})" if stamp else "")]
+    if branch and not RELEASE_BRANCH_RE.match(branch):
+        out.append(f"    {branch} is a working branch, not a release one: if this "
+                   "target relies")
+        out.append("    on a pin only those tables carry, it will not work until "
+                   "that change")
+        out.append("    has merged.")
+    if trusted:
+        out.append("    Emitted with --trust-symbol: " + ", ".join(trusted))
+        out.append("    Betaflight's tables do not list those pins. The firmware "
+                   "needs the")
+        out.append("    matching pin-table addition, or they will be silently "
+                   "unused.")
+    return out
+
+
 def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
           gyro_align: str, args_trust: bool = False,
           reference: Optional[str] = None,
           version: Optional[str] = None,
-          hse_mhz: Optional[int] = None) -> Tuple[Config, dict]:
+          hse_mhz: Optional[int] = None,
+          page: Optional[int] = None) -> Tuple[Config, dict]:
     fw = json.loads((DATA_DIR / "firmware.json").read_text())
     aliases = json.loads(ALIAS_FILE.read_text())
 
@@ -889,17 +1294,41 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         raise SystemExit("Could not detect FC_TARGET_MCU - pass --target")
     caps = fw["targets"][target]
 
-    sym = find_symbol(words)
+    sym = find_symbol(words, page=page)
     labels = find_net_labels(words, sym)
     res = netmap.resolve(sym, labels, caps)
     hints = read_timer_hints(words)
     parts = detect_parts(words, fw["drivers"], aliases)
 
     cfg = Config()
+
+    # Sanity of the capability data itself, before any of it is believed.
+    cfg.warnings.extend(seed_exceeds_limits(caps))
+
+    # Which sheet the pin map came from. netmap prints this; genconfig did not,
+    # so a five-page submission produced a config with no record of which sheet
+    # was read - and no mention of a rival MCU symbol on another one, which is
+    # the case where reading the wrong sheet is possible at all.
+    sheet = netmap.describe_pages(sym)
+    if sym.split:
+        cfg.notes.append(
+            f"the MCU symbol is drawn across pages {'+'.join(str(p) for p in sym.pages)}"
+            " and the halves were merged; check that they are one part")
+    if sym.ignored_pages:
+        cfg.warnings.append(
+            f"page(s) {', '.join(str(p) for p in sym.ignored_pages)} also carry an "
+            f"MCU symbol; page {sym.page} was read because it has the most GPIO "
+            "pins. If that is the wrong sheet, re-run with --page")
+
     gaps: Set[str] = set()          # nets the firmware lacks but the symbol backs
     for l in res.links:
         if not (l.checked and not l.ok):
             continue
+        # A pin the tables lack is usually one row to add. When the array that
+        # row belongs to is already full, it is not - and the advice below would
+        # send a reviewer down the wrong path without this.
+        full = table_is_full(caps, l.net)
+        ceiling = f". Note that {full}" if full else ""
         if l.symbol_ok:
             # The symbol independently claims this function, so the likely fix is
             # in Betaflight's pin tables, not on the board. Worth a firmware PR.
@@ -911,17 +1340,18 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 "lists do contain errors, so confirm in the datasheet AF table "
                 "before adding it to the firmware"
                 + ("" if args_trust else "; omitted (re-run with --trust-symbol "
-                                         "to emit it)"))
+                                         "to emit it)")
+                + ceiling)
         elif l.symbol_ok is False:
             cfg.warnings.append(
                 f"{l.net} on {l.pin}: neither Betaflight's {target} tables nor the "
                 f"symbol's own AF list ({'/'.join(l.afs)}) support this - likely a "
-                "schematic error; omitted")
+                "schematic error; omitted" + ceiling)
         else:
             cfg.warnings.append(
                 f"{l.net} is on {l.pin}, which Betaflight's {target} tables do not "
                 "support for that function, and the symbol carries no AF list to "
-                "corroborate it - omitted")
+                "corroborate it - omitted" + ceiling)
 
     for l in res.on_power_pin:
         cfg.warnings.append(
@@ -941,6 +1371,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     simple: Dict[str, str] = {}
     pinios: List[Tuple[str, str]] = []
     unknown: List[Link] = []
+    # pin -> the net drawn on it. A diagnostic that explains why something was
+    # left out has to name the net, not just the pin: that is what tells the
+    # reader which wire on their sheet is affected, and it is what the
+    # regression suite matches on when it checks that no net vanished without
+    # either an emitted define or an explanation.
+    net_of: Dict[str, str] = {}
 
     for l in res.links:
         # Anything the firmware map rejected, or that landed on a supply pin, is
@@ -952,6 +1388,14 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             continue
         role, idx, sub = classify(l.net)
         if role == "ignore":
+            continue
+        net_of[l.pin] = l.net
+        if role and role.startswith("gyro") and role.split("_")[0] not in GYRO_OWNERS:
+            # gyrodev.c carries GYRO_1..GYRO_4, but nothing here can check a
+            # third IMU, so it is reported rather than half-emitted.
+            cfg.warnings.append(
+                f"{l.net} on {l.pin} names a third or later IMU; only GYRO_1 and "
+                "GYRO_2 are generated - add it by hand")
             continue
         if role is None:
             unknown.append(l)
@@ -986,7 +1430,15 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     #
     # The schematic's own sha256 is still worth recording - it pins down which
     # revision the config came from - just not in that field.
+    #
+    # The rest of the block is the other half of the provenance, and it exists
+    # because a config generated against a patched firmware tree used to look
+    # exactly like one generated against a release. It did not behave like one:
+    # a board depended on an unmerged pin-table fix, and nothing in the file
+    # said so. Which tree validated these pins is a fact this tool holds, so it
+    # is recorded - and, unlike REFERENCE, none of it is invented.
     digest = sha256(pdf.read_bytes()).hexdigest()
+    manufacturer, mfr_line = resolve_manufacturer(manufacturer, cfg)
     cfg.add(HEADER)
     if reference:
         cfg.add("/*")
@@ -1000,7 +1452,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     cfg.add("/*")
     cfg.add(f"    Generated from {pdf.name}")
     cfg.add(f"    Schematic sha256: {digest}")
+    cfg.add(f"    MCU symbol: {len(sym.rows)} pins{sheet}")
     cfg.add(f"    Converted: {date.today().isoformat()}")
+    for line in firmware_provenance(fw, sorted(gaps) if args_trust else []):
+        cfg.add(f"    {line}")
+    cfg.add(f"    {mfr_line}")
     if not reference:
         cfg.add("")
         cfg.add("    No REFERENCE directive: this target has not been reviewed by")
@@ -1035,7 +1491,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                     feats.append(d)
     else:
         cfg.warnings.append("no gyro part recognised on the sheet")
-    if "gyro_clkin" in simple:
+    if "gyro_clkin" in simple or "gyro2_clkin" in simple:
         feats.append("USE_GYRO_CLKIN")
     if "baro" in parts:
         bus = "spi" if "baro" in spi_groups else "i2c"
@@ -1052,6 +1508,14 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 feats.append(d)
     if "osd" in parts:
         feats.append("USE_MAX7456")
+    if "sdcard" in spi_groups:
+        # A config.h target does not get USE_SDCARD for free. common_pre.h only
+        # defines it inside `#if !defined(USE_CONFIG)`, which the config-repo
+        # build path does define - so the SD chip select alone gave a card the
+        # firmware never compiled a driver for. USE_SDCARD_SPI is what makes
+        # pg/sdcard.c read SDCARD_SPI_INSTANCE and SDCARD_SPI_CS_PIN at all;
+        # common_post.h #undefs it if USE_SDCARD is missing, so both are needed.
+        feats += ["USE_SDCARD", "USE_SDCARD_SPI"]
     for f in dict.fromkeys(feats):
         cfg.define(f)
     cfg.add()
@@ -1069,11 +1533,38 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
 
     # ---- motors ----------------------------------------------------------
     tplan = motor_timer_plan(caps, motors, hints)
+
+    # PPM capture and the ESC 1-wire passthrough are timer inputs, not plain
+    # GPIO: both reach the pin through timerAllocate(), which only ever returns
+    # a channel for a pin listed in TIMER_PIN_MAPPING (drivers/timer_common.c).
+    # So the pin is resolved to a timer *before* its define is written - a
+    # RX_PPM_PIN on a pin with no timer is a define the build cannot honour.
+    # Net names imply nothing testable to netmap, so the check has to happen
+    # here rather than being inherited from the agreement score.
+    capture: Dict[str, Tuple[str, str, Tuple[int, str, str]]] = {}
+    for role, label, hint_keys in (("rx_ppm", "RX_PPM_PIN", ("PPM", "RX-PPM")),
+                                   ("escserial", "ESCSERIAL_PIN", ("ESCSERIAL",))):
+        pin = simple.get(role)
+        if not pin:
+            continue
+        hint = next((hints[k] for k in hint_keys if k in hints), None)
+        got = pick_timer(caps, pin, hint, prefer_advanced=False)
+        if got:
+            capture[role] = (pin, label, got)
+        else:
+            cfg.warnings.append(
+                f"{net_of.get(pin, label)} on {pin}: Betaflight's {target} timer "
+                f"table has no channel there, and {label} is an input capture - "
+                "omitted, since timerAllocate() could never hand the driver that "
+                "pin")
+
     for n, pin in sorted(motors.items()):
         cfg.define(f"MOTOR{n}_PIN", pin)
     for n, pin in sorted(servos.items()):
         cfg.define(f"SERVO{n}_PIN", pin)
-    if motors or servos:
+    if "rx_ppm" in capture:
+        cfg.define("RX_PPM_PIN", capture["rx_ppm"][0])
+    if motors or servos or "rx_ppm" in capture:
         cfg.add()
 
     # ---- UARTs -----------------------------------------------------------
@@ -1108,6 +1599,23 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         dev = assigned.get(owner)
         if dev:
             resolved[owner] = (dev, pins)
+        elif set(pins) == {"cs"} and owner == "gyro2":
+            # The second IMU is the one device whose CS pin cannot be emitted on
+            # its own. common_pre.h counts gyros by which GYRO_n_CS_PIN exist, so
+            # a lone GYRO_2_CS_PIN raises GYRO_COUNT to 2 and then gyrodev.c
+            # leaves devconf[1] at BUS_TYPE_NONE - a second gyro slot wired to
+            # nothing. And the bus cannot be guessed from gyro 1's: across the
+            # 619-board corpus 66 of the 119 dual-gyro boards that name both
+            # instances put the second IMU on a *different* SPI bus, so
+            # "it shares gyro 1's" is wrong more often than right.
+            resolved[owner] = ("", pins)
+            cfg.warnings.append(
+                f"a second IMU chip select ({net_of.get(pins['cs'], 'GYRO2-CS')}) "
+                f"is on {pins['cs']} but the sheet "
+                "gives it no SCK/SDI/SDO nets, so its SPI bus is unknown. "
+                "GYRO_2_* is not emitted: GYRO_2_CS_PIN alone would raise "
+                "GYRO_COUNT to 2 with no bus behind it. Add "
+                "GYRO_2_SPI_INSTANCE, GYRO_2_CS_PIN and GYRO_2_EXTI_PIN by hand")
         elif set(pins) == {"cs"}:
             # CS-only: the device shares another bus but the sheet does not say
             # which, so emit the CS pin and leave the instance to the reviewer.
@@ -1118,12 +1626,17 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         else:
             cfg.warnings.append(f"could not resolve the SPI bus for {owner}")
 
+    # SDCARD's chip select is SDCARD_SPI_CS_PIN, not SDCARD_CS_PIN: pg/sdcard.c
+    # reads only the former, and no config in the 619-board corpus spells it the
+    # other way. The wrong name compiled fine and did nothing - the build proves
+    # nothing failure mode - so it is checked against the firmware here.
     CS_DEFINE = {
         "gyro": "GYRO_1_CS_PIN",
+        "gyro2": "GYRO_2_CS_PIN",
         "osd": "MAX7456_SPI_CS_PIN",
         "flash": "FLASH_CS_PIN",
         "baro": "BARO_CS_PIN",
-        "sdcard": "SDCARD_CS_PIN",
+        "sdcard": "SDCARD_SPI_CS_PIN",
     }
     # Cross-check any bus the sheet named itself against the firmware map.
     # Check the pin belongs to the bus its label names - not that it serves the
@@ -1172,14 +1685,27 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # on the bus being resolvable, so they are emitted here rather than inside
     # the loop above. Nesting them there meant an unresolved bus silently took
     # GYRO_1_CS_PIN, FLASH_CS_PIN and GYRO_1_EXTI_PIN down with it.
+    #
+    # The exception is the second IMU: see the CS-only branch above for why its
+    # pins travel with its bus instead of being emitted regardless.
+    gyro2 = bool(resolved.get("gyro2", ("", {}))[0])
     wrote_cs = False
     for owner, (_dev, pins) in sorted(resolved.items()):
         cs = pins.get("cs")
-        if cs and owner in CS_DEFINE:
+        if cs and owner in CS_DEFINE and (owner != "gyro2" or gyro2):
             cfg.define(CS_DEFINE[owner], cs)
             wrote_cs = True
-    for role, name in (("gyro_exti", "GYRO_1_EXTI_PIN"),
-                       ("gyro_clkin", "GYRO_1_CLKIN_PIN")):
+    gyro_io = [("gyro_exti", "GYRO_1_EXTI_PIN"), ("gyro_clkin", "GYRO_1_CLKIN_PIN")]
+    if gyro2:
+        gyro_io += [("gyro2_exti", "GYRO_2_EXTI_PIN"),
+                    ("gyro2_clkin", "GYRO_2_CLKIN_PIN")]
+    elif "gyro2_exti" in simple or "gyro2_clkin" in simple:
+        orphaned = [f"{net_of.get(simple[r], r)}({simple[r]})"
+                    for r in ("gyro2_exti", "gyro2_clkin") if r in simple]
+        cfg.warnings.append(
+            f"{', '.join(orphaned)} belong to a second IMU that was not emitted, "
+            "so they are left out with it")
+    for role, name in gyro_io:
         if role in simple:
             cfg.define(name, simple[role])
             wrote_cs = True
@@ -1198,6 +1724,9 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         if role in simple:
             cfg.define(name, simple[role])
             wrote = True
+    if "escserial" in capture:
+        cfg.define("ESCSERIAL_PIN", capture["escserial"][0])
+        wrote = True
     if wrote:
         cfg.add()
 
@@ -1230,15 +1759,26 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         got = pick_timer(caps, pin, hints.get(f"SERVO{n}"), prefer_advanced=True)
         if got:
             picks.append(TimerPick(pin, f"SERVO{n}_PIN", got[0], got[1], -1, got[2]))
-    for role, label, dmaopt in (("led_strip", "LED_STRIP_PIN", 0),
-                                ("camera_control", "CAMERA_CONTROL_PIN", -1),
-                                ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1)):
+    # Input captures need a row so timerAllocate() can find the pin, but never a
+    # DMA option: the PPM and escserial drivers read the capture register from
+    # the ISR. That is also how the corpus writes them - every RX_PPM_PIN row in
+    # the config repo carries dmaopt -1.
+    for _role, (pin, label, got) in sorted(capture.items()):
+        if any(p.pin == pin for p in picks):
+            continue
+        picks.append(TimerPick(pin, label, got[0], got[1], -1, got[2]))
+    timed_io = [("led_strip", "LED_STRIP_PIN", 0),
+                ("camera_control", "CAMERA_CONTROL_PIN", -1),
+                ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1)]
+    if gyro2:
+        timed_io.append(("gyro2_clkin", "GYRO_2_CLKIN_PIN", -1))
+    for role, label, dmaopt in timed_io:
         pin = simple.get(role)
         if not pin:
             continue
         hint = hints.get(role.replace("_", "-").upper()) or hints.get(
             {"led_strip": "LED-STRIP", "camera_control": "CAM-CONTROLL",
-             "gyro_clkin": "GYRO-CLOCK"}[role])
+             "gyro_clkin": "GYRO-CLOCK", "gyro2_clkin": "GYRO2-CLOCK"}[role])
         got = pick_timer(caps, pin, hint, prefer_advanced=False)
         if got:
             picks.append(TimerPick(pin, label, got[0], got[1], dmaopt, got[2]))
@@ -1246,6 +1786,23 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             cfg.warnings.append(f"{label} on {pin} has no timer; LED strip needs one"
                                 if role == "led_strip" else
                                 f"{label} on {pin} has no timer function")
+
+    # TIMER_PIN_MAP refers to pins by macro name, so a row naming a define that
+    # was never emitted is an undeclared identifier at build time, not a missing
+    # feature. Anything upstream may have dropped its define - an unresolvable
+    # bus, a firmware-rejected pin - so check rather than assume.
+    #
+    # This runs before the DMA numbering below, not after: a dropped row must
+    # not take a DMA channel with it, and must not appear in the reasoning for
+    # why another row was moved.
+    defined = {m.group(1) for m in re.finditer(r"^#define\s+([A-Z][A-Z0-9_]+)",
+                                               "\n".join(cfg.lines), re.M)}
+    for p in list(picks):
+        if p.label not in defined:
+            cfg.warnings.append(
+                f"{p.label} has a timer mapping but no pin define was emitted; "
+                "the row is dropped, as it would not compile")
+            picks.remove(p)
 
     # DMA option numbering means two different things depending on the part.
     #
@@ -1260,14 +1817,23 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # number their motors 0, 1, 2, 3...
     mux = caps["dma"]["style"] == "mux"
     if mux:
+        # Two ceilings, and the lower one binds: the part has `mux_options`
+        # channels, and dmaopt indexes dmaChannelSpec[], which the firmware
+        # sizes at MAX_TIMER_DMA_OPTIONS. Numbering past either is a row the
+        # build cannot resolve, so say which one ran out rather than emitting it.
         pool = caps["dma"]["mux_options"] or 0
+        table_max = limit(caps, "MAX_TIMER_DMA_OPTIONS")
+        bounds = [(n, why) for n, why in ((pool, f"{target} has {pool} DMA channels"),
+                                          (table_max, f"MAX_TIMER_DMA_OPTIONS is "
+                                                      f"{table_max}")) if n]
+        ceiling, reason = min(bounds) if bounds else (0, "")
         nxt = 0
         for p in picks:
             if p.dmaopt < 0:
                 continue
-            if pool and nxt >= pool:
+            if ceiling and nxt >= ceiling:
                 cfg.warnings.append(
-                    f"{p.label}: only {pool} DMA channels exist on {target}; "
+                    f"{p.label}: no DMA option left to give it - {reason}; "
                     "assigned no DMA")
                 p.dmaopt = -1
                 continue
@@ -1276,24 +1842,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         mux_next = nxt
     else:
         mux_next = 0
-        for p in picks:
-            if p.dmaopt >= 0:
-                spec = dma_streams(caps, p.channel, p.dmaopt)
-                if spec:
-                    claimed.add(_stream_of(spec))
-
-    # TIMER_PIN_MAP refers to pins by macro name, so a row naming a define that
-    # was never emitted is an undeclared identifier at build time, not a missing
-    # feature. Anything upstream may have dropped its define - an unresolvable
-    # bus, a firmware-rejected pin - so check rather than assume.
-    defined = {m.group(1) for m in re.finditer(r"^#define\s+([A-Z][A-Z0-9_]+)",
-                                               "\n".join(cfg.lines), re.M)}
-    for p in list(picks):
-        if p.label not in defined:
-            cfg.warnings.append(
-                f"{p.label} has a timer mapping but no pin define was emitted; "
-                "the row is dropped, as it would not compile")
-            picks.remove(p)
+        assign_fixed_dma_options(cfg, caps, picks, claimed, target)
 
     if picks:
         width = max(len(p.label) for p in picks) + 1
@@ -1338,6 +1887,10 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     cfg.add()
 
     cfg.define("GYRO_1_ALIGN", gyro_align, width=29)
+    if gyro2:
+        # Same placeholder, same reason: a second IMU is usually rotated
+        # differently from the first, and neither orientation is on the sheet.
+        cfg.define("GYRO_2_ALIGN", gyro_align, width=29)
     for owner, define in INSTANCE_DEFINE.items():
         dev = resolved.get(owner, ("", {}))[0]
         if dev:
@@ -1359,9 +1912,22 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 "default state with the vendor")
 
     # ---- defaults --------------------------------------------------------
+    # Which log device to default to. Both can be fitted; the corpus splits
+    # almost evenly when they are (8 boards pick the card, 7 the flash), so the
+    # card only wins when it is the only one. With just a card it is decisive:
+    # 79 of the 85 card-only boards default to it.
+    sdcard = bool(resolved.get("sdcard", ("", {}))[0])
     if "flash" in parts:
         cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH", width=29)
+        if sdcard:
+            cfg.notes.append(
+                "both an SD card and a flash chip are fitted; blackbox defaults "
+                "to the flash - the corpus is split roughly evenly on that, so "
+                "confirm the vendor's intent")
+    elif sdcard:
+        cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_SDCARD", width=29)
     cfg.define("DEFAULT_DSHOT_BITBANG", "DSHOT_BITBANG_ON", width=29)
+    _note_dshot_burst(cfg, caps, tplan, target)
     if "adc_curr" in simple:
         cfg.define("DEFAULT_CURRENT_METER_SOURCE", "CURRENT_METER_ADC", width=29)
     if "adc_vbat" in simple:
@@ -1396,14 +1962,28 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                          + ", ".join(f"{l.net}({l.pin})" for l in unknown))
     if res.unmapped:
         cfg.notes.append("unconnected pins: " + " ".join(res.unmapped))
-    cfg.warnings.append(f"GYRO_1_ALIGN is a placeholder ({gyro_align}); "
-                        "orientation cannot be read from a schematic")
+    aligns = "GYRO_1_ALIGN and GYRO_2_ALIGN are" if gyro2 else "GYRO_1_ALIGN is a"
+    cfg.warnings.append(f"{aligns} placeholder{'s' if gyro2 else ''} "
+                        f"({gyro_align}); orientation cannot be read from a "
+                        "schematic")
     if "adc_curr" in simple:
         cfg.warnings.append("DEFAULT_CURRENT_METER_SCALE omitted; it depends on "
                             "the ESC shunt, not the FC")
+    if "adc_vbat" in simple:
+        # 15% of the corpus sets this, and the value is sitting on the sheet -
+        # but only as two resistors, which needs component pins associated to
+        # nets by geometry (a partial netlist), not the label matching this tool
+        # does. The firmware default is 110, which happens to be right for a
+        # 100K/10K divider; guessing it for a board with any other divider gives
+        # a silently wrong battery voltage, so nothing is emitted.
+        cfg.warnings.append(
+            "DEFAULT_VOLTAGE_METER_SCALE omitted; it is set by the VBAT "
+            "divider, which cannot be read from net labels alone - measure it "
+            "or ask the vendor rather than trusting the firmware default of 110")
 
     meta = {
         "target": target,
+        "manufacturer": manufacturer,      # canonical id, as emitted
         "parts": {k: [vars(h) for h in v] for k, v in parts.items()},
         "agreement": res.agreement,
         "offset": res.offset,
@@ -1412,6 +1992,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         "timers": [vars(p) for p in picks],
         "hse_mhz": hse,
         "firmware": fw["firmware"],
+        "limits": caps.get("limits") or {},
+        "pages": sym.pages,
+        "page_count": sym.page_count,
+        "page_description": sheet,
+        "ignored_pages": sym.ignored_pages,
     }
     return cfg, meta
 
@@ -1428,6 +2013,10 @@ def main() -> int:
     ap.add_argument("--board", required=True, help="BOARD_NAME")
     ap.add_argument("--manufacturer", required=True, help="MANUFACTURER_ID (4 chars)")
     ap.add_argument("--target", help="FC_TARGET_MCU (auto-detected if omitted)")
+    ap.add_argument("--page", type=int,
+                    help="sheet holding the MCU symbol. Auto-detected as the "
+                         "page with the most GPIO pins; pass this when a "
+                         "multi-page submission draws the MCU somewhere else.")
     ap.add_argument("--gyro-align", default="CW0_DEG")
     ap.add_argument("--hse-mhz", type=int,
                     help="HSE crystal frequency in MHz, when the vendor states "
@@ -1457,21 +2046,28 @@ def main() -> int:
 
     cfg, meta = build(args.pdf, args.board, args.manufacturer,
                       args.target, args.gyro_align, args.trust_symbol,
-                      args.reference, args.fw_version, args.hse_mhz)
+                      args.reference, args.fw_version, args.hse_mhz,
+                      args.page)
     text = "\n".join(cfg.lines).rstrip() + "\n"
 
     if args.to_stdout or not args.outdir:
         print(text)
     if args.outdir:
         # Mirror the config repo's manufacturer-grouped layout so the directory
-        # works as-is with `make CONFIG=<board> CONFIG_DIR=<outdir>`.
-        dest = args.outdir / "configs" / args.manufacturer / args.board / "config.h"
+        # works as-is with `make CONFIG=<board> CONFIG_DIR=<outdir>`. The
+        # directory takes the registry's spelling of the id, not the argument's,
+        # so the path and MANUFACTURER_ID cannot disagree.
+        dest = args.outdir / "configs" / meta["manufacturer"] / args.board / "config.h"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
         print(f"wrote {dest}", file=sys.stderr)
 
+    fwinfo = meta["firmware"]
     print(f"\ntarget {meta['target']}  agreement {meta['agreement']:.0%}  "
           f"offset {meta['offset']:+.2f}pt", file=sys.stderr)
+    print(f"  symbol {meta['page_description'].lstrip() or 'on the only page'}, "
+          f"firmware {fwinfo.get('rev', '?')} ({fwinfo.get('branch', '?')})",
+          file=sys.stderr)
     for cat, hits in sorted(meta["parts"].items()):
         shown = ", ".join(f"{h['marking']}->{h['driver']}"
                           + ("" if h["fitted"] else " [not fitted]") for h in hits)

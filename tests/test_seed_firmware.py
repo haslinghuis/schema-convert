@@ -100,15 +100,86 @@ class GuardSatisfiabilityTests(unittest.TestCase):
         """
         A guard the translator cannot turn into Python must not be read as
         "unreachable" - that would drop real pins for a parsing failure.
-
-        Note the limit: this only holds for expressions that fail to evaluate.
-        A comparison against an unknown macro (`TARGET_FLASH_SIZE > 512`)
-        evaluates cleanly to False and does gate the line, which is not what
-        _eval's comment says it intends. No table parsed today uses one.
         """
         self.assertTrue(seed_firmware.guards_hold(["defined(A) ? 1 : 0"], self.F7)[0])
-        self.assertFalse(seed_firmware.guards_hold(["TARGET_FLASH_SIZE > 512"],
-                                                   self.F7)[0])
+
+    def test_a_test_of_a_macros_value_is_free_not_false(self):
+        """
+        Only macro *names* are harvested, so `TARGET_FLASH_SIZE > 512` cannot be
+        decided either way and both branches of it must stay reachable.
+
+        This used to assert the opposite, because the name resolved to False and
+        `False > 512` is False - a value test silently gated its line off, and
+        the suite pinned that rather than the behaviour _eval documents. No
+        table parsed today carries such a guard, so this is a latent contract,
+        deliberately changed.
+        """
+        self.assertTrue(seed_firmware.guards_hold(
+            ["TARGET_FLASH_SIZE > 512"], self.F7)[0])
+        self.assertTrue(seed_firmware.guards_hold(
+            ["!(TARGET_FLASH_SIZE > 512)"], self.F7)[0])
+        self.assertTrue(seed_firmware.guards_hold(
+            ["MCU_FLASH_SIZE == 1024"], self.F7)[0])
+
+    def test_an_undecidable_value_test_does_not_erase_the_family_evidence(self):
+        """
+        The cheap fix - "anything with a comparison is reachable" - would hand
+        every other MCU's pins to this one. The family conjunct still decides,
+        whichever side of the && it sits on.
+        """
+        for guard in ("defined(STM32H7) && TARGET_FLASH_SIZE > 512",
+                      "TARGET_FLASH_SIZE > 512 && defined(STM32H7)"):
+            self.assertFalse(seed_firmware.guards_hold([guard], self.F7)[0], guard)
+        self.assertTrue(seed_firmware.guards_hold(
+            ["TARGET_FLASH_SIZE > 512 && defined(STM32F7)"], self.F7)[0])
+        # ...and one value test cannot be both true and false at once.
+        self.assertFalse(seed_firmware.guards_hold(
+            ["TARGET_FLASH_SIZE > 512", "!(TARGET_FLASH_SIZE > 512)"], self.F7)[0])
+
+
+class DefineValueTests(unittest.TestCase):
+    """
+    seed_firmware._define_value - the firmware's fixed array ceilings.
+
+    These bound what a config may reference: a UART pin past
+    UARTHARDWARE_MAX_PINS is not in the hardware table at all. Reading the wrong
+    branch of the per-family #if chain would hand a family someone else's
+    ceiling, which is the one failure worth testing in isolation.
+    """
+
+    CHAIN = (
+        "#if defined(STM32F4)\n"
+        "#define UARTHARDWARE_MAX_PINS 4\n"
+        "#elif defined(STM32H7)\n"
+        "#define UARTHARDWARE_MAX_PINS 6\n"
+        "#elif defined(STM32H5) || defined(STM32C5)\n"
+        "#define UARTHARDWARE_MAX_PINS 5\n"
+        "#endif\n"
+    )
+
+    def value(self, text, defs, macro="UARTHARDWARE_MAX_PINS"):
+        return seed_firmware._define_value(text, macro, defs)
+
+    def test_each_family_gets_its_own_branch(self):
+        self.assertEqual(self.value(self.CHAIN, {"STM32F4"}), 4)
+        self.assertEqual(self.value(self.CHAIN, {"STM32H7"}), 6)
+        self.assertEqual(self.value(self.CHAIN, {"STM32H5"}), 5)
+        self.assertEqual(self.value(self.CHAIN, {"STM32C5"}), 5)
+
+    def test_a_family_the_chain_does_not_name_gets_none_not_a_default(self):
+        self.assertIsNone(self.value(self.CHAIN, {"STM32G4"}))
+
+    def test_an_unguarded_define_applies_to_every_family(self):
+        self.assertEqual(
+            self.value("#define I2C_PIN_SEL_MAX 8\n", {"STM32G4"}, "I2C_PIN_SEL_MAX"), 8)
+
+    def test_a_value_that_is_not_an_integer_is_not_guessed_at(self):
+        self.assertIsNone(self.value("#define UARTHARDWARE_MAX_PINS SOME_OTHER\n",
+                                     {"STM32F4"}))
+
+    def test_a_longer_macro_name_is_not_mistaken_for_this_one(self):
+        self.assertIsNone(self.value("#define UARTHARDWARE_MAX_PINS_X 9\n",
+                                     {"STM32F4"}))
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +339,87 @@ class LiveSeedTests(CapabilityDataMixin, unittest.TestCase):
         self.assertEqual(set(self.data["targets"]) & on_disk, set(self.data["targets"]))
         for name in self.data["targets"]:
             self.assertRegex(name, r"^STM32[A-Z]\d[A-Z0-9]{2}$")
+
+    def test_the_array_limits_are_harvested_per_family(self):
+        """
+        Read straight out of the per-family #if chain in
+        src/platform/STM32/include/platform/platform.h. If the firmware moves a
+        family to a different ceiling this fails, which is the point - the value
+        is only useful if it is the build's own.
+        """
+        expected = {"STM32F405": 4, "STM32F722": 4, "STM32G474": 3,
+                    "STM32H562": 5, "STM32H743": 6}
+        for target, pins in expected.items():
+            if target not in self.data["targets"]:
+                continue
+            with self.subTest(target=target):
+                self.assertEqual(
+                    self.data["targets"][target]["limits"]["UARTHARDWARE_MAX_PINS"],
+                    pins)
+
+    def test_every_target_carries_a_plausible_set_of_limits(self):
+        for name, caps in sorted(self.data["targets"].items()):
+            limits = caps["limits"]
+            self.assertEqual(sorted(limits),
+                             sorted(m for m, _ in seed_firmware.LIMIT_SOURCES), name)
+            for macro, value in limits.items():
+                with self.subTest(target=name, macro=macro):
+                    self.assertIsNotNone(value, f"{name}: {macro} not found")
+                    self.assertIsInstance(value, int)
+                    self.assertGreater(value, 0)
+
+    # Ports whose pin list is longer than the array declared to hold it. Recorded
+    # exactly, so a new one fails and so does fixing one of these.
+    #
+    # STM32N6 sets UARTHARDWARE_MAX_PINS to 5, but serial_uart_stm32n6xx.c gives
+    # UART7 six .txPins. Betaflight builds with -Werror, so an N6 config that
+    # defines USE_UART7 does not compile at all - excess elements in an array
+    # initializer. Read out of the firmware, not inferred from this parser.
+    UART_TABLE_OVERFLOWS = {("STM32N657", "UART7", "tx"): 6}
+
+    def test_the_harvested_tables_stay_inside_those_limits(self):
+        """
+        The limits are only worth recording if they agree with the tables next
+        to them. More UART pins for one port than the array holds would mean
+        either the parser is reading rows the build cannot reach, or the
+        firmware table has outgrown its array.
+        """
+        overflows = {}
+        for name, caps in sorted(self.data["targets"].items()):
+            limits = caps["limits"]
+            with self.subTest(target=name):
+                counts = {}
+                for pin, entries in caps["uart"].items():
+                    for e in entries:
+                        counts[(e["dev"], e["dir"])] = counts.get((e["dev"], e["dir"]), 0) + 1
+                for (dev, direction), n in counts.items():
+                    if n > limits["UARTHARDWARE_MAX_PINS"]:
+                        overflows[(name, dev, direction)] = n
+
+                counts = {}
+                for pin, entries in caps["i2c"].items():
+                    for e in entries:
+                        counts[(e["dev"], e["role"])] = counts.get((e["dev"], e["role"]), 0) + 1
+                self.assertLessEqual(max(counts.values(), default=0),
+                                     limits["I2C_PIN_SEL_MAX"], name)
+
+                dma = caps["dma"]
+                if dma["style"] == "mux":
+                    self.assertLessEqual(dma["mux_options"],
+                                         limits["MAX_PERIPHERAL_DMA_OPTIONS"], name)
+                else:
+                    for key, options in dma["timer"].items():
+                        self.assertLessEqual(len(options),
+                                             limits["MAX_TIMER_DMA_OPTIONS"],
+                                             f"{name}: {key}")
+                    for key, options in dma["peripheral"].items():
+                        self.assertLessEqual(len(options),
+                                             limits["MAX_PERIPHERAL_DMA_OPTIONS"],
+                                             f"{name}: {key}")
+
+        self.assertEqual(overflows, self.UART_TABLE_OVERFLOWS,
+                         "a UART pin list has outgrown UARTHARDWARE_MAX_PINS, or a "
+                         "recorded overflow has been fixed upstream")
 
     def test_the_revision_is_recorded(self):
         rev = self.data["firmware"]

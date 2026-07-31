@@ -1,0 +1,604 @@
+{
+ "schema": 1,
+ "generated": "2026-07-31T20:34:37Z",
+ "source": {
+  "repo": "https://github.com/betaflight/config",
+  "file": "Manufacturers.md",
+  "ref": "upstream/master",
+  "rev": "18ffb2a74",
+  "commit_date": "2026-07-23",
+  "sha256": "c1452a81c04ab6b6c1aa4ac1da5795424ecd7fd8a78d41ff83e60b2489ba9319"
+ },
+ "reserved": [
+  "COMM",
+  "CUST",
+  "FOSS",
+  "LEGA"
+ ],
+ "manufacturers": {
+  "ACRO": {
+   "name": "ARCROBO Pte., Ltd",
+   "url": "https://www.arcrobo.com.sg/"
+  },
+  "AEDR": {
+   "name": "AEDROX",
+   "url": "https://www.aedrox.com/"
+  },
+  "AERO": {
+   "name": "AeroCogito",
+   "url": "https://www.aerocogito.com/"
+  },
+  "AFNG": {
+   "name": "AlienFlight NG",
+   "url": "https://www.alienflightng.com/"
+  },
+  "AIKO": {
+   "name": "AIKON Electronics",
+   "url": "https://www.aikon-electronics.com/"
+  },
+  "AIRB": {
+   "name": "Airbot",
+   "url": "https://store.myairbot.com/"
+  },
+  "AKIN": {
+   "name": "AKINGFPV",
+   "url": "https://www.akingfpv.com/"
+  },
+  "ALWH": {
+   "name": "Alienwhoop",
+   "url": "https://shop.alienwhoop.us/"
+  },
+  "ANYL": {
+   "name": "AnyLeaf",
+   "url": "https://www.anyleaf.org/"
+  },
+  "APEX": {
+   "name": "Apexfpv",
+   "url": "https://apexfpv.eu/"
+  },
+  "ARKE": {
+   "name": "ARK Electronics",
+   "url": "https://arkelectron.com/"
+  },
+  "ASKY": {
+   "name": "AcroSky",
+   "url": ""
+  },
+  "AXFL": {
+   "name": "Axisflying",
+   "url": "https://www.axisflying.com/"
+  },
+  "BEFH": {
+   "name": "BETAFPV Hobby",
+   "url": "https://betafpv.com/"
+  },
+  "BKMN": {
+   "name": "BLCKMN",
+   "url": "https://github.com/blckmn"
+  },
+  "BKRC": {
+   "name": "BAYCK RC",
+   "url": ""
+  },
+  "BLDY": {
+   "name": "BotLab Dynamics",
+   "url": "https://www.botlabdynamics.store"
+  },
+  "BROT": {
+   "name": "Brotherhobby Co., Ltd",
+   "url": "https://brotherhobby.com/"
+  },
+  "BSTF": {
+   "name": "BEASTFPV",
+   "url": "http://www.beastfpv.com/"
+  },
+  "CADX": {
+   "name": "CADDX TECHNOLOGY (SHENZHEN) Co., Ltd",
+   "url": "https://caddxfpv.com/"
+  },
+  "CCRC": {
+   "name": "Sunhey Now",
+   "url": "https://sunheyccrc.aliexpress.com/"
+  },
+  "CLRA": {
+   "name": "CLRACING LLC",
+   "url": "https://cl-racing.myshopify.com/"
+  },
+  "COMM": {
+   "name": "Community provided target definitions for closed source targets",
+   "url": ""
+  },
+  "CUST": {
+   "name": "'Custom', to be used for homebrew targets",
+   "url": ""
+  },
+  "CYCL": {
+   "name": "CycloneRC",
+   "url": "http://www.cyclone-rc.com"
+  },
+  "DAFP": {
+   "name": "DarwinFPV",
+   "url": "https://darwinfpv.com/"
+  },
+  "DAKE": {
+   "name": "DAKEFPV Innovation Technology Ltd",
+   "url": "https://www.dakefpv.com/"
+  },
+  "DALR": {
+   "name": "DALRC TECHNOLOGY Co., Ltd",
+   "url": "http://www.dalrc.cn/DALRC/"
+  },
+  "DARK": {
+   "name": "Darkmatter",
+   "url": "https://thedarkmatter.in/"
+  },
+  "DERC": {
+   "name": "DemonRC",
+   "url": "https://demonrc.eu/"
+  },
+  "DFRA": {
+   "name": "Drone FPV Racer",
+   "url": "https://www.drone-fpv-racer.com/"
+  },
+  "DFRC": {
+   "name": "Shenzhen Jingfei Technology Co., Ltd",
+   "url": "https://dreamflyrc.com/"
+  },
+  "DIAT": {
+   "name": "Diatone Innovations",
+   "url": "https://www.diatoneusa.com/"
+  },
+  "DPDS": {
+   "name": "Deepspace FPV",
+   "url": "https://www.deepspacefpv.com"
+  },
+  "DRCL": {
+   "name": "dronercland",
+   "url": "https://www.instagram.com/dronercland/"
+  },
+  "DREA": {
+   "name": "DREAMRC",
+   "url": "https://github.com/dreamworks-fpv"
+  },
+  "DRNR": {
+   "name": "Shenzhen Zhimu Technology Co., Ltd",
+   "url": "https://www.droneer.com"
+  },
+  "DRRC": {
+   "name": "DroidRC",
+   "url": "https://github.com/xiaoxiabub"
+  },
+  "DYST": {
+   "name": "DongYang Smart Technology Co., Ltd (dys)",
+   "url": "http://www.dys.hk/"
+  },
+  "EACH": {
+   "name": "eachine",
+   "url": "https://www.eachine.com/"
+  },
+  "EASP": {
+   "name": "Ewing Aerospace",
+   "url": "https://ewingaerospace.com/"
+  },
+  "EMAX": {
+   "name": "EMAX",
+   "url": "https://emaxmodel.com/"
+  },
+  "EXUA": {
+   "name": "EXUAV FPV",
+   "url": "https://github.com/Linjieqiang"
+  },
+  "FFPV": {
+   "name": "Furious FPV",
+   "url": "https://furiousfpv.com/"
+  },
+  "FFRC": {
+   "name": "FlyFishRC",
+   "url": "https://www.flyfish-rc.com/"
+  },
+  "FISM": {
+   "name": "Shenzhen Micheng Innovation Technology Co., Ltd",
+   "url": "http://www.michenginnovation.com/"
+  },
+  "FLAO": {
+   "name": "FLAO Limited",
+   "url": "https://www.sunrisemodel.com"
+  },
+  "FLCO": {
+   "name": "Shenzhen Flycolor Electronic Co., Ltd",
+   "url": "http://www.flycolor.net/"
+  },
+  "FLHB": {
+   "name": "Flash Hobby Technology Co.,Limited",
+   "url": "https://flashhobby.com/"
+  },
+  "FLHI": {
+   "name": "Fly High",
+   "url": "https://elektronchika.github.io/flyhigh/"
+  },
+  "FLLF": {
+   "name": "Flying Lemon FPV",
+   "url": "https://github.com/flyinglemonfpv"
+  },
+  "FLMO": {
+   "name": "FlyMod",
+   "url": "https://flymod.net/"
+  },
+  "FLON": {
+   "name": "FlightOne",
+   "url": "https://flightone.com/"
+  },
+  "FLTE": {
+   "name": "FLYTEX LTD",
+   "url": "https://www.flytex.pro/"
+  },
+  "FLWO": {
+   "name": "Flywoo",
+   "url": "https://flywoo.net/"
+  },
+  "FLYS": {
+   "name": "FlySpark",
+   "url": "https://flyspark.in/"
+  },
+  "FOSS": {
+   "name": "Free open source target definitions",
+   "url": ""
+  },
+  "FOXE": {
+   "name": "Foxeer",
+   "url": "http://www.foxeer.com/"
+  },
+  "FPVM": {
+   "name": "FPV Model",
+   "url": "https://fpvmodel.com/"
+  },
+  "FRSK": {
+   "name": "FrSky",
+   "url": "https://www.frsky-rc.com/"
+  },
+  "GEEL": {
+   "name": "Geelang",
+   "url": "https://geelang.com/"
+  },
+  "GEFP": {
+   "name": "GetFPV LLC",
+   "url": "https://www.getfpv.com/"
+  },
+  "GEPR": {
+   "name": "GEPRC",
+   "url": "https://geprc.com/"
+  },
+  "GEUP": {
+   "name": "Gear Up",
+   "url": "https://takeyourgear.com/"
+  },
+  "GFPV": {
+   "name": "GE-FPV",
+   "url": "http://www.ge-fpv.com/"
+  },
+  "GMRC": {
+   "name": "Great Mountain RC",
+   "url": "https://github.com/shanggl"
+  },
+  "HAMO": {
+   "name": "Happymodel",
+   "url": "http://www.happymodel.cn/"
+  },
+  "HARC": {
+   "name": "HAKRC",
+   "url": "https://www.hakrc.com/"
+  },
+  "HBRD": {
+   "name": "Hummingbird",
+   "url": "https://newbeedrone.com/collections/hummingbird"
+  },
+  "HBRO": {
+   "name": "Holybro",
+   "url": "http://www.holybro.com/index.html"
+  },
+  "HDZO": {
+   "name": "Divimath, Inc.",
+   "url": "https://www.hd-zero.com/"
+  },
+  "HEBI": {
+   "name": "Shenzhen High Energy Bili Co., Ltd",
+   "url": "http://www.coddar.net/"
+  },
+  "HENA": {
+   "name": "Heli-Nation",
+   "url": "https://www.heli-nation.com/"
+  },
+  "HFOR": {
+   "name": "HIFIONRC",
+   "url": "http://www.hifionrc.com/"
+  },
+  "HGLR": {
+   "name": "HGLRC",
+   "url": "https://www.hglrc.com/"
+  },
+  "HNEC": {
+   "name": "Huizhou NIDICI Electronic Co., Ltd",
+   "url": "https://shop.nidici.com/"
+  },
+  "HOWI": {
+   "name": "Hobbywing Technology Co., Ltd",
+   "url": "http://hobbywing.com/"
+  },
+  "IFRC": {
+   "name": "iFlight Innovation Technology Ltd.",
+   "url": "https://www.iflight-rc.com/"
+  },
+  "JHEF": {
+   "name": "Shenzhen Jinhang Electronic Co., Ltd",
+   "url": "https://www.jhemcu.com/"
+  },
+  "KLEE": {
+   "name": "Kevin Lee (WhitenoiseFPV)",
+   "url": "https://whitenoisefpv.com/"
+  },
+  "KONX": {
+   "name": "Konex Drone, SL",
+   "url": "https://konexdrone.com/"
+  },
+  "LDAR": {
+   "name": "LDARC",
+   "url": "http://ldarc.com/"
+  },
+  "LEGA": {
+   "name": "Closed source legacy targets without a maintainer",
+   "url": ""
+  },
+  "LMNR": {
+   "name": "Lumenier",
+   "url": "https://www.lumenier.com/"
+  },
+  "MADF": {
+   "name": "madflight",
+   "url": "https://madflight.com/"
+  },
+  "MARC": {
+   "name": "Mayhem RC",
+   "url": "https://mayhemrc.com.au/"
+  },
+  "MEPS": {
+   "name": "MepsKing",
+   "url": "https://www.mepsking.com/"
+  },
+  "MERA": {
+   "name": "MerakRC",
+   "url": "http://www.merakrc.com/"
+  },
+  "MICO": {
+   "name": "MicoAir Tech",
+   "url": "https://micoair.com/"
+  },
+  "MOLA": {
+   "name": "MotoLab",
+   "url": "https://github.com/MotoLab"
+  },
+  "MOQU": {
+   "name": "Modd Quad",
+   "url": "https://www.moddquad.com/"
+  },
+  "MTKS": {
+   "name": "Matek Systems",
+   "url": "http://www.mateksys.com/"
+  },
+  "MZGC": {
+   "name": "Manaz GCS",
+   "url": "https://www.shop-mzgcs.de/"
+  },
+  "NAMO": {
+   "name": "Namimno Silan Electronic Technology Co., Ltd",
+   "url": "http://namimnorc.com/"
+  },
+  "NEBD": {
+   "name": "NewBeeDrone",
+   "url": "https://newbeedrone.com/"
+  },
+  "NERC": {
+   "name": "NeutronRC",
+   "url": "https://www.facebook.com/Neutronrc-575638996448880"
+  },
+  "NGUA": {
+   "name": "NG.UAVP",
+   "url": "https://ng.uavp.ch/Shop"
+  },
+  "NYXT": {
+   "name": "Nyxtronics",
+   "url": "https://nyxtronics.com"
+  },
+  "ODTY": {
+   "name": "OddityRC",
+   "url": "http://www.oddityrc.com"
+  },
+  "OPEN": {
+   "name": "OpenPilot",
+   "url": "https://librepilot.atlassian.net/wiki/spaces/LPDOC/pages/31588369/Supported+Hardware"
+  },
+  "ORBT": {
+   "name": "Orbit Technology",
+   "url": "https://www.orbitteknoloji.com.tr/"
+  },
+  "ORQA": {
+   "name": "Orqa Ltd",
+   "url": "https://orqafpv.com/"
+  },
+  "OXBT": {
+   "name": "Zhuhai Oxbot Technology Co., Ltd",
+   "url": "https://www.oxbot.com/"
+  },
+  "PRIN": {
+   "name": "PrincipIoT LLC",
+   "url": "https://principiot.com/"
+  },
+  "PYDR": {
+   "name": "Pyro-Drone",
+   "url": "https://pyrodrone.com/"
+  },
+  "PYID": {
+   "name": "PYI Technologies",
+   "url": "https://pyidrones.com/"
+  },
+  "RALI": {
+   "name": "RadioLink Electronic Ltd",
+   "url": "https://radiolink.com/"
+  },
+  "RASP": {
+   "name": "Raspberry PI",
+   "url": "https://www.raspberrypi.com/"
+  },
+  "RAST": {
+   "name": "Racerstar",
+   "url": "https://www.racerstar.com/"
+  },
+  "RCTI": {
+   "name": "RCTimer",
+   "url": "http://rctimer.com/"
+  },
+  "RDMS": {
+   "name": "RadioMaster RC",
+   "url": "https://www.radiomasterrc.com/"
+  },
+  "RUSH": {
+   "name": "FPV Racing Rush",
+   "url": "http://www.rushfpv.com/"
+  },
+  "SDRC": {
+   "name": "Siangda Model Co., Ltd",
+   "url": "https://www.sdmodel.com.tw/"
+  },
+  "SFLY": {
+   "name": "Macfos Ltd",
+   "url": "https://robu.in"
+  },
+  "SJET": {
+   "name": "Shenzhen Jiufang Electronic Technology Co., Ltd",
+   "url": "https://www.jiufang-tech.com/"
+  },
+  "SKST": {
+   "name": "Shenzhen SKYSTARS Tech Co., LIMITED",
+   "url": "http://www.skystars-rc.com/index.html"
+  },
+  "SKZO": {
+   "name": "SkyZone",
+   "url": "http://www.skyzonehobbies.com/"
+  },
+  "SLGD": {
+   "name": "Sologood RC",
+   "url": "https://www.sologood.net/"
+  },
+  "SNMT": {
+   "name": "Shenzhen NewMumu Technology Co., Ltd",
+   "url": "http://nvisionfpv.com/"
+  },
+  "SPBE": {
+   "name": "LangTian Technology (Shenzhen) Co. (SpeedyBee)",
+   "url": "https://www.speedybee.com/"
+  },
+  "SPCM": {
+   "name": "Guangzhou shi parker electronic technology Co., Ltd",
+   "url": "https://www.spcmaker.com/"
+  },
+  "SPDX": {
+   "name": "Spedix Co., Ltd",
+   "url": "http://www.spedix-rc.com/"
+  },
+  "SPRO": {
+   "name": "Seriously Pro Racing (SP Racing)",
+   "url": "http://seriouslypro.com/"
+  },
+  "SQRE": {
+   "name": "SEQURE",
+   "url": "https://sequremall.com"
+  },
+  "SSAK": {
+   "name": "Dezhou Yingfei Intelligent Technology Co., Ltd",
+   "url": ""
+  },
+  "STBE": {
+   "name": "StingBee",
+   "url": "https://stingbee.com.ua"
+  },
+  "STMI": {
+   "name": "ST Microelectronics (MCU evaluation boards)",
+   "url": "https://www.st.com/content/st_com/en.html"
+  },
+  "SU25": {
+   "name": "Sub250",
+   "url": "https://sub250.com/"
+  },
+  "TACO": {
+   "name": "Taco RC",
+   "url": "https://taco-rc.com/"
+  },
+  "TCMM": {
+   "name": "Shenzhen Xinmumu Science and Technology Co (TCMM)",
+   "url": "http://www.tcmm-rc.cn/"
+  },
+  "TEBS": {
+   "name": "Team Blacksheep",
+   "url": "https://www.team-blacksheep.com/"
+  },
+  "TJRC": {
+   "name": "Feijian Technology (Shenzhen) Co., Ltd",
+   "url": "http://www.tjrcfpv.com/"
+  },
+  "TMTR": {
+   "name": "T-motor",
+   "url": "http://uav-en.tmotor.com/"
+  },
+  "TTRH": {
+   "name": "TransTEC",
+   "url": "http://www.transtechobby.com/"
+  },
+  "TURC": {
+   "name": "TUNERC",
+   "url": "https://www.tunerc.com/"
+  },
+  "VGRC": {
+   "name": "V-GOOD Technology Co.",
+   "url": "http://www.vgoodrc.com/"
+  },
+  "VIVA": {
+   "name": "VivaFPV",
+   "url": "https://vivafpv.com/"
+  },
+  "VWIN": {
+   "name": "Huizhou Xinchuang Technology Co., Ltd",
+   "url": ""
+  },
+  "WDIY": {
+   "name": "WDIY",
+   "url": "http://wdiy.net.cn/"
+  },
+  "WIZZ": {
+   "name": "WIZZ",
+   "url": "https://wizz.store/"
+  },
+  "WRPL": {
+   "name": "Warp Labs",
+   "url": "https://www.warplabs.it/"
+  },
+  "YUPF": {
+   "name": "YuPiFc",
+   "url": "https://www.yupifc.com/"
+  },
+  "YYRC": {
+   "name": "JLDZ",
+   "url": ""
+  },
+  "ZEEZ": {
+   "name": "Zeez RC",
+   "url": "https://www.zeezrc.com/"
+  },
+  "ZERO": {
+   "name": "Zerodrag",
+   "url": "https://zerodrag.in/"
+  },
+  "ZEXM": {
+   "name": "Shenzhen Zexin Future Technology Co., Ltd",
+   "url": "http://zexfpv.com/"
+  }
+ }
+}

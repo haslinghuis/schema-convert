@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "852a86b41",
   "frozen_firmware_branch": "master",
-  "tool_rev": "5d0fdae38"
+  "tool_rev": "31e2da7b7"
  },
  "boards": [
   {
@@ -52,10 +52,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 63,
    "timer_rows": 7,
-   "warnings": 2,
-   "notes": 9,
+   "warnings": 4,
+   "notes": 12,
    "netmap_digest": "d46b96eb33589a849c617f85cf530775f3016c42c2dce8f0252867884165ffa4",
-   "config_digest": "d5409d775665e63ca294922192aa0bd697544a14c030be1c325e4a0bc5327dd5",
+   "config_digest": "0704bcd9346cdfb946c797347d6e1d885a0f03111d7a9414a0f34dbf3d84d547",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -85,10 +85,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 60,
    "timer_rows": 7,
-   "warnings": 8,
-   "notes": 10,
+   "warnings": 10,
+   "notes": 11,
    "netmap_digest": "aea630336c55c758794c89504d1db3e3556dd71977020baea0f76da197135408",
-   "config_digest": "01dcf3b7b9ae96730e542bfbaa7f66a4853a60e65eae2c05ee1de835e8187eee",
+   "config_digest": "1cbccccf280d152f9ccff49dc00517e298405f89265ea7fa063d56c481a7796e",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -118,10 +118,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 62,
    "timer_rows": 7,
-   "warnings": 4,
-   "notes": 10,
+   "warnings": 6,
+   "notes": 11,
    "netmap_digest": "74a50131d779dab2af35593e04f738ea26ab13900965485a16d6d35b7acb6bca",
-   "config_digest": "23746da4530dd4e2427612052ae84b058191c9ac252eabf4ff540436b0e39df1",
+   "config_digest": "c754edfc3478c0b3ca4ac2e04e9872c8fac10606d000d779b05a587ed30617d6",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -151,10 +151,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 18,
    "timer_rows": 1,
-   "warnings": 4,
+   "warnings": 5,
    "notes": 8,
    "netmap_digest": "de042d608dffd4378901352cb7ca1ac79fb03b53bb3b5213c12556907636f502",
-   "config_digest": "3d518d399ff70d7576038ae0087fecb44a56686166bf06aa95048660bdff2e3a",
+   "config_digest": "cc43d2bbe4487f38f0cd29ee57b0705ca58468c82f90055121c24e5cc0c140b7",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -184,10 +184,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 49,
    "timer_rows": 5,
-   "warnings": 4,
-   "notes": 4,
+   "warnings": 6,
+   "notes": 5,
    "netmap_digest": "695a1adb4dafb8de5f26f223082ab2d4f32bd455b36e432074251a8a141d9d29",
-   "config_digest": "5e0453abb354b92ef6acd77921267af5ea25be7b013ee63b2f1bb7740c67e5db",
+   "config_digest": "74b9bf01dfed5a487de1f7044cb4a4e54a1f182b8b3846ead474907ecc64d5fb",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

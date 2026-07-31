@@ -19,6 +19,7 @@ What it harvests, per MCU target (e.g. STM32F722):
   spi          pin -> [{dev, role}, ...]
   i2c          pin -> [{dev, role}, ...]
   adc          pin -> {devices, channel}
+  limits       firmware array ceiling -> int   (UARTHARDWARE_MAX_PINS, ...)
   drivers      category -> {part -> USE_ define}
 
 Run this whenever the firmware moves. The output records the firmware git rev so
@@ -133,12 +134,18 @@ def guards_hold(guards: List[str], defs: set) -> Tuple[bool, List[str]]:
     if len(free) > 12:  # runaway guard; assume reachable rather than blow up
         return True, notable
 
+    # A guard may also test a macro's *value* (`TARGET_FLASH_SIZE > 512`). Only
+    # macro names are harvested, never their values, so such a test is a second
+    # kind of free variable: try it both ways rather than picking one.
+    unknowns = (True, False) if any(_COMPARISON.search(e) for e in exprs) else (True,)
+
     for assignment in range(1 << len(free)):
         chosen = {
             name for bit, name in enumerate(free) if assignment >> bit & 1
         }
-        if all(_eval(e, defs | chosen) for e in exprs):
-            return True, notable
+        for unknown in unknowns:
+            if all(_eval(e, defs | chosen, unknown) for e in exprs):
+                return True, notable
     return False, notable
 
 
@@ -151,13 +158,59 @@ def _to_python(expr: str) -> str:
     return re.sub(r'(?<!")\b(?!and\b|or\b|not\b|D\b)([A-Za-z_]\w*)\b(?!")', r'D("\1")', py)
 
 
-def _eval(py: str, defs: set) -> bool:
+_COMPARISON = re.compile(r"[<>]|==|!=")
+
+
+class _Macro:
+    """
+    A macro name standing in a preprocessor expression.
+
+    In a boolean context it answers the only question the harvest can answer -
+    is this macro defined - which is what `#ifdef`-style guards ask. Arithmetic
+    and comparison ask a different question, the macro's *value*, which is not
+    harvested. Answering that one by accident is what made
+    `TARGET_FLASH_SIZE > 512` silently gate a line off: the name resolved to
+    `False`, and `False > 512` is False. So value tests yield the caller's
+    `unknown` verdict instead, and `guards_hold` tries both verdicts.
+    """
+
+    __slots__ = ("name", "defined", "unknown")
+
+    def __init__(self, name: str, defined: bool, unknown: bool):
+        self.name, self.defined, self.unknown = name, defined, unknown
+
+    def __bool__(self) -> bool:
+        return self.defined
+
+    def _value_test(self, *_) -> bool:
+        return self.unknown
+
+    def _still_unknown(self, *_) -> "_Macro":
+        # Arithmetic keeps the value unknown, so a later comparison still
+        # reaches _value_test rather than comparing a bool against an int.
+        return self
+
+    __lt__ = __le__ = __gt__ = __ge__ = __eq__ = __ne__ = _value_test
+    __hash__ = None  # comparison is not an equivalence here
+    __add__ = __radd__ = __sub__ = __rsub__ = _still_unknown
+    __mul__ = __rmul__ = __truediv__ = __rtruediv__ = _still_unknown
+    __floordiv__ = __rfloordiv__ = __mod__ = __rmod__ = _still_unknown
+    __lshift__ = __rlshift__ = __rshift__ = __rrshift__ = _still_unknown
+    __and__ = __rand__ = __or__ = __ror__ = __xor__ = __rxor__ = _still_unknown
+    __neg__ = __pos__ = __invert__ = _still_unknown
+
+
+def _eval(py: str, defs: set, unknown: bool = True) -> bool:
+    """
+    Evaluate one translated guard. `unknown` is the verdict to give a test of
+    some macro's value, which this data cannot decide either way.
+    """
     try:
         return bool(eval(py, {"__builtins__": {}},  # noqa: S307 - constrained input
-                         {"D": lambda n: n in defs}))
+                         {"D": lambda n: _Macro(n, n in defs, unknown)}))
     except Exception:
-        # Arithmetic guards (TARGET_FLASH_SIZE > 512) are not capability
-        # statements; treat them as no obstacle.
+        # A guard the translator cannot turn into Python at all (`?:`, a cast)
+        # is a parsing failure, not a capability statement; no obstacle.
         return True
 
 
@@ -463,6 +516,72 @@ def _platform_file(fw: Path, family: str, pattern: str) -> Optional[Path]:
 
 
 # --------------------------------------------------------------------------- #
+# Firmware array limits
+# --------------------------------------------------------------------------- #
+
+# Ceilings the firmware's own fixed-size arrays impose, per family. A pin past
+# UARTHARDWARE_MAX_PINS is not in uartHardware[].txPins[] at all, so no config
+# can select it however capable the silicon is - the table is the limit, in
+# exactly the sense of "firmware is the single source of truth". The parsed
+# capability tables should already respect these, so a harvested count above a
+# limit means the parser is reading rows the build cannot use.
+#
+# Keyed by the macro's own name so a value can be traced back to its #define.
+LIMIT_SOURCES = (
+    ("UARTHARDWARE_MAX_PINS",
+     "src/platform/STM32/include/platform/platform.h"),
+    ("I2C_PIN_SEL_MAX",
+     "src/main/drivers/bus_i2c_impl.h"),
+    ("MAX_TIMER_DMA_OPTIONS",
+     "src/platform/STM32/dma_reqmap_mcu.h"),
+    ("MAX_PERIPHERAL_DMA_OPTIONS",
+     "src/platform/STM32/dma_reqmap_mcu.h"),
+)
+
+
+def parse_limits(fw: Path, defs: set) -> Dict[str, Optional[int]]:
+    """
+    macro -> int, or None when this family's build does not define it.
+
+    None is recorded rather than a plausible default: a guessed ceiling is worse
+    than a missing one, because a caller cannot tell it was guessed.
+    """
+    out: Dict[str, Optional[int]] = {}
+    texts: Dict[str, Optional[str]] = {}
+    for macro, rel in LIMIT_SOURCES:
+        if rel not in texts:
+            src = fw / rel
+            texts[rel] = src.read_text(errors="replace") if src.exists() else None
+        text = texts[rel]
+        out[macro] = _define_value(text, macro, defs) if text is not None else None
+    return out
+
+
+def _define_value(text: str, macro: str, defs: set) -> Optional[int]:
+    """
+    The value a build with `defs` would see for `#define macro <int>`.
+
+    The preprocessor takes the first branch of an #if/#elif chain that holds, so
+    so does this. A definition whose value is not a plain integer literal (a
+    macro reference, an expression) is not resolvable here and is skipped, which
+    leaves None rather than a wrong number.
+    """
+    pattern = re.compile(rf"#\s*define\s+{re.escape(macro)}\s+(\S+)")
+    for line, guards in GuardScanner(text):
+        m = pattern.match(line)
+        if not m:
+            continue
+        holds, _ = guards_hold(guards, defs)
+        if not holds:
+            continue
+        try:
+            return int(m.group(1).strip("()"), 0)
+        except ValueError:
+            continue
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Driver catalogue
 # --------------------------------------------------------------------------- #
 
@@ -562,12 +681,19 @@ def build(fw: Path, quiet: bool = False) -> dict:
                 "spi": parse_spi(fw, family, defs),
                 "i2c": parse_i2c(fw, family, defs),
                 "adc": parse_adc(fw, family, defs),
+                "limits": parse_limits(fw, defs),
             }
             if not quiet:
                 c = cache[key]
+                lim = c["limits"]
+                shown = "  ".join(
+                    f"{k}={'?' if lim[k] is None else lim[k]}"
+                    for k in ("UARTHARDWARE_MAX_PINS", "MAX_TIMER_DMA_OPTIONS")
+                )
                 print(f"  {family:9} {info['mcu']:14} "
                       f"timers={len(c['timers']):3}  uart={len(c['uart']):3}  "
-                      f"spi={len(c['spi']):3}  i2c={len(c['i2c']):2}  adc={len(c['adc']):3}")
+                      f"spi={len(c['spi']):3}  i2c={len(c['i2c']):2}  adc={len(c['adc']):3}"
+                      f"  {shown}")
         per_target[name] = {**info, **cache[key]}
 
     return {

@@ -13,6 +13,7 @@ timer's.
 """
 
 import json
+import re
 import unittest
 
 import support  # noqa: F401  (puts mcu-parser on sys.path)
@@ -41,6 +42,9 @@ def fake_caps(style: str = "fixed") -> dict:
             # answer even though it is the obvious one.
             "PA8": ["TIM1_CH1N", "TIM4_CH1"],
             "PB0": ["TIM3_CH3"],
+            # Spare capture-capable pins, for the timer inputs (PPM, escserial).
+            "PA0": ["TIM2_CH1"],
+            "PA1": ["TIM2_CH2"],
         },
         "uart": {
             "PA9": [{"dev": "UART1", "dir": "tx"}],
@@ -105,12 +109,33 @@ class ClassifyTests(unittest.TestCase):
         ("GYRO-MISO", "gyro_spi", None, "sdi"),
         ("GYRO_MOSI", "gyro_spi", None, "sdo"),
         ("GYRO-SCLK", "gyro_spi", None, "sck"),
+        # A second IMU. Sheets write the index on either side of the name and
+        # both mean GYRO_2_*; index 1 is the first gyro, not a third device.
+        ("GYRO2-CS", "gyro2_cs", None, None),
+        ("GYRO-CS2", "gyro2_cs", None, None),
+        ("IMU2_EXTI", "gyro2_exti", None, None),
+        ("GYRO2-SCK", "gyro2_spi", None, "sck"),
+        ("GYRO2-MISO", "gyro2_spi", None, "sdi"),
+        ("GYRO1-CS", "gyro_cs", None, None),
+        ("GYRO3-CS", "gyro3_cs", None, None),
+        # A part number is not a device index: MPU-6000 and ICM42688 must not
+        # be read as gyro 6 and gyro 4.
+        ("MPU6000-CS", None, None, None),
+        ("ICM42688-CS", None, None, None),
+        ("PPM", "rx_ppm", None, None),
+        ("RX-PPM", "rx_ppm", None, None),
+        ("PPM_IN", "rx_ppm", None, None),
+        ("ESCSERIAL", "escserial", None, None),
+        ("ESC-SERIAL", "escserial", None, None),
         ("SPI1_MOSI", "spi_bus", "1", "sdo"),
         ("OSD-CS", "osd_cs", None, None),
         ("AT7456-SCK", "osd_spi", None, "sck"),
         ("FLASH-CS", "flash_cs", None, None),
         ("BARO-CS", "baro_cs", None, None),
         ("SDCARD-CS", "sdcard_cs", None, None),
+        ("SD-CS", "sdcard_cs", None, None),
+        ("SDCARD-SCK", "sdcard_spi", None, "sck"),
+        ("SD_MISO", "sdcard_spi", None, "sdi"),
         ("TX4", "uart_tx", "4", None),
         ("DJI-RX2", "uart_rx", "2", None),
         ("RX1-R", "uart_rx", "1", None),
@@ -383,6 +408,49 @@ class AdcTests(unittest.TestCase):
 
     def test_the_contended_resource_is_the_stream_not_the_channel(self):
         self.assertEqual(genconfig._stream_of("DMA2_S4_C7"), "DMA2_S4")
+
+
+class DshotBurstTests(unittest.TestCase):
+    """
+    genconfig._note_dshot_burst.
+
+    Burst DShot is reported, never chosen. `DEFAULT_DSHOT_BURST` is used by 51%
+    of the corpus and the obvious rule - four motors on one timer, therefore
+    DSHOT_DMAR_ON - does not survive the firmware: burst runs off TIMx_UP, whose
+    DMA comes from the `upopt` argument of DEF_TIM(), which every STM32 timer
+    table passes as 0. On a DMAMUX part that is one shared channel for every
+    timer, and `TIMUPn_DMA_OPT` - the define that would move it - reaches only
+    cli.c and the X32 platform, never the STM32 DShot driver.
+    """
+
+    def note(self, caps, motors):
+        cfg = genconfig.Config()
+        plan = genconfig.motor_timer_plan(caps, motors, {})
+        genconfig._note_dshot_burst(cfg, caps, plan, "FAKE32X100")
+        return " ".join(cfg.notes)
+
+    def test_a_shared_timer_is_reported_but_never_emitted(self):
+        for style in ("fixed", "mux"):
+            with self.subTest(style=style):
+                caps = fake_caps(style)
+                note = self.note(caps, {1: "PC6", 2: "PC7", 3: "PC8", 4: "PC9"})
+                self.assertIn("TIM8", note)
+                self.assertIn("DSHOT_BURST", note.replace("DEFAULT_DSHOT_BURST",
+                                                          "DSHOT_BURST"))
+
+    def test_the_dmamux_reason_is_given_where_it_applies(self):
+        mux = self.note(fake_caps("mux"), {1: "PC6", 2: "PC7", 3: "PC8", 4: "PC9"})
+        self.assertIn("TIMUPn_DMA_OPT", mux)
+        fixed = self.note(fake_caps("fixed"), {1: "PC6", 2: "PC7", 3: "PC8", 4: "PC9"})
+        self.assertNotIn("TIMUPn_DMA_OPT", fixed)
+
+    def test_motors_spread_over_two_timers_say_nothing(self):
+        # PA8's only plain channel is TIM4_CH1, so this cannot be one timer.
+        caps = fake_caps()
+        self.assertEqual(self.note(caps, {1: "PC6", 2: "PA8"}), "")
+
+    def test_a_single_motor_is_not_a_burst_candidate(self):
+        self.assertEqual(self.note(fake_caps(), {1: "PC6"}), "")
 
 
 # --------------------------------------------------------------------------- #
@@ -669,6 +737,332 @@ class SyntheticSheetTests(unittest.TestCase):
         labels = netmap.find_net_labels(words, sym)
         self.assertEqual(sorted(l.text for l in labels),
                          sorted(n for _, n in self.LEFT + self.RIGHT))
+
+
+# --------------------------------------------------------------------------- #
+# Whole-file generation, on a synthetic sheet
+# --------------------------------------------------------------------------- #
+
+class SyntheticBoard:
+    """
+    A made-up schematic run all the way through genconfig.build().
+
+    The corpus of real schematics exercises none of the features tested below -
+    no board in it has a PPM net, an ESC serial net, an SD card or a second IMU
+    - so a golden digest cannot pin any of this down. Driving the whole pipeline
+    from invented geometry can, and it costs a temporary firmware.json plus a
+    file for the schematic hash to be taken of.
+
+    Only `extract_words` is replaced: everything after it - symbol detection,
+    net labelling, the firmware check, bus solving, timer and DMA allocation -
+    runs exactly as it does on a vendor PDF.
+    """
+
+    PITCH = 4.0
+    LABEL_RISE = 0.3
+    LEFT_EDGE = 10.0
+    RIGHT_EDGE = 200.0
+
+    def __init__(self, left, right=(), extra=(), style="fixed"):
+        self.left, self.right, self.extra, self.style = left, right, extra, style
+
+    def words(self):
+        out = []
+        for i, (name, net) in enumerate(self.left):
+            y = 100 + i * self.PITCH
+            out.append(Word(name, self.LEFT_EDGE, y,
+                            self.LEFT_EDGE + 4 * len(name), y + 2, 1))
+            out.append(Word(net, 1.0, y - self.LABEL_RISE, 9.0,
+                            y - self.LABEL_RISE + 2, 1))
+        for i, (name, net) in enumerate(self.right):
+            y = 100 + i * self.PITCH
+            out.append(Word(name, self.RIGHT_EDGE - 4 * len(name), y,
+                            self.RIGHT_EDGE, y + 2, 1))
+            out.append(Word(net, 205.0, y - self.LABEL_RISE, 225.0,
+                            y - self.LABEL_RISE + 2, 1))
+        # Part markings, well clear of the row band so they cannot be mistaken
+        # for net labels.
+        for i, text in enumerate(self.extra):
+            out.append(Word(text, 100.0, 300.0 + i * 6, 140.0, 303.0 + i * 6, 1))
+        return out
+
+
+TARGET = "FAKE32X100"
+
+
+def generate(board: "SyntheticBoard"):
+    """(text, cfg, meta) for one synthetic board."""
+    import tempfile
+    from pathlib import Path
+    from unittest import mock
+
+    data = {
+        "schema": 1,
+        "generated": "1970-01-01T00:00:00Z",
+        "firmware": {"rev": "synthetic", "date": "", "branch": "", "path": ""},
+        "drivers": support.frozen_firmware()["drivers"],
+        "targets": {TARGET: fake_caps(board.style)},
+    }
+    with tempfile.TemporaryDirectory(prefix="schema-convert-synth-") as tmp:
+        tmp = Path(tmp)
+        (tmp / "firmware.json").write_text(json.dumps(data))
+        pdf = tmp / "sheet.pdf"
+        pdf.write_bytes(b"%PDF-synthetic")
+        old = genconfig.DATA_DIR
+        genconfig.DATA_DIR = tmp
+        try:
+            with mock.patch.object(genconfig, "extract_words",
+                                   return_value=board.words()):
+                cfg, meta = genconfig.build(pdf=pdf, board="SYNTH",
+                                            manufacturer="TEST", target=TARGET,
+                                            gyro_align="CW0_DEG")
+        finally:
+            genconfig.DATA_DIR = old
+    return "\n".join(cfg.lines).rstrip() + "\n", cfg, meta
+
+
+# A fixed left column - a gyro on SPI1 plus an I2C bus - and a right column that
+# each test extends. Rows are added on the right because find_symbol picks each
+# edge as the largest cluster of shared x0 / x1, and a lopsided left column
+# would win the right-hand alignment too. Real symbols are not lopsided.
+BASE_LEFT = [("PA5/SPI1_SCK", "GYRO-SCK"),
+             ("PA6/SPI1_MISO", "GYRO-MISO"),
+             ("PA7/SPI1_MOSI", "GYRO-MOSI"),
+             ("PA4", "GYRO-CS"),
+             ("PB8/I2C1_SCL", "I2C1-SCL"),
+             ("PB9/I2C1_SDA", "I2C1-SDA")]
+BASE_RIGHT = [("PC6/TIM3_CH1/TIM8_CH1", "MOTOR1"),
+              ("PC7/TIM3_CH2/TIM8_CH2", "MOTOR2"),
+              ("PC8/TIM3_CH3/TIM8_CH3", "MOTOR3"),
+              ("PC9/TIM3_CH4/TIM8_CH4", "MOTOR4")]
+PARTS = ("MPU-6000",)
+SPI2_ROWS = [("PB13/SPI2_SCK", "{0}-SCK"),
+             ("PB14/SPI2_MISO", "{0}-MISO"),
+             ("PB15/SPI2_MOSI", "{0}-MOSI")]
+
+
+def spi2_for(device):
+    return [(pin, net.format(device)) for pin, net in SPI2_ROWS]
+
+
+def board(extra_rows=(), parts=PARTS, style="fixed"):
+    return SyntheticBoard(BASE_LEFT, BASE_RIGHT + list(extra_rows), parts, style)
+
+
+class CaptureInputTests(unittest.TestCase):
+    """
+    RX_PPM_PIN and ESCSERIAL_PIN - 54% and 18% of the corpus, and neither had a
+    rule at all.
+
+    Both are timer *input captures*, not GPIO. Both drivers reach the pin via
+    timerAllocate(), which walks timerIOConfig() - the TIMER_PIN_MAPPING table -
+    and returns nothing for a pin that is not in it. So the pin needs a timer
+    channel in the firmware table and a row in the map, and it must not be given
+    a DMA option: the drivers read the capture register from the ISR, and every
+    RX_PPM_PIN row in the config repo carries dmaopt -1.
+    """
+
+    def rows(self, text):
+        return {label: (occ, opt)
+                for _, label, occ, opt in support.timer_rows(text)}
+
+    def test_ppm_is_emitted_with_an_undma_ed_timer_row(self):
+        text, _, _ = generate(board([("PA0/TIM2_CH1", "PPM")]))
+        self.assertEqual(support.defines(text).get("RX_PPM_PIN"), "PA0")
+        self.assertEqual(self.rows(text).get("RX_PPM_PIN"), (1, -1))
+
+    def test_escserial_is_emitted_with_an_undma_ed_timer_row(self):
+        text, _, _ = generate(board([("PA1/TIM2_CH2", "ESCSERIAL")]))
+        self.assertEqual(support.defines(text).get("ESCSERIAL_PIN"), "PA1")
+        self.assertEqual(self.rows(text).get("ESCSERIAL_PIN"), (1, -1))
+
+    def test_a_pin_the_firmware_gives_no_timer_is_refused(self):
+        """
+        The whole point of the check. PB13 is a real GPIO with a real SPI
+        function and no timer at all, so a PPM net there is a define the build
+        could never honour - and netmap cannot catch it, because the name 'PPM'
+        implies no requirement it knows how to test.
+        """
+        text, cfg, _ = generate(board([("PB13/SPI2_SCK", "PPM")]))
+        self.assertNotIn("RX_PPM_PIN", support.defines(text))
+        self.assertTrue(any("RX_PPM_PIN" in w and "timer" in w
+                            for w in cfg.warnings), cfg.warnings)
+
+    def test_the_motors_keep_a_distinct_dma_option_each(self):
+        """A capture row must not consume a DMA number the motors need."""
+        text, _, _ = generate(board([("PA0/TIM2_CH1", "PPM")], style="mux"))
+        opts = [opt for _, _, _, opt in support.timer_rows(text) if opt >= 0]
+        self.assertEqual(sorted(opts), list(range(len(opts))))
+        self.assertEqual(self.rows(text)["RX_PPM_PIN"][1], -1)
+
+
+class SecondGyroTests(unittest.TestCase):
+    """
+    GYRO_2_* - 25% of the corpus, and the classifier had no rule for it.
+
+    Two cases, and they end differently. When the sheet names the second IMU's
+    own data nets the existing solver handles it: the groups have different data
+    pins, so they cannot share an instance and are assigned apart.
+
+    When it names only GYRO2-CS, nothing is emitted. That is not timidity:
+    common_pre.h counts gyros by which GYRO_n_CS_PIN exist, so a lone
+    GYRO_2_CS_PIN raises GYRO_COUNT to 2 and gyrodev.c then leaves devconf[1] at
+    BUS_TYPE_NONE. Nor can the bus be borrowed from gyro 1 - across the config
+    repo, 66 of the 119 dual-gyro boards naming both instances put the second
+    IMU on a *different* bus.
+    """
+
+    def test_two_imus_on_different_buses_are_solved_apart(self):
+        text, _, _ = generate(board(spi2_for("GYRO2") + [("PB12", "GYRO2-CS"),
+                                                         ("PB10", "GYRO2-EXTI")]))
+        d = support.defines(text)
+        self.assertEqual(d.get("GYRO_1_SPI_INSTANCE"), "SPI1")
+        self.assertEqual(d.get("GYRO_2_SPI_INSTANCE"), "SPI2")
+        self.assertEqual(d.get("SPI2_SCK_PIN"), "PB13")
+        self.assertEqual(d.get("GYRO_1_CS_PIN"), "PA4")
+        self.assertEqual(d.get("GYRO_2_CS_PIN"), "PB12")
+        self.assertEqual(d.get("GYRO_2_EXTI_PIN"), "PB10")
+        self.assertEqual(d.get("GYRO_2_ALIGN"), "CW0_DEG")
+
+    def test_the_index_may_be_written_after_the_signal_name(self):
+        """`GYRO-CS2` names the same device as `GYRO2-CS`, so it must not be
+        read as a second chip select for gyro 1 - which is what the old rule,
+        matching the digit without capturing it, silently did."""
+        text, cfg, _ = generate(board([("PB12", "GYRO-CS2")]))
+        d = support.defines(text)
+        self.assertEqual(d.get("GYRO_1_CS_PIN"), "PA4")
+        self.assertNotIn("GYRO_2_CS_PIN", d)
+        self.assertTrue(any("PB12" in w and "second IMU" in w
+                            for w in cfg.warnings), cfg.warnings)
+
+    def test_a_chip_select_alone_emits_nothing_and_says_why(self):
+        text, cfg, _ = generate(board([("PB12", "GYRO2-CS"),
+                                       ("PB10", "GYRO2-EXTI")]))
+        d = support.defines(text)
+        for name in ("GYRO_2_CS_PIN", "GYRO_2_SPI_INSTANCE", "GYRO_2_EXTI_PIN",
+                     "GYRO_2_ALIGN"):
+            self.assertNotIn(name, d)
+        self.assertTrue(any("GYRO_COUNT" in w for w in cfg.warnings), cfg.warnings)
+        # The pin is still named, so the reviewer knows which one to wire up.
+        self.assertTrue(any("PB12" in w for w in cfg.warnings), cfg.warnings)
+        # ...and gyro 1 survives intact.
+        self.assertEqual(d.get("GYRO_1_CS_PIN"), "PA4")
+
+    def test_a_third_imu_is_reported_rather_than_half_emitted(self):
+        text, cfg, _ = generate(board([("PB12", "GYRO3-CS")]))
+        self.assertNotIn("GYRO_3", text)
+        self.assertTrue(any("third" in w for w in cfg.warnings), cfg.warnings)
+
+    def test_a_board_with_one_imu_says_nothing_about_a_second(self):
+        text, _, _ = generate(board())
+        self.assertNotIn("GYRO_2", text)
+        self.assertEqual(support.defines(text).get("GYRO_1_CS_PIN"), "PA4")
+
+
+class SdcardTests(unittest.TestCase):
+    """
+    USE_SDCARD - 15% of the corpus. The `sdcard_cs` role already existed, but
+    the feature define did not, and the chip select was emitted under a name the
+    firmware does not read.
+
+    pg/sdcard.c reads SDCARD_SPI_CS_PIN; SDCARD_CS_PIN appears nowhere in the
+    firmware and in none of the 619 configs. And common_pre.h only defines
+    USE_SDCARD inside `#if !defined(USE_CONFIG)`, which the config-repo build
+    path does define - so without it the card had neither a driver nor a
+    readable chip select, and the file still compiled.
+    """
+
+    def card(self):
+        return spi2_for("SDCARD") + [("PB12", "SD-CS")]
+
+    def test_the_feature_defines_and_the_firmware_s_own_cs_name(self):
+        text, _, _ = generate(board(self.card()))
+        d = support.defines(text)
+        self.assertIn("#define USE_SDCARD\n", text)
+        self.assertIn("#define USE_SDCARD_SPI\n", text)
+        self.assertEqual(d.get("SDCARD_SPI_CS_PIN"), "PB12")
+        self.assertEqual(d.get("SDCARD_SPI_INSTANCE"), "SPI2")
+        self.assertNotIn("SDCARD_CS_PIN", text)
+
+    def test_a_card_alone_takes_the_blackbox_default(self):
+        text, _, _ = generate(board(self.card()))
+        self.assertEqual(support.defines(text).get("DEFAULT_BLACKBOX_DEVICE"),
+                         "BLACKBOX_DEVICE_SDCARD")
+
+    def test_a_fitted_flash_still_wins_but_the_split_is_reported(self):
+        text, cfg, _ = generate(board(self.card(),
+                                      parts=PARTS + ("W25Q128JVEIQ",)))
+        self.assertEqual(support.defines(text).get("DEFAULT_BLACKBOX_DEVICE"),
+                         "BLACKBOX_DEVICE_FLASH")
+        self.assertTrue(any("SD card" in n for n in cfg.notes), cfg.notes)
+
+    def test_no_card_means_no_sdcard_defines(self):
+        self.assertNotIn("SDCARD", generate(board())[0])
+
+
+class GeneratedFileInvariantTests(unittest.TestCase):
+    """
+    The invariants the real boards are held to, applied to a synthetic board
+    carrying every new feature at once - which no vendor sheet in reach does.
+    """
+
+    def setUp(self):
+        self.text = generate(board(
+            spi2_for("GYRO2") + [("PB12", "GYRO2-CS"), ("PB10", "GYRO2-EXTI"),
+                                 ("PA0/TIM2_CH1", "PPM"),
+                                 ("PA1/TIM2_CH2", "ESCSERIAL")]))[0]
+        self.defines = support.defines(self.text)
+
+    def test_every_timer_row_names_a_define_the_file_makes(self):
+        missing = [label for _, label, _, _ in support.timer_rows(self.text)
+                   if label not in self.defines]
+        self.assertEqual(missing, [])
+
+    def test_no_two_defines_claim_the_same_pin(self):
+        seen = {}
+        for name, value in self.defines.items():
+            if name.endswith("_PIN") and support.PIN_VALUE_RE.match(value):
+                seen.setdefault(value, []).append(name)
+        self.assertEqual([v for v in seen.values() if len(v) > 1], [])
+
+    def test_every_timer_row_occurrence_is_in_range_for_its_pin(self):
+        caps = fake_caps()
+        for _, label, occurrence, _ in support.timer_rows(self.text):
+            pin = self.defines[label]
+            channels = caps["timers"].get(pin) or []
+            with self.subTest(label=label):
+                self.assertTrue(1 <= occurrence <= len(channels))
+
+    def test_a_net_that_is_refused_is_still_named(self):
+        """
+        The suite's `unaccounted_roles` invariant, on the nets this change can
+        refuse. A net that reaches neither a define nor a diagnostic just looks
+        like an incomplete config later, with no clue why - and every new rule
+        here has a path that deliberately emits nothing.
+        """
+        refused = [("PE1", "GYRO2-CS"),      # no data nets: bus unknown
+                   ("PE0", "GYRO2-EXTI"),    # goes with it
+                   ("PB13/SPI2_SCK", "PPM"), # no timer on that pin
+                   ("PE2", "GYRO3-CS")]      # a third IMU
+        text, cfg, meta = generate(board(refused))
+        emitted = set(support.defines(text).values())
+        said = " ".join(cfg.warnings + cfg.notes)
+        for link in meta["links"]:
+            if genconfig.classify(link["net"])[0] == "ignore" or not link["gpio"]:
+                continue
+            with self.subTest(net=link["net"]):
+                self.assertTrue(link["pin"] in emitted or link["net"] in said,
+                                f"{link['net']} on {link['pin']} vanished")
+
+    def test_no_spi_bus_is_emitted_half_finished(self):
+        buses = {}
+        for name in self.defines:
+            m = re.fullmatch(r"SPI(\d)_(SCK|SDI|SDO)_PIN", name)
+            if m:
+                buses.setdefault(m.group(1), set()).add(m.group(2))
+        for bus, roles in buses.items():
+            with self.subTest(bus=bus):
+                self.assertEqual(roles, {"SCK", "SDI", "SDO"})
 
 
 if __name__ == "__main__":
