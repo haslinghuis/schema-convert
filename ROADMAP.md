@@ -403,9 +403,14 @@ seeder's firmware rev in the generated header.
    not have them; the entries are right for the family's other members. The
    audit now says that once per peripheral instead of once per pin.
 
-   Still outstanding: **no F4 datasheet**, and F4 is the largest family by board
-   count. `stm32f405rg.pdf` is the single highest-value file to drop in.
-   The H5 `TIM13_CH1N`/`TIM14_CH1N` pair also remains reasoned rather than read.
+   **F4 is now covered too** (DS8626 Rev 12, filed as `stm32f405-407.pdf`).
+   Its UART/I2C/SPI tables came back clean at 100% extraction, and the one timer
+   finding was real: `PA11` was declared `TIM1_CH1N` on both F4 and F7 where the
+   silicon has `TIM1_CH4`. Raised as #15510.
+
+   Still outstanding, all timer-table findings nobody has read against a
+   rendered table: H5 and H7 `TIM13_CH1N`/`TIM14_CH1N` on `PF8`/`PF9`, and N6's
+   `TIM15`/`TIM2`/`TIM3`/`TIM5` rows. Treat as unverified, not as defects.
 5. **§4.5 `config.c`** — still unsupported.
 6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
 7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
