@@ -8,14 +8,17 @@ use a given define — a proxy for how often a gap will actually be hit.
 
 ---
 
-## 1. Defects — wrong today
+## 1. Defects
 
-### 1.1 Multi-page schematics are flattened into one coordinate space
+### 1.1 Multi-page schematics flattened into one coordinate space — FIXED
 
-`netmap.extract_words()` regexes every `<word>` element out of the
+*Resolved. Extraction is now page-aware; the record below is kept because the
+failure mode is instructive and the second bug it exposed is worth remembering.*
+
+`netmap.extract_words()` used to regex every `<word>` element out of the
 `pdftotext -bbox-layout` output without tracking which `<page>` it came from.
 Every page of an A-series sheet shares the same coordinate range, so words from
-page 1 and page 4 collide:
+page 1 and page 4 collided:
 
 ```
 pages: 5
@@ -26,18 +29,41 @@ pages: 5
   page 5: 508 words,   0 pin-name tokens, y range 29-561
 ```
 
-One of the boards processed so far is a 5-page schematic. It still scored 18/18,
+One of the boards processed is a 5-page schematic. It still scored 18/18,
 because the MCU symbol dominates its own column and the firmware check rejects
-nonsense — but that is luck, not design. Words from four unrelated pages are
+nonsense — but that was luck, not design. Words from four unrelated pages were
 competing to be its net-label column, and unexplained unclassified nets on that
-board are the visible symptom.
+board were the visible symptom.
 
-**Fix:** parse per `<page>`, run symbol detection on each, and take the page with
-the strongest MCU symbol (or merge, if a design splits the MCU across sheets —
-large boards do). Cheap, and it removes a whole class of silent misreads.
+**Fixed by:** parsing per `<page>`, running symbol detection on each, ranking by
+distinct GPIO pins, and locking net labels to the symbol's own sheet. A split
+MCU merges only on strong evidence (disjoint pin sets, comparable size, matching
+pitch); a rival page that fails that test is reported, never silently dropped.
+`--page N` overrides, and the header now reads `31 pins on page 4 of 5`.
 
-**Until then:** treat any result from a multi-page PDF as suspect regardless of
-the agreement score.
+Result on the 5-page board: the offset moved from +2.99pt to +0.60pt — matching
+every other board's convention, which is strong evidence the old fit was being
+dragged by foreign text. Three unclassified nets (`HOLD`, `COU42`, `VTX`) turned
+out to be labels from other sheets, each of which had been *stealing a pin from a
+legitimate page-4 net*. The three single-page boards are byte-identical.
+
+#### The second bug this exposed: phantom symbol edge
+
+Isolating one page revealed a latent defect that had been masked. On a
+**single-column** symbol, right-aligned names of unequal length share an `x1` but
+not an `x0`, so the x0 clustering produced a phantom second "edge" holding just
+the short names about 8pt from the real one. The overlap guard only discarded the
+duplicate when the two clusters were *identical*.
+
+That board's "50 pins" were really **31 pins with 19 counted twice**, and the
+phantom left edge was pairing against whatever text happened to sit to its left
+(`PIC1301 → PB3`, `P → PB4`). The guard now removes items the larger edge already
+claimed.
+
+Worth noting how this hid: the generated `config.h` was byte-identical before and
+after, because none of the bogus nets matched a `ROLE_RULES` entry and so never
+reached the output. A silent internal corruption that happened not to surface —
+exactly the class of thing §4.1's invariant tests exist to catch.
 
 ### 1.2 `SYSTEM_HSE_MHZ` is never emitted — wrong for F4 and G4
 
@@ -90,26 +116,64 @@ classifier has no rule and the SPI solver has no concept of a second IMU.
 
 ## 3. Capability — needs analysis the tool cannot yet do
 
-### 3.1 Datasheet alternate-function tables are not ingested
+### 3.1 Datasheet verification of the firmware tables
 
-The biggest structural gap. When the firmware rejects a pin, the tool falls back
-to the schematic symbol's own AF list as a second opinion — but a symbol can be
-wrong. A real submission claimed `UART7_TX` on a pin whose datasheet AF row is
-empty, while another pin it used really did have `USART3_RX` and the firmware
-table was the thing at fault. Only the datasheet distinguishes these, and the
-tool cannot read one.
+**Firmware is the single source of truth.** The generator may only emit what the
+build actually honours: a pin Betaflight's tables do not list cannot be used,
+whatever the silicon supports. Datasheet data must therefore never enter the
+generator's runtime path — doing so would emit configs months before the firmware
+could run them, which is precisely the case that came up when a board used a pin
+the H5 USART3 table lacked. The right fix there was a firmware PR, not teaching
+the generator to bypass firmware.
 
-A working prototype exists (built ad hoc while auditing an H5 UART table): parse
-the AF tables out of an ST datasheet PDF by column geometry, yielding
-`pin -> {function: AF number}`. Validated against 16 pins the firmware already
-had — 14 exact, and the 2 mismatches were genuine firmware bugs.
+So the datasheet is a **verification instrument, not an input**. Its output is a
+firmware bug report; once merged, `seed_firmware.py` picks the fix up
+automatically. One-way loop, no second source of truth:
 
-**Value beyond this tool:** the same data audits Betaflight's own pin tables. Run
-across the H5 UART and I2C tables it found three real defects in 70 pairs. Every
-other MCU family is unaudited.
+```
+datasheet ──audit──> firmware tables ──seed──> generator ──> config.h
+              │                ▲
+              └── bug report ──┘
+```
 
-**Effort:** moderate. The parser exists; productising means handling per-family
-table layouts and sourcing datasheets.
+Today the tool has no datasheet access, so when firmware rejects a pin it falls
+back on the schematic symbol's own AF list as a second opinion — and a symbol can
+be wrong. One submission claimed `UART7_TX` on a pin whose datasheet AF row is
+empty, while a different pin on the same sheet really did have `USART3_RX` and
+the *firmware* was at fault. Only a datasheet separates those two cases.
+
+A working prototype exists (built while auditing the H5 tables): parse the AF
+tables out of an ST datasheet by column geometry into `pin -> {function: AF}`.
+Validated against 16 pins firmware already had — 14 exact, and the 2 mismatches
+were genuine firmware bugs.
+
+**Value beyond this repo:** run across the H5 UART and I2C tables it found three
+real defects in 70 pairs — a wrong AF number that made USART10 unusable on both
+its pins, and an I2C4 pin with no I2C function at all, copy-pasted from the H7
+block. Every other MCU family is unaudited.
+
+#### Make it repeatable, not one-shot
+
+It is tempting to treat this as a sweep that ends: audit every family once, fix
+what it finds, done. That is not reachable as a steady state.
+
+- The `I2C4_SCL PF14` bug was **introduced** by a later copy-paste, not an
+  original error. Any future edit can reintroduce that class of mistake.
+- New families keep landing — H5, C5 and N6 are all recent, and each arrives
+  hand-written and unaudited.
+- Datasheet revisions and errata do occasionally change AF tables.
+
+So it wants to be a cheap re-runnable check with a non-zero exit code, suitable
+for CI on any commit touching `src/platform/*/`. The marginal cost over a
+one-shot tool is close to nil.
+
+#### Datasheet coverage is partial
+
+Locally available under `manufacturers/datasheets/`: C5, F7, G4, H5, H7, N6.
+**No F4 datasheet at all** — and F4 is roughly 250 of the 619 boards. AT32 and
+APM32 have none either. "Everything has been verified" cannot be claimed for a
+family whose datasheet is missing, and the tool should say so rather than
+reporting a clean run.
 
 ### 3.2 No circuit-level analysis
 
@@ -170,12 +234,20 @@ validate against it and fail loudly on an unregistered ID.
 and the generator has no idea the limit exists — it would happily reference a
 pin the firmware table has no room for. Seed the limits and check against them.
 
-### 4.4 `config.c` is not supported
+### 4.4 `genconfig` does not surface which page it read
+
+`netmap` now reports `31 pins on page 4 of 5` and exposes `sym.page`,
+`sym.pages`, `sym.split`, `sym.ignored_pages` and `describe_pages()`, but
+`genconfig` calls `find_symbol()` itself and prints its own header. On a
+multi-page submission the generated config gives no indication which sheet was
+read, and a rival symbol on another page is never mentioned. Small wiring job.
+
+### 4.5 `config.c` is not supported
 
 The config repo allows an optional `config.c` next to `config.h` for
 board-specific init. Not emitted, and not detected when one would be needed.
 
-### 4.5 Provenance is weak
+### 4.6 Provenance is weak
 
 The schematic sha256 is recorded, but nothing ties a generated config to the
 firmware revision it was validated against. A config generated against a patched
@@ -192,6 +264,8 @@ seeder's firmware rev in the generated header.
 3. **§4.1 tests** — everything after this is safer with them
 4. **§4.2 / §4.3 / §4.5** — small, high signal-to-noise
 5. **§2 coverage** — mechanical, mostly new `ROLE_RULES` entries
-6. **§3.1 datasheet AF** — highest value, moderate effort, and pays off across
-   Betaflight itself rather than just here
+6. **§3.1 datasheet verification** — highest value, moderate effort, and pays off
+   across Betaflight itself rather than just here. Build it as a CI-able check
+   from the start; sourcing an F4 datasheet is the blocking gap for the family
+   that matters most by board count
 7. **§3.2 circuit analysis** — highest effort; start with the VBAT divider alone

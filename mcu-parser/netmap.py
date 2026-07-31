@@ -57,29 +57,55 @@ class Word:
     y0: float
     x1: float
     y1: float
+    page: int = 1
 
     @property
     def yc(self) -> float:
         return (self.y0 + self.y1) / 2
 
 
+PAGE_RE = re.compile(r"<page\b[^>]*>(.*?)</page>", re.S)
+WORD_RE = re.compile(
+    r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>',
+    re.S,
+)
+
+
+def _words_in(xml: str, page: int) -> List[Word]:
+    words: List[Word] = []
+    for m in WORD_RE.finditer(xml):
+        x0, y0, x1, y1, text = m.groups()
+        text = re.sub(r"&amp;", "&", text).strip()
+        if text:
+            words.append(Word(text, float(x0), float(y0), float(x1), float(y1), page))
+    return words
+
+
 def extract_words(pdf: Path) -> List[Word]:
+    """
+    Every word in the document, each tagged with the sheet it was drawn on.
+
+    Sheets of one plot share a coordinate space - page 1 and page 4 of an A3 set
+    both run y 29-561 - so a flattened word list puts unrelated sheets on the
+    same rows. Anything downstream that reasons about geometry has to stay
+    inside a page, or it will pair a net label with a pin drawn elsewhere.
+    """
     if not shutil.which("pdftotext"):
         raise SystemExit("pdftotext not found - install poppler-utils")
     out = subprocess.run(
         ["pdftotext", "-bbox-layout", str(pdf), "-"],
         capture_output=True, text=True, check=True,
     ).stdout
-    words: List[Word] = []
-    for m in re.finditer(
-        r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>',
-        out, re.S,
-    ):
-        x0, y0, x1, y1, text = m.groups()
-        text = re.sub(r"&amp;", "&", text).strip()
-        if text:
-            words.append(Word(text, float(x0), float(y0), float(x1), float(y1)))
-    return words
+    pages = PAGE_RE.findall(out)
+    if not pages:
+        # No <page> markup at all: treat the document as a single sheet rather
+        # than losing every word.
+        return _words_in(out, 1)
+    return [w for n, body in enumerate(pages, 1) for w in _words_in(body, n)]
+
+
+def page_count(words: Sequence[Word]) -> int:
+    return max((w.page for w in words), default=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -96,11 +122,58 @@ class PinRow:
 
 
 @dataclass
-class Symbol:
+class SymbolPart:
+    """One page's worth of symbol. Edges and the row band are per page, because
+    coordinates only mean anything relative to the sheet they were drawn on."""
+    page: int
     rows: List[PinRow]
     left_edge: float
     right_edge: float
+
+    @property
+    def y_min(self) -> float:
+        return min(r.y for r in self.rows)
+
+    @property
+    def y_max(self) -> float:
+        return max(r.y for r in self.rows)
+
+    @property
+    def pins(self) -> set[str]:
+        return {r.pin for r in self.rows if r.gpio}
+
+
+@dataclass
+class Symbol:
+    parts: List[SymbolPart]
     pitch: float
+    page_count: int = 1
+    # Pages carrying a rival symbol that was not merged - reported, never used.
+    ignored_pages: List[int] = field(default_factory=list)
+
+    @property
+    def rows(self) -> List[PinRow]:
+        return [r for p in self.parts for r in p.rows]
+
+    @property
+    def page(self) -> int:
+        return self.parts[0].page
+
+    @property
+    def pages(self) -> List[int]:
+        return [p.page for p in self.parts]
+
+    @property
+    def split(self) -> bool:
+        return len(self.parts) > 1
+
+    @property
+    def left_edge(self) -> float:
+        return self.parts[0].left_edge
+
+    @property
+    def right_edge(self) -> float:
+        return self.parts[0].right_edge
 
     @property
     def y_min(self) -> float:
@@ -161,15 +234,15 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
                 break
             v = min(nxt, key=lambda v: v.x0)
             text, x1 = text + v.text, v.x1
-        out.append(Word(text, w.x0, w.y0, x1, w.y1))
+        out.append(Word(text, w.x0, w.y0, x1, w.y1, w.page))
     return out
 
 
-def find_symbol(words: Sequence[Word], min_pins: int = 8) -> Symbol:
+def _find_part(words: Sequence[Word], page: int, min_pins: int
+               ) -> Optional[Tuple[SymbolPart, float]]:
     """
-    Locate the MCU symbol as the largest set of pin-name words sharing an edge
-    alignment. Left-side names are left-aligned (common x0), right-side names are
-    right-aligned (common x1).
+    The symbol on one sheet, as (part, row pitch), or None if this sheet has
+    none. Returns rather than raises: most pages of a set carry no MCU at all.
     """
     tagged: List[Tuple[Word, str, List[str], bool]] = []
     for w in assemble_pin_names(words):
@@ -186,11 +259,21 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8) -> Symbol:
     left = max(cluster([(t[0].x0, t) for t in tagged], tol=1.0), key=len, default=[])
     right = max(cluster([(t[0].x1, t) for t in tagged], tol=1.0), key=len, default=[])
     # A pin name belongs to whichever edge claimed it; drop the overlap so a
-    # single-column symbol is not counted twice.
+    # single-column symbol is not counted twice. Names of unequal length share
+    # an x1 but not an x0, so such a symbol also throws up a partial second
+    # "edge" holding just its shortest names - which sits a character's width
+    # from the real one and would pair that half of the rows against whatever
+    # text happens to lie to its left.
     if {id(t) for t in left} == {id(t) for t in right}:
         right = []
+    elif len(right) >= len(left):
+        claimed = {id(t) for t in right}
+        left = [t for t in left if id(t) not in claimed]
+    else:
+        claimed = {id(t) for t in left}
+        right = [t for t in right if id(t) not in claimed]
     if len(left) + len(right) < min_pins:
-        raise SystemExit("Could not find an MCU symbol - no aligned pin-name column")
+        return None
 
     rows: List[PinRow] = []
     for w, pin, afs, gpio in left:
@@ -206,7 +289,68 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8) -> Symbol:
     ys = sorted({round(r.y, 2) for r in rows})
     gaps = [round(b - a, 2) for a, b in zip(ys, ys[1:]) if 0.5 < b - a < 20]
     pitch = min(gaps) if gaps else 3.66
-    return Symbol(rows, left_edge, right_edge, pitch)
+    return SymbolPart(page, rows, left_edge, right_edge), pitch
+
+
+def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
+                   part: SymbolPart, part_pitch: float) -> bool:
+    """
+    Does this second sheet hold the other half of the same MCU symbol?
+
+    Large designs do split one MCU across sheets, and taking only the bigger
+    half would drop real pins with no sign that anything was lost. But a sheet
+    that merely repeats the symbol, or carries a second MCU, would be merged
+    into nonsense - so the bar is deliberately high. A genuine half shares no
+    pin with what is already accepted (the two halves partition the package),
+    is drawn on the same grid, and is substantial in its own right.
+    """
+    mine = set().union(*(p.pins for p in accepted))
+    theirs = part.pins
+    if len(theirs) < 12 or len(theirs) * 3 < len(mine):
+        return False
+    if mine & theirs:
+        return False
+    return abs(part_pitch - pitch) <= pitch * 0.1
+
+
+def find_symbol(words: Sequence[Word], min_pins: int = 8,
+                page: Optional[int] = None) -> Symbol:
+    """
+    Locate the MCU symbol as the largest set of pin-name words sharing an edge
+    alignment. Left-side names are left-aligned (common x0), right-side names are
+    right-aligned (common x1).
+
+    Detection runs per page and the strongest symbol wins, because sheets share
+    a coordinate space: assembled from a flattened word list, a symbol happily
+    takes rows - and later, net labels - from an unrelated sheet, and the
+    firmware check only rejects the subset of those that name a function.
+    """
+    by_page: Dict[int, List[Word]] = defaultdict(list)
+    for w in words:
+        by_page[w.page].append(w)
+    npages = page_count(words)
+    if page is not None:
+        by_page = {page: by_page.get(page, [])}
+
+    found = [got for p, ws in sorted(by_page.items())
+             if (got := _find_part(ws, p, min_pins))]
+    if not found:
+        raise SystemExit("Could not find an MCU symbol - no aligned pin-name column")
+
+    # Strength is distinct GPIO pins, not rows: a single-column symbol whose
+    # names cluster on both alignments would otherwise count itself twice.
+    found.sort(key=lambda f: (-len(f[0].pins), -len(f[0].rows), f[0].page))
+    (best, pitch), rivals = found[0], found[1:]
+
+    parts, pitches, ignored = [best], [pitch], []
+    for part, part_pitch in rivals:
+        if _is_split_half(parts, pitch, part, part_pitch):
+            parts.append(part)
+            pitches.append(part_pitch)
+        elif len(part.pins) >= min_pins:
+            ignored.append(part.page)
+    parts.sort(key=lambda p: p.page)
+    return Symbol(parts, min(pitches), npages, sorted(ignored))
 
 
 # Gutter text that is not a net label: component designators (C50, R21, U3),
@@ -241,19 +385,31 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
     everything further out belongs to neighbouring components. Rather than guess
     a distance threshold, cluster the gutter text by its alignment coordinate and
     keep the substantial column nearest the edge.
+
+    Only the symbol's own sheet is searched. Every sheet occupies the same
+    coordinates, so words from the others sit inside the row band too and would
+    compete - on equal terms - to be the net-label column.
     """
-    pad = sym.pitch * 2
-    lo, hi = sym.y_min - pad, sym.y_max + pad
+    return [w for part in sym.parts
+            for w in _labels_for_part(words, part, sym.pitch)]
+
+
+def _labels_for_part(words: Sequence[Word], part: SymbolPart,
+                     pitch: float) -> List[Word]:
+    pad = pitch * 2
+    lo, hi = part.y_min - pad, part.y_max + pad
 
     sides: Dict[str, List[Word]] = {"L": [], "R": []}
     for w in words:
+        if w.page != part.page:
+            continue
         if not (lo <= w.y0 <= hi) or PIN_RE.match(w.text):
             continue
         if JUNK_RE.search(w.text) or POWER_RE.match(w.text):
             continue
-        if w.x1 < sym.left_edge:
+        if w.x1 < part.left_edge:
             sides["L"].append(w)
-        elif w.x0 > sym.right_edge:
+        elif w.x0 > part.right_edge:
             sides["R"].append(w)
 
     out: List[Word] = []
@@ -434,10 +590,15 @@ class Result:
 
 def _pair(sym: Symbol, labels: Sequence[Word], offset: float
           ) -> Tuple[List[Tuple[Word, PinRow]], List[Word]]:
+    parts = {p.page: p for p in sym.parts}
     pairs, orphans = [], []
     for w in labels:
-        side = "L" if w.x1 < sym.left_edge else "R"
-        cands = [r for r in sym.rows if r.side == side]
+        part = parts.get(w.page)
+        if part is None:
+            orphans.append(w)
+            continue
+        side = "L" if w.x1 < part.left_edge else "R"
+        cands = [r for r in part.rows if r.side == side]
         if not cands:
             orphans.append(w)
             continue
@@ -459,6 +620,11 @@ def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
     dropped. A silently discarded net just looks like an incomplete config later,
     with no clue why - and the usual cause is worth seeing: a net wired to a pin
     the symbol names as a supply, which is a schematic problem, not a parse one.
+
+    One offset is swept for the whole symbol, including a split one: halves of
+    the same symbol come off the same Altium template, so they share a font size
+    and a grid, and scoring them together is what keeps the winning offset from
+    being chosen on half the evidence.
     """
     step = sym.pitch / 12
     candidates = [i * step for i in range(-18, 19)]
@@ -526,11 +692,23 @@ def detect_target(words: Sequence[Word], data: dict) -> Optional[str]:
     return None
 
 
+def describe_pages(sym: Symbol) -> str:
+    """' on page 4 of 5' - empty for a single-sheet plot, where it says nothing."""
+    if sym.page_count < 2:
+        return ""
+    where = "+".join(str(p) for p in sym.pages)
+    if sym.split:
+        return f" on pages {where} of {sym.page_count} (merged)"
+    return f" on page {where} of {sym.page_count}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf", type=Path)
     ap.add_argument("--target", help="FC_TARGET_MCU (auto-detected if omitted)")
+    ap.add_argument("--page", type=int,
+                    help="sheet holding the MCU (auto-detected if omitted)")
     ap.add_argument("--json", type=Path, help="write the net map as JSON")
     args = ap.parse_args()
 
@@ -541,13 +719,18 @@ def main() -> int:
         raise SystemExit("Could not detect FC_TARGET_MCU - pass --target")
     caps, data = load_caps(target)
 
-    sym = find_symbol(words)
+    sym = find_symbol(words, page=args.page)
     labels = find_net_labels(words, sym)
     res = resolve(sym, labels, caps)
 
     print(f"target {target}  ({caps['mcu']}, {caps['family']})")
-    print(f"symbol: {len(sym.rows)} pins, pitch {sym.pitch:.2f}pt, "
+    print(f"symbol: {len(sym.rows)} pins{describe_pages(sym)}, "
+          f"pitch {sym.pitch:.2f}pt, "
           f"AF lists {'present' if sym.has_af_lists else 'absent'}")
+    if sym.ignored_pages:
+        print(f"WARN: page(s) {', '.join(str(p) for p in sym.ignored_pages)} also "
+              f"carry an MCU symbol; only page {sym.page} was used - if that is "
+              f"the wrong sheet, pass --page")
     print(f"offset {res.offset:+.2f}pt  agreement {res.score[0]}/{res.score[1]} "
           f"({res.agreement:.0%})\n")
     for l in sorted(res.links, key=lambda l: (l.side, l.pin)):
@@ -567,6 +750,8 @@ def main() -> int:
     if args.json:
         args.json.write_text(json.dumps({
             "target": target,
+            "pages": sym.pages,
+            "page_count": sym.page_count,
             "offset": res.offset,
             "agreement": res.agreement,
             "links": [vars(l) for l in res.links],
