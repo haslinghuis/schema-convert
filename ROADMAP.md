@@ -395,8 +395,8 @@ seeder's firmware rev in the generated header.
    exercises any of them. A schematic with a second IMU is the single most
    valuable input: 25% of shipped configs have one, and the SPI solver's
    shared-bus path is where it is most likely to be wrong.
-4. ~~**§3.1 audit the remaining families**~~ — done for every datasheet on hand.
-   All seven now exit 0: H5, G4, N6, **F7, H7 and C5**. The F7/H7/C5 findings
+4. ~~**§3.1 audit the remaining families**~~ — done, and every family with a
+   datasheet on hand now audits clean: F4, F7, G4, H5, H7, C5, N6. The F7/H7/C5 findings
    turned out not to be defects at all — `I2C4` occurs zero times in the F722
    datasheet, `UART9`/`USART10` zero times in H743, `USART7` zero times in C562,
    against 16–53 occurrences of their control peripherals. Those parts simply do
@@ -415,15 +415,16 @@ seeder's firmware rev in the generated header.
    half-fixed already: its table used `CH1` with a `WAS TIM13_CH1N` note, but the
    superseded AF macros were left behind.
 
-   **N6 is the one still open, and it is a rewrite rather than a rename.** Its
-   timer table references entries the silicon lacks: `TIM2_CH4`, `TIM5_CH4` and
-   `TIM15_CH2` on `PA3`, `TIM3_CH3` and `TIM15_CH1N` on `PB0`, and
-   `TIM15_CH1N`/`CH1`/`CH2` on `PE4`/`PE5`/`PE6`. DS14791 Rev 6 gives `PA3` only
-   `TIM16_CH1` at AF1, puts `TIM15_CH1` on `PA2` and `TIM15_CH1N` on `PA1`, and
-   gives `PE5`/`PE6` `I2C1_SCL`/`I2C1_SDA` at AF4 — the shape of a block copied
-   from H7. Deciding the intended mapping is a judgement call for someone who
-   knows what the N6 port was aiming at, so it is deliberately not folded into a
-   mechanical rename.
+   **N6 is done too, and it was smaller than it looked.** I called it a rewrite;
+   it was not. Seven entries named a channel the silicon does not have on that
+   pin, and every affected pin already carried its correct entries alongside —
+   so it was a removal. `TIM15` in particular is right on ten other pins; the
+   errors clustered on four. Raised as #15512, and the N6 audit is now clean at
+   239/239 pairs.
+
+   Worth keeping as a lesson: the "shape of a copied block" read came from the
+   finding list, not from the table. Looking at the table first would have
+   scoped it correctly and sooner.
 5. **§4.5 `config.c`** — still unsupported.
 6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
 7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
