@@ -1,0 +1,80 @@
+{
+ "_comment": [
+  "Silkscreen part number -> Betaflight driver part key (see the 'drivers'",
+  "section of firmware.json). Only needed where the marking on the schematic",
+  "differs from the name Betaflight gave the driver. Everything that matches a",
+  "driver key directly needs no entry here.",
+  "",
+  "Keys are matched case-insensitively after stripping -, _ and whitespace, so",
+  "'SPA06-003', 'spa06_003' and 'SPA06003' all hit the same entry.",
+  "",
+  "This is the one hand-maintained file in the pipeline; firmware.json is",
+  "generated. Add an entry when a vendor's schematic uses a marking the",
+  "generator does not recognise."
+ ],
+
+ "gyro": {
+  "ICM42688": "ICM42688P",
+  "ICM42605": "ICM42605",
+  "ICM42622": "ICM42622P",
+  "ICM42686": "ICM42686P",
+  "ICM20608": "ICM20608G",
+  "BMI270": "BMI270",
+  "IIM42652": "IIM42652",
+  "IIM42653": "IIM42653"
+ },
+
+ "acc": {
+  "ICM42688": "ICM42688P",
+  "ICM42622": "ICM42622P",
+  "ICM42686": "ICM42686P",
+  "ICM20608": "ICM20608G"
+ },
+
+ "baro": {
+  "SPA06003": "SPA06_003",
+  "SPA06": "SPA06_003",
+  "SPL06001": "DPS310",
+  "SPL07003": "SPA06_003",
+  "DPS368": "DPS310",
+  "2SMPB02B": "2SMBP_02B",
+  "BMP390": "BMP388",
+  "MS5611_01BA": "MS5611"
+ },
+
+ "mag": {
+  "QMC5883L": "QMC5883L",
+  "HMC5883L": "HMC5883",
+  "IST8310": "IST8310"
+ },
+
+ "_flash_comment": [
+  "The m25p16 driver's JEDEC table covers the whole W25Q family with no",
+  "per-capacity gate, so USE_FLASH_W25Q128FV is the correct define for a",
+  "W25Q64/256/512 as well. Mapping them here keeps that fact in one place."
+ ],
+
+ "flash": {
+  "W25Q128JVEIQ": "W25Q128FV",
+  "W25Q128JVSIQ": "W25Q128FV",
+  "W25Q128JVSIM": "W25Q128FV",
+  "W25Q128JV": "W25Q128FV",
+  "W25Q128": "W25Q128FV",
+  "W25Q64JV": "W25Q128FV",
+  "W25Q64": "W25Q128FV",
+  "W25Q256JVEIQ": "W25Q128FV",
+  "W25Q256JV": "W25Q128FV",
+  "W25Q256": "W25Q128FV",
+  "W25Q512JV": "W25Q128FV",
+  "W25Q512": "W25Q128FV",
+  "PY25Q128HA": "PY25Q128HA",
+  "GD25Q127C": "W25Q128FV",
+  "ZB25VQ128": "W25Q128FV",
+  "EN25QH128A": "W25Q128FV"
+ },
+
+ "osd": {
+  "AT7456E": "MAX7456",
+  "MAX7456": "MAX7456"
+ }
+}

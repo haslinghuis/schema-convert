@@ -1,0 +1,24 @@
+# schema-convert — schematic PDF to Betaflight config.h
+#
+# The pipeline deliberately has no Python dependencies. Text extraction shells
+# out to `pdftotext` (poppler), which is the only real prerequisite; everything
+# else is standard library.
+#
+# pdfplumber was tried and rejected: on the Altium plots these boards ship with,
+# it returns none of the MCU symbol's pin-name strings and merges adjacent
+# labels into nonsense. poppler returns every one cleanly, with coordinates.
+#
+# Run the tools directly:
+#   python3 mcu-parser/seed_firmware.py
+#   python3 mcu-parser/genconfig.py board.pdf --board NAME --manufacturer ID
+
+[project]
+name = "schema-convert"
+version = "0.2.0"
+description = "Convert flight-controller schematic PDFs into Betaflight config.h targets"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false

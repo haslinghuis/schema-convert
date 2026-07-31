@@ -1,0 +1,1109 @@
+#!/usr/bin/env python3
+"""
+genconfig.py - Turn a schematic PDF into a Betaflight config.h.
+
+Pipeline:
+
+  netmap.py         geometry -> which net is on which MCU pin
+  seed_firmware.py  firmware -> what each pin can actually do
+  this script       net names -> config.h roles, buses, timers and DMA
+
+Nothing here guesses a peripheral instance. The SPI bus behind GYRO-SCK/MISO/MOSI
+is found by intersecting those three pins' capabilities in the firmware map; the
+TIMER_PIN_MAP occurrence index is counted out of the firmware's own timer table;
+ADC DMA options are checked against the streams the motors already claimed. When
+the schematic annotates its own intent (`MOTOR1-TIM8 CH1`), that is preferred
+over inference and reported as such.
+
+What it cannot know is called out in the emitted header and on stderr: gyro
+orientation is a board-layout property, and the current-sense scale depends on
+the ESC. Those need the vendor.
+
+Usage:
+    python genconfig.py <schematic.pdf> --board NAME --manufacturer ID [-o DIR]
+    python genconfig.py <schematic.pdf> --board NAME --manufacturer ID --print
+"""
+
+import argparse
+import json
+import re
+import sys
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date
+from hashlib import sha256
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Set, Tuple
+
+sys.path.insert(0, str(Path(__file__).parent))
+import netmap  # noqa: E402
+from netmap import Link, Result, Word, extract_words, find_net_labels, find_symbol  # noqa: E402
+
+DATA_DIR = Path(__file__).parent / "data"
+ALIAS_FILE = DATA_DIR / "aliases.json"
+
+
+# --------------------------------------------------------------------------- #
+# Net name -> config.h role
+# --------------------------------------------------------------------------- #
+
+# Each rule: (regex, role, group-is-index). Order matters; first match wins.
+ROLE_RULES: List[Tuple[re.Pattern, str]] = [
+    # Some sheets name the bus explicitly (SPI1_SCK) instead of naming the device
+    # on it (GYRO-SCK). Take that at face value - it removes the guesswork.
+    (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
+    (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
+    (re.compile(r"^SERVO(\d+)$"), "servo"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_]?CS\d?$"), "gyro_cs"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
+    (re.compile(r"^(?:GYRO|IMU)\d?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)\d?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "gyro_spi"),
+    (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_]?CS$"), "osd_cs"),
+    (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),
+    (re.compile(r"^FLASH[-_]?CS$"), "flash_cs"),
+    (re.compile(r"^FLASH[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "flash_spi"),
+    (re.compile(r"^BARO[-_]?CS$"), "baro_cs"),
+    (re.compile(r"^BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
+    (re.compile(r"^SD(?:CARD)?[-_]?CS$"), "sdcard_cs"),
+    (re.compile(r"^(?:.*[-_])?TX(\d)(?:[-_]?R)?$"), "uart_tx"),
+    (re.compile(r"^(?:.*[-_])?RX(\d)(?:[-_]?R)?$"), "uart_rx"),
+    (re.compile(r"^I2C(\d)[-_]SCL$"), "i2c_scl"),
+    (re.compile(r"^I2C(\d)[-_]SDA$"), "i2c_sda"),
+    # Both orderings appear in the wild: ADC-BATT and VBAT_ADC.
+    (re.compile(r"^(?:ADC[-_])?(?:BATT|VBAT|BAT)(?:[-_]ADC)?$"), "adc_vbat"),
+    (re.compile(r"^(?:ADC[-_])?(?:CURR|CURRENT|ISENSE)(?:[-_]ADC)?$"), "adc_curr"),
+    (re.compile(r"^(?:ADC[-_])?RSSI(?:[-_]ADC)?$"), "adc_rssi"),
+    (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^LED0$"), "led0"),
+    (re.compile(r"^LED1$"), "led1"),
+    (re.compile(r"^LED[-_]?STRIP$|^WS2812$|^LED[-_]?DATA$"), "led_strip"),
+    (re.compile(r"^(?:BEEPER|BUZZER|BZ)[-_]?$"), "beeper"),
+    (re.compile(r"^CAM[-_]?CONTROLL?$|^CAMERA[-_]?CONTROL$|^CC$"), "camera_control"),
+    (re.compile(r"^USB[-_]?DETECT$|^VBUS[-_]?DETECT$"), "usb_detect"),
+    (re.compile(r"^VTX[-_]?SW$|^VTX[-_]?(?:PWR|POWER|EN)$"), "pinio"),
+    (re.compile(r"^USER(\d)$|^PINIO(\d)$"), "pinio"),
+    # A trailing _SW or _EN is a switched rail: CAM_SW, BEC_EN, VTX_EN. These are
+    # PINIO outputs, which is different from CAM-Controll (a PWM camera-OSD line).
+    (re.compile(r"^[A-Z0-9]+[-_](?:SW|EN)$", re.I), "pinio"),
+    (re.compile(r"^(?:FC[-_])?SW(?:DIO|CLK)$|^BOOT$|^OTG[+-]$|^DD?[+-]$|^NRST$"), "ignore"),
+]
+
+
+def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    'GYRO-SCK' -> ('gyro_spi', None, 'sck')
+    'TX4'      -> ('uart_tx', '4', None)
+    Returns (role, index, sub).
+    """
+    n = net.upper().strip()
+    for rx, role in ROLE_RULES:
+        m = rx.match(n)
+        if not m:
+            continue
+        groups = [g for g in m.groups() if g]
+        idx = next((g for g in groups if g.isdigit()), None)
+        sub = next((g.lower() for g in groups if not g.isdigit()), None)
+        if sub in ("sclk",):
+            sub = "sck"
+        if sub in ("miso",):
+            sub = "sdi"
+        if sub in ("mosi",):
+            sub = "sdo"
+        return role, idx, sub
+    return None, None, None
+
+
+# --------------------------------------------------------------------------- #
+# Bus inference
+# --------------------------------------------------------------------------- #
+
+def spi_candidates(caps: dict, pins: Dict[str, str]) -> Tuple[Set[str], List[str]]:
+    """Which SPI instances can drive this sck/sdi/sdo trio?"""
+    notes: List[str] = []
+    sets: List[Set[str]] = []
+    for role, pin in pins.items():
+        if role not in ("sck", "sdi", "sdo"):
+            continue
+        devs = {e["dev"] for e in caps["spi"].get(pin, []) if e["role"] == role}
+        if not devs:
+            notes.append(f"{pin} has no SPI {role} function")
+            continue
+        sets.append(devs)
+    if not sets:
+        return set(), notes
+    common = set.intersection(*sets)
+    if not common:
+        notes.append(f"no single SPI bus covers {pins}")
+    return common, notes
+
+
+def assign_spi_buses(caps: dict, groups: Dict[str, Dict[str, str]]
+                     ) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Work out which SPI instance each device sits on, solving all of them together.
+
+    Picking greedily per device does not work. On an F7, PB3/PB4/PB5 are valid
+    SPI1 *and* SPI3 pins, so a flash chip wired there looks like SPI1 in
+    isolation and steals the bus from a gyro on PA5/PA6/PA7 that has nowhere else
+    to go. Devices sharing identical data pins genuinely share a bus (an OSD and
+    a baro on one SPI2 is normal); devices with different data pins cannot. So
+    group by data pins, then assign distinct instances to distinct groups,
+    most-constrained group first.
+    """
+    notes: List[str] = []
+    keyed: Dict[Tuple, List[str]] = defaultdict(list)
+    for owner, pins in groups.items():
+        data = tuple(sorted((r, p) for r, p in pins.items() if r != "cs"))
+        if data:
+            keyed[data].append(owner)
+
+    cands: Dict[Tuple, Set[str]] = {}
+    for data, owners in keyed.items():
+        common, ns = spi_candidates(caps, dict(data))
+        notes.extend(f"{'/'.join(owners)}: {n}" for n in ns)
+        cands[data] = common
+
+    order = sorted(cands, key=lambda d: (len(cands[d]), str(d)))
+    solution: Dict[Tuple, str] = {}
+
+    def solve(i: int) -> bool:
+        if i == len(order):
+            return True
+        data = order[i]
+        for dev in sorted(cands[data]):
+            if dev in solution.values():
+                continue
+            solution[data] = dev
+            if solve(i + 1):
+                return True
+            del solution[data]
+        return False
+
+    if not solve(0):
+        notes.append("no conflict-free SPI assignment exists; falling back to "
+                     "per-device best guess - verify every SPI instance")
+        for data in order:
+            if cands[data]:
+                solution[data] = sorted(cands[data])[0]
+
+    out: Dict[str, str] = {}
+    for data, owners in keyed.items():
+        dev = solution.get(data)
+        if not dev:
+            continue
+        for owner in owners:
+            out[owner] = dev
+        if len(cands[data]) > 1:
+            notes.append(f"{'/'.join(owners)}: {sorted(cands[data])} both possible; "
+                         f"{dev} chosen so the other buses still fit")
+    return out, notes
+
+
+def infer_i2c_bus(caps: dict, scl: Optional[str], sda: Optional[str],
+                  declared: Optional[str]) -> Tuple[Optional[str], List[str]]:
+    notes: List[str] = []
+    sets = []
+    for pin, role in ((scl, "scl"), (sda, "sda")):
+        if not pin:
+            continue
+        devs = {e["dev"] for e in caps["i2c"].get(pin, []) if e["role"] == role}
+        if devs:
+            sets.append(devs)
+        else:
+            notes.append(f"{pin} has no I2C {role} function")
+    if not sets:
+        return None, notes
+    common = set.intersection(*sets)
+    if not common:
+        return None, notes + ["SCL and SDA are not on the same I2C bus"]
+    dev = sorted(common)[0]
+    if declared and f"I2C{declared}" != dev:
+        notes.append(f"net names say I2C{declared} but the pins are {dev}")
+    return dev, notes
+
+
+# --------------------------------------------------------------------------- #
+# Timer allocation
+# --------------------------------------------------------------------------- #
+
+# Advanced-control timers, preferred for motor output: they live on the faster
+# bus and carry the complementary/brake features DShot benefits from.
+ADVANCED = ("TIM1", "TIM8", "TIM20")
+
+# Device owner -> the config.h define naming its SPI bus.
+INSTANCE_DEFINE = {
+    "gyro": "GYRO_1_SPI_INSTANCE",
+    "osd": "MAX7456_SPI_INSTANCE",
+    "flash": "FLASH_SPI_INSTANCE",
+    "baro": "BARO_SPI_INSTANCE",
+    "sdcard": "SDCARD_SPI_INSTANCE",
+}
+
+
+@dataclass
+class TimerPick:
+    pin: str
+    label: str          # the config.h symbol used in TIMER_PIN_MAPPING
+    occurrence: int     # 1-based index into the firmware timer table
+    channel: str        # TIM8_CH1
+    dmaopt: int
+    source: str         # 'schematic' | 'inferred'
+
+
+def read_timer_hints(words: Sequence[Word]) -> Dict[str, str]:
+    """
+    Pick up annotations the schematic author wrote, e.g. the words
+    'MOTOR1-TIM8' followed by 'CH1'. Returns {'MOTOR1': 'TIM8_CH1'}.
+    """
+    hints: Dict[str, str] = {}
+    for w in words:
+        m = re.match(r"^(.+?)[-_](TIM\d+)$", w.text)
+        if not m:
+            continue
+        net, tim = m.group(1), m.group(2)
+        # The channel is the next word to the right on the same line.
+        ch = next(
+            (v.text for v in words
+             if abs(v.y0 - w.y0) < 1.0 and 0 <= v.x0 - w.x1 < 6
+             and re.fullmatch(r"CH\d", v.text)),
+            None,
+        )
+        if ch:
+            hints[net.upper()] = f"{tim}_{ch}"
+    return hints
+
+
+def pick_timer(caps: dict, pin: str, hint: Optional[str],
+               prefer_advanced: bool, avoid_complementary: bool = True
+               ) -> Optional[Tuple[int, str, str]]:
+    """Return (occurrence, channel, source) for a pin needing a timer."""
+    options = caps["timers"].get(pin) or []
+    if not options:
+        return None
+    if hint:
+        for i, ch in enumerate(options, start=1):
+            if ch == hint:
+                return i, ch, "schematic"
+    ranked = list(enumerate(options, start=1))
+    if avoid_complementary:
+        plain = [(i, c) for i, c in ranked if not c.endswith("N")]
+        ranked = plain or ranked
+    if prefer_advanced:
+        ranked.sort(key=lambda t: (t[1].split("_")[0] not in ADVANCED, t[0]))
+    return (*ranked[0], "inferred")
+
+
+def motor_timer_plan(caps: dict, motors: Dict[int, str],
+                     hints: Dict[str, str]) -> Dict[str, Tuple[int, str, str]]:
+    """
+    Choose timers for the motor pins, preferring one shared timer so burst DShot
+    stays available. Schematic annotations override the choice.
+    """
+    if not motors:
+        return {}
+    # Which timers can serve every motor pin on a plain (non-complementary) channel?
+    per_pin = {
+        pin: {c.split("_")[0] for c in caps["timers"].get(pin, []) if not c.endswith("N")}
+        for pin in motors.values()
+    }
+    shared = set.intersection(*per_pin.values()) if per_pin else set()
+    preferred: Optional[str] = None
+    if shared:
+        preferred = sorted(shared, key=lambda t: (t not in ADVANCED, t))[0]
+
+    plan: Dict[str, Tuple[int, str, str]] = {}
+    for n, pin in sorted(motors.items()):
+        hint = hints.get(f"MOTOR{n}")
+        if not hint and preferred:
+            for c in caps["timers"].get(pin, []):
+                if c.startswith(preferred + "_") and not c.endswith("N"):
+                    hint = c
+                    break
+        got = pick_timer(caps, pin, hint, prefer_advanced=True)
+        if got:
+            plan[pin] = got
+    return plan
+
+
+def dma_streams(caps: dict, key: str, opt: int) -> Optional[str]:
+    table = caps["dma"]["timer"] if key.startswith("TIM") else caps["dma"]["peripheral"]
+    opts = table.get(key) or []
+    return opts[opt] if 0 <= opt < len(opts) else None
+
+
+def choose_adc(caps: dict, pins: Sequence[str], claimed: Set[str],
+               mux_next: int = 0) -> Tuple[Optional[str], Optional[int], List[str]]:
+    """
+    Pick an ADC instance that can read every ADC pin, plus a DMA option that
+    nothing else has taken.
+
+    On DMAMUX parts the option is an index into the one shared channel table, so
+    it must continue past whatever the timers already claimed; on fixed-mapping
+    parts it indexes the ADC's own stream list and only has to dodge the streams
+    the timers occupy.
+    """
+    notes: List[str] = []
+    if not pins:
+        return None, None, notes
+    sets = []
+    for p in pins:
+        entry = caps["adc"].get(p)
+        if not entry:
+            notes.append(f"{p} is not an ADC-capable pin")
+            continue
+        sets.append(set(entry["devices"]))     # '123' -> {'1','2','3'}
+    if not sets:
+        return None, None, notes
+    common = set.intersection(*sets)
+    if not common:
+        return None, None, notes + ["no single ADC instance covers all ADC pins"]
+
+    if caps["dma"]["style"] == "mux":
+        dev = f"ADC{sorted(common)[0]}"
+        pool = caps["dma"]["mux_options"] or 0
+        if pool and mux_next >= pool:
+            return dev, None, notes + [
+                f"{dev}: no DMA channel left on this part ({pool} total)"]
+        return dev, mux_next, notes
+
+    for n in sorted(common):
+        dev = f"ADC{n}"
+        opts = caps["dma"]["peripheral"].get(dev) or []
+        for opt, stream in enumerate(opts):
+            if _stream_of(stream) not in claimed:
+                return dev, opt, notes
+        notes.append(f"{dev}: every DMA option collides with a timer stream")
+    dev = f"ADC{sorted(common)[0]}"
+    return dev, 0, notes + [f"{dev}_DMA_OPT 0 may collide - verify"]
+
+
+def _stream_of(spec: str) -> str:
+    """'DMA2_S4_C7' -> 'DMA2_S4' (the contended resource is the stream)."""
+    m = re.match(r"(DMA\d+_S\d+)", spec)
+    return m.group(1) if m else spec
+
+
+# --------------------------------------------------------------------------- #
+# Connector-derived UART roles
+# --------------------------------------------------------------------------- #
+
+# Keyword on a connector's silkscreen -> the config.h role define. Only roles
+# with an unambiguous meaning are listed; a 'VTX' header could be analog
+# SmartAudio or MSP, so it is deliberately left out rather than guessed.
+CONNECTOR_ROLES: List[Tuple[re.Pattern, str]] = [
+    # Matched against the whole label ("J5 GPS"), so keep these unanchored and
+    # word-bounded rather than anchored to the start of the string.
+    (re.compile(r"\b(?:GPS|GNSS|COMPASS)\b", re.I), "GPS_UART"),
+    (re.compile(r"\b(?:RECEIVER|ELRS|CRSF|SBUS|RX)\b(?!\d)", re.I), "SERIALRX_UART"),
+    (re.compile(r"\bESC\b", re.I), "ESC_SENSOR_UART"),
+    (re.compile(r"\b(?:DJI|O[34]|AIR.?UNIT|VISTA|GOGGLE)\b", re.I), "MSP_UART"),
+]
+
+SERIAL_PORT_NAMES = {  # configs spell 1/2/3/6 as USART, the rest as UART
+    "1": "SERIAL_PORT_USART1", "2": "SERIAL_PORT_USART2",
+    "3": "SERIAL_PORT_USART3", "6": "SERIAL_PORT_USART6",
+}
+
+
+def read_connector_roles(words: Sequence[Word]) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Read the labelled connectors and work out what each UART is for.
+
+    Vendor sheets name their headers (`J5 GPS`, `J7 Receiver`, `J2 ESC`), and the
+    UART broken out on each header says what that port is meant to do. Each
+    TX/RX net is attributed to its nearest connector designator, which is more
+    robust than a bounding box when headers sit close together.
+    """
+    notes: List[str] = []
+    designators = [w for w in words if re.fullmatch(r"[JP]\d{1,2}", w.text)]
+    if not designators:
+        return {}, notes
+
+    # The header's name is whatever sits just to the right of its designator.
+    names: Dict[int, str] = {}
+    for d in designators:
+        tail = [w.text for w in words
+                if abs(w.y0 - d.y0) < 1.5 and 0 <= w.x0 - d.x1 < 12
+                and not re.fullmatch(r"[\d.]+", w.text)]
+        names[id(d)] = " ".join([d.text] + tail[:2])
+
+    # dir -> uart index, per connector
+    seen: Dict[int, Dict[str, Set[str]]] = defaultdict(lambda: defaultdict(set))
+    for w in words:
+        m = re.fullmatch(r"(TX|RX)(\d)(?:[-_]R)?", w.text, re.I)
+        if not m:
+            continue
+        near = min(designators,
+                   key=lambda d: (d.x0 - w.x0) ** 2 + (d.y0 - w.y0) ** 2)
+        dist = ((near.x0 - w.x0) ** 2 + (near.y0 - w.y0) ** 2) ** 0.5
+        if dist > 80:            # too far to belong to any header
+            continue
+        seen[id(near)][m.group(1).lower()].add(m.group(2))
+
+    roles: Dict[str, str] = {}
+    for d in designators:
+        label = names.get(id(d), d.text)
+        role = next((r for rx, r in CONNECTOR_ROLES if rx.search(label)), None)
+        if not role or id(d) not in seen:
+            continue
+        dirs = seen[id(d)]
+        both = dirs.get("tx", set()) & dirs.get("rx", set())
+        # A full-duplex port on the header beats one that only appears one way:
+        # a DJI header carries its MSP link both ways plus an SBUS output.
+        idx = (sorted(both) or sorted(dirs.get("tx", set()) | dirs.get("rx", set())))
+        if not idx:
+            continue
+        if role in roles and roles[role] != idx[0]:
+            notes.append(f"{role}: {label} suggests UART{idx[0]} but "
+                         f"UART{roles[role]} was already chosen")
+            continue
+        roles[role] = idx[0]
+        notes.append(f"{role} = UART{idx[0]} from connector '{label}'")
+    return roles, notes
+
+
+# --------------------------------------------------------------------------- #
+# Part detection
+# --------------------------------------------------------------------------- #
+
+# A footprint marked not-fitted. Vendors put the alternate part on the same sheet
+# so one PCB can be built either way.
+NOT_FITTED_RE = re.compile(r"\((?:NC|DNP|DNI|NF|NP)\)\s*$", re.I)
+
+
+def _norm(part: str) -> str:
+    return re.sub(r"[-_\s]", "", NOT_FITTED_RE.sub("", part)).upper()
+
+
+@dataclass
+class PartHit:
+    driver: str        # the firmware's key, e.g. ICM42688P
+    marking: str       # as printed on the sheet
+    fitted: bool       # False when marked (NC)/(DNP)
+
+
+def detect_parts(words: Sequence[Word], drivers: dict, aliases: dict
+                 ) -> Dict[str, List[PartHit]]:
+    """
+    category -> every part found, fitted ones first.
+
+    A sheet often carries alternates: `MPU-6000` fitted next to `ICM42688(NC)`
+    and `QFN24-MPU6000(NC)`. Returning all of them lets one firmware serve every
+    build option, and the ordering is deterministic - iterating a set of tokens
+    made the chosen part vary between runs for no visible reason.
+    """
+    found: Dict[str, List[PartHit]] = defaultdict(list)
+    tokens = sorted({w.text for w in words})
+    for cat, parts in drivers.items():
+        lookup = {_norm(p): p for p in parts}
+        alias = {_norm(k): v for k, v in aliases.get(cat, {}).items()}
+        seen: Set[str] = set()
+        for tok in tokens:
+            key = _norm(tok)
+            # Longest sensible match: the whole token, then leading chunks
+            # (W25Q128JVEIQ, AT7456E-LGA16, SPA06-003).
+            for cand in (key, *(key[:i] for i in range(len(key) - 1, 3, -1))):
+                driver = alias.get(cand) if alias.get(cand) in parts else lookup.get(cand)
+                if not driver or driver in seen:
+                    continue
+                seen.add(driver)
+                found[cat].append(
+                    PartHit(driver, tok, not NOT_FITTED_RE.search(tok)))
+                break
+    for cat in found:
+        found[cat].sort(key=lambda h: (not h.fitted, h.driver))
+    return dict(found)
+
+
+# --------------------------------------------------------------------------- #
+# Assembly
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Config:
+    lines: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)
+
+    def add(self, text: str = "") -> None:
+        self.lines.append(text)
+
+    def define(self, name: str, value: str = "", width: int = 20) -> None:
+        self.add(f"#define {name:<{width}}{value}".rstrip())
+
+
+HEADER = """/*
+ * This file is part of Betaflight.
+ *
+ * Betaflight is free software. You can redistribute this software
+ * and/or modify this software under the terms of the GNU General
+ * Public License as published by the Free Software Foundation,
+ * either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Betaflight is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * See the GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public
+ * License along with this software.
+ *
+ * If not, see <http://www.gnu.org/licenses/>.
+ */
+"""
+
+
+def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
+          gyro_align: str, args_trust: bool = False,
+          reference: Optional[str] = None,
+          version: Optional[str] = None) -> Tuple[Config, dict]:
+    fw = json.loads((DATA_DIR / "firmware.json").read_text())
+    aliases = json.loads(ALIAS_FILE.read_text())
+
+    words = extract_words(pdf)
+    target = target or netmap.detect_target(words, fw)
+    if not target:
+        raise SystemExit("Could not detect FC_TARGET_MCU - pass --target")
+    caps = fw["targets"][target]
+
+    sym = find_symbol(words)
+    labels = find_net_labels(words, sym)
+    res = netmap.resolve(sym, labels, caps)
+    hints = read_timer_hints(words)
+    parts = detect_parts(words, fw["drivers"], aliases)
+
+    cfg = Config()
+    gaps: Set[str] = set()          # nets the firmware lacks but the symbol backs
+    for l in res.links:
+        if not (l.checked and not l.ok):
+            continue
+        if l.symbol_ok:
+            # The symbol independently claims this function, so the likely fix is
+            # in Betaflight's pin tables, not on the board. Worth a firmware PR.
+            gaps.add(l.net)
+            cfg.warnings.append(
+                f"{l.net} on {l.pin}: the symbol's AF list backs this, but "
+                f"Betaflight's {target} tables have no such option for {l.pin}. "
+                "Either a firmware pin-table gap or a wrong symbol - vendor AF "
+                "lists do contain errors, so confirm in the datasheet AF table "
+                "before adding it to the firmware"
+                + ("" if args_trust else "; omitted (re-run with --trust-symbol "
+                                         "to emit it)"))
+        elif l.symbol_ok is False:
+            cfg.warnings.append(
+                f"{l.net} on {l.pin}: neither Betaflight's {target} tables nor the "
+                f"symbol's own AF list ({'/'.join(l.afs)}) support this - likely a "
+                "schematic error; omitted")
+        else:
+            cfg.warnings.append(
+                f"{l.net} is on {l.pin}, which Betaflight's {target} tables do not "
+                "support for that function, and the symbol carries no AF list to "
+                "corroborate it - omitted")
+
+    for l in res.on_power_pin:
+        cfg.warnings.append(
+            f"{l.net} is wired to {l.pin}, a supply/system pin on this symbol - "
+            "omitted; check the schematic")
+    if res.orphans:
+        cfg.warnings.append("net label(s) that matched no pin row and were "
+                            "omitted: " + ", ".join(res.orphans))
+
+    # ---- group the links by role -----------------------------------------
+    motors: Dict[int, str] = {}
+    servos: Dict[int, str] = {}
+    uart: Dict[Tuple[str, str], str] = {}
+    i2c: Dict[str, str] = {}
+    spi_groups: Dict[str, Dict[str, str]] = defaultdict(dict)
+    spi_named: Dict[str, Dict[str, str]] = defaultdict(dict)   # bus stated on the sheet
+    simple: Dict[str, str] = {}
+    pinios: List[Tuple[str, str]] = []
+    unknown: List[Link] = []
+
+    for l in res.links:
+        # Anything the firmware map rejected, or that landed on a supply pin, is
+        # left out rather than emitted as a define that cannot work. Each one is
+        # already recorded as a warning above.
+        if not l.gpio:
+            continue
+        if l.checked and not l.ok and not (args_trust and l.symbol_ok):
+            continue
+        role, idx, sub = classify(l.net)
+        if role == "ignore":
+            continue
+        if role is None:
+            unknown.append(l)
+        elif role == "motor":
+            motors[int(idx or 1)] = l.pin
+        elif role == "servo":
+            servos[int(idx or 1)] = l.pin
+        elif role in ("uart_tx", "uart_rx"):
+            uart[(idx or "1", role[-2:])] = l.pin
+        elif role in ("i2c_scl", "i2c_sda"):
+            i2c[role[-3:]] = l.pin
+            i2c.setdefault("declared", idx or "1")
+        elif role == "spi_bus":
+            spi_named[f"SPI{idx or '1'}"][sub or "sck"] = l.pin
+        elif role.endswith("_spi"):
+            spi_groups[role[:-4]][sub or "sck"] = l.pin
+        elif role.endswith("_cs"):
+            spi_groups[role[:-3]]["cs"] = l.pin
+        elif role == "pinio":
+            pinios.append((l.net, l.pin))
+        else:
+            simple[role] = l.pin
+
+    # ---- header ----------------------------------------------------------
+    #
+    # REFERENCE is NOT a hash of anything we hold. It is a token the Betaflight
+    # team issues once a target has been reviewed, validated against the
+    # upper-cased BOARD_NAME, and it cannot be computed locally. Emitting a
+    # locally-derived digest there would be inventing provenance, so the
+    # supported-target block is written only when a real value is supplied via
+    # --reference.
+    #
+    # The schematic's own sha256 is still worth recording - it pins down which
+    # revision the config came from - just not in that field.
+    digest = sha256(pdf.read_bytes()).hexdigest()
+    cfg.add(HEADER)
+    if reference:
+        cfg.add("/*")
+        cfg.add("    SUPPORTED TARGET - THANK YOU")
+        cfg.add(f"    REFERENCE: {reference}")
+        cfg.add(f"    DATE: {date.today().isoformat()}")
+        if version:
+            cfg.add(f"    VERSION: {version}")
+        cfg.add("*/")
+        cfg.add()
+    cfg.add("/*")
+    cfg.add(f"    Generated from {pdf.name}")
+    cfg.add(f"    Schematic sha256: {digest}")
+    cfg.add(f"    Converted: {date.today().isoformat()}")
+    if not reference:
+        cfg.add("")
+        cfg.add("    No REFERENCE directive: this target has not been reviewed by")
+        cfg.add("    the Betaflight team. They issue that value; it cannot be")
+        cfg.add("    computed here. Re-run with --reference once it is provided.")
+    cfg.add("*/")
+    cfg.add()
+    cfg.add("#pragma once")
+    cfg.add()
+    cfg.define("FC_TARGET_MCU", target)
+    cfg.add()
+    cfg.define("BOARD_NAME", board)
+    cfg.define("MANUFACTURER_ID", manufacturer)
+    cfg.add()
+
+    # ---- feature defines -------------------------------------------------
+    gyro_bus = "spi" if "gyro" in spi_groups else "i2c"
+    feats: List[str] = []
+
+    def driver_for(cat: str, hit: PartHit, bus: str) -> Optional[str]:
+        buses = fw["drivers"][cat].get(hit.driver) or {}
+        return buses.get(bus) or buses.get("any") or next(iter(buses.values()), None)
+
+    if "gyro" in parts:
+        feats += ["USE_ACC", "USE_GYRO"]
+        # Emit every variant on the sheet, fitted or not, so one firmware covers
+        # both build options - which is what the alternate footprint is for.
+        for cat in ("acc", "gyro"):
+            for hit in parts.get(cat, []):
+                d = driver_for(cat, hit, gyro_bus)
+                if d:
+                    feats.append(d)
+    else:
+        cfg.warnings.append("no gyro part recognised on the sheet")
+    if "gyro_clkin" in simple:
+        feats.append("USE_GYRO_CLKIN")
+    if "baro" in parts:
+        bus = "spi" if "baro" in spi_groups else "i2c"
+        feats.append("USE_BARO")
+        for hit in parts["baro"]:
+            d = driver_for("baro", hit, bus)
+            if d:
+                feats.append(d)
+    if "flash" in parts:
+        feats.append("USE_FLASH")
+        for hit in parts["flash"]:
+            d = driver_for("flash", hit, "spi")
+            if d:
+                feats.append(d)
+    if "osd" in parts:
+        feats.append("USE_MAX7456")
+    for f in dict.fromkeys(feats):
+        cfg.define(f)
+    cfg.add()
+
+    for cat, hits in sorted(parts.items()):
+        unfitted = [h for h in hits if not h.fitted]
+        if unfitted and not any(h.fitted for h in hits):
+            cfg.warnings.append(
+                f"the only {cat} on the sheet is marked not-fitted "
+                f"({', '.join(h.marking for h in unfitted)}); driver enabled anyway "
+                "- confirm the populated variant with the vendor")
+        elif unfitted:
+            cfg.notes.append(f"{cat} alternates marked not-fitted, drivers included: "
+                             + ", ".join(h.marking for h in unfitted))
+
+    # ---- motors ----------------------------------------------------------
+    tplan = motor_timer_plan(caps, motors, hints)
+    for n, pin in sorted(motors.items()):
+        cfg.define(f"MOTOR{n}_PIN", pin)
+    for n, pin in sorted(servos.items()):
+        cfg.define(f"SERVO{n}_PIN", pin)
+    if motors or servos:
+        cfg.add()
+
+    # ---- UARTs -----------------------------------------------------------
+    for n in sorted({k[0] for k in uart}, key=int):
+        for d in ("tx", "rx"):
+            pin = uart.get((n, d))
+            if pin:
+                cfg.define(f"UART{n}_{d.upper()}_PIN", pin)
+    if uart:
+        cfg.add()
+
+    # ---- I2C -------------------------------------------------------------
+    i2c_dev = None
+    if i2c.get("scl") or i2c.get("sda"):
+        i2c_dev, notes = infer_i2c_bus(caps, i2c.get("scl"), i2c.get("sda"),
+                                       i2c.get("declared"))
+        cfg.notes.extend(notes)
+        if i2c_dev:
+            n = i2c_dev[-1]
+            if i2c.get("scl"):
+                cfg.define(f"I2C{n}_SCL_PIN", i2c["scl"])
+            if i2c.get("sda"):
+                cfg.define(f"I2C{n}_SDA_PIN", i2c["sda"])
+            cfg.add()
+
+    # ---- SPI buses -------------------------------------------------------
+    # Emit in bus order so the file reads like the hand-written ones.
+    assigned, notes = assign_spi_buses(caps, spi_groups)
+    cfg.notes.extend(notes)
+    resolved: Dict[str, Tuple[str, Dict[str, str]]] = {}
+    for owner, pins in spi_groups.items():
+        dev = assigned.get(owner)
+        if dev:
+            resolved[owner] = (dev, pins)
+        elif set(pins) == {"cs"}:
+            # CS-only: the device shares another bus but the sheet does not say
+            # which, so emit the CS pin and leave the instance to the reviewer.
+            resolved[owner] = ("", pins)
+            cfg.warnings.append(
+                f"{owner} has only a CS net on this sheet; set "
+                f"{INSTANCE_DEFINE.get(owner, owner.upper() + '_SPI_INSTANCE')} by hand")
+        else:
+            cfg.warnings.append(f"could not resolve the SPI bus for {owner}")
+
+    CS_DEFINE = {
+        "gyro": "GYRO_1_CS_PIN",
+        "osd": "MAX7456_SPI_CS_PIN",
+        "flash": "FLASH_CS_PIN",
+        "baro": "BARO_CS_PIN",
+        "sdcard": "SDCARD_CS_PIN",
+    }
+    # Cross-check any bus the sheet named itself against the firmware map.
+    for dev, pins in spi_named.items():
+        for role, pin in pins.items():
+            if not any(e["dev"] == dev and e["role"] == role
+                       for e in caps["spi"].get(pin, [])):
+                cfg.warnings.append(
+                    f"{dev}_{role.upper()} labelled on {pin}, but {pin} has no "
+                    f"{dev} {role} function")
+
+    all_buses = sorted({d for d, _ in resolved.values() if d} | set(spi_named))
+    for dev in all_buses:
+        owners = [o for o, (d, _) in resolved.items() if d == dev]
+        n = dev[-1]
+        pins = dict(spi_named.get(dev, {}))
+        for o in owners:
+            pins.update({k: v for k, v in resolved[o][1].items() if k != "cs"})
+        for role, key in (("sck", "SCK"), ("sdi", "SDI"), ("sdo", "SDO")):
+            if role in pins:
+                cfg.define(f"SPI{n}_{key}_PIN", pins[role])
+        for o in owners:
+            cs = resolved[o][1].get("cs")
+            if cs and o in CS_DEFINE:
+                cfg.define(CS_DEFINE[o], cs)
+            if o == "gyro":
+                if "gyro_exti" in simple:
+                    cfg.define("GYRO_1_EXTI_PIN", simple["gyro_exti"])
+                if "gyro_clkin" in simple:
+                    cfg.define("GYRO_1_CLKIN_PIN", simple["gyro_clkin"])
+        cfg.add()
+
+    # ---- discrete IO -----------------------------------------------------
+    IO_DEFINE = [
+        ("led0", "LED0_PIN"), ("led1", "LED1_PIN"),
+        ("beeper", "BEEPER_PIN"), ("led_strip", "LED_STRIP_PIN"),
+        ("camera_control", "CAMERA_CONTROL_PIN"),
+        ("usb_detect", "USB_DETECT_PIN"),
+    ]
+    wrote = False
+    for role, name in IO_DEFINE:
+        if role in simple:
+            cfg.define(name, simple[role])
+            wrote = True
+    if wrote:
+        cfg.add()
+
+    adc_pins = [simple[k] for k in ("adc_vbat", "adc_curr", "adc_rssi") if k in simple]
+    for role, name in (("adc_vbat", "ADC_VBAT_PIN"), ("adc_curr", "ADC_CURR_PIN"),
+                       ("adc_rssi", "ADC_RSSI_PIN")):
+        if role in simple:
+            cfg.define(name, simple[role])
+    if adc_pins:
+        cfg.add()
+
+    # PINIO order follows the sheet: a VTX switch is conventionally PINIO1.
+    pinios.sort(key=lambda t: (0 if "VTX" in t[0].upper() else 1, t[0]))
+    for i, (_net, pin) in enumerate(pinios, start=1):
+        cfg.define(f"PINIO{i}_PIN", pin)
+    if pinios:
+        cfg.add()
+
+    # ---- timer mapping ---------------------------------------------------
+    picks: List[TimerPick] = []
+    claimed: Set[str] = set()
+    for n, pin in sorted(motors.items()):
+        got = tplan.get(pin)
+        if not got:
+            cfg.warnings.append(f"MOTOR{n} on {pin} has no timer in the firmware table")
+            continue
+        occ, ch, src = got
+        picks.append(TimerPick(pin, f"MOTOR{n}_PIN", occ, ch, 0, src))
+    for n, pin in sorted(servos.items()):
+        got = pick_timer(caps, pin, hints.get(f"SERVO{n}"), prefer_advanced=True)
+        if got:
+            picks.append(TimerPick(pin, f"SERVO{n}_PIN", got[0], got[1], -1, got[2]))
+    for role, label, dmaopt in (("led_strip", "LED_STRIP_PIN", 0),
+                                ("camera_control", "CAMERA_CONTROL_PIN", -1),
+                                ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1)):
+        pin = simple.get(role)
+        if not pin:
+            continue
+        hint = hints.get(role.replace("_", "-").upper()) or hints.get(
+            {"led_strip": "LED-STRIP", "camera_control": "CAM-CONTROLL",
+             "gyro_clkin": "GYRO-CLOCK"}[role])
+        got = pick_timer(caps, pin, hint, prefer_advanced=False)
+        if got:
+            picks.append(TimerPick(pin, label, got[0], got[1], dmaopt, got[2]))
+        else:
+            cfg.warnings.append(f"{label} on {pin} has no timer; LED strip needs one"
+                                if role == "led_strip" else
+                                f"{label} on {pin} has no timer function")
+
+    # DMA option numbering means two different things depending on the part.
+    #
+    # On F4/F7 the mapping is fixed: dmaopt indexes that timer channel's own
+    # short list of possible streams, so several peripherals may all use opt 0
+    # and still land on different streams.
+    #
+    # On DMAMUX/GPDMA parts (G4, H5, H7, C5, N6) any request can be routed to
+    # any channel, so dmaopt is a direct index into one shared channel table.
+    # There, opt 0 on four motors puts all four on the same channel. Each user
+    # needs its own number - see how the G4 and H7 configs in the config repo
+    # number their motors 0, 1, 2, 3...
+    mux = caps["dma"]["style"] == "mux"
+    if mux:
+        pool = caps["dma"]["mux_options"] or 0
+        nxt = 0
+        for p in picks:
+            if p.dmaopt < 0:
+                continue
+            if pool and nxt >= pool:
+                cfg.warnings.append(
+                    f"{p.label}: only {pool} DMA channels exist on {target}; "
+                    "assigned no DMA")
+                p.dmaopt = -1
+                continue
+            p.dmaopt = nxt
+            nxt += 1
+        mux_next = nxt
+    else:
+        mux_next = 0
+        for p in picks:
+            if p.dmaopt >= 0:
+                spec = dma_streams(caps, p.channel, p.dmaopt)
+                if spec:
+                    claimed.add(_stream_of(spec))
+
+    if picks:
+        width = max(len(p.label) for p in picks) + 1
+        cfg.add("#define TIMER_PIN_MAPPING \\")
+        for i, p in enumerate(picks):
+            cont = " \\" if i < len(picks) - 1 else ""
+            cfg.add(f"    TIMER_PIN_MAP( {i}, {p.label + ',':<{width}}"
+                    f"{p.occurrence:>2}, {p.dmaopt:>2}){cont}")
+        cfg.add()
+        for p in picks:
+            if p.source == "inferred":
+                cfg.notes.append(f"{p.label} -> {p.channel} inferred (no annotation)")
+
+    # ---- DMA and instances ----------------------------------------------
+    adc_dev, adc_opt, notes = choose_adc(caps, adc_pins, claimed, mux_next)
+    cfg.notes.extend(notes)
+    if adc_dev and adc_opt is not None:
+        cfg.define(f"{adc_dev}_DMA_OPT", str(adc_opt), width=29)
+        cfg.add()
+
+    if "beeper" in simple:
+        # An NPN/transistor low-side driver sounds when the pin is driven high,
+        # which is what BEEPER_INVERTED selects. Bare open-drain buzzers are the
+        # exception and would need this removed.
+        cfg.define("BEEPER_INVERTED", width=29)
+        cfg.add()
+        cfg.notes.append("BEEPER_INVERTED assumes a transistor low-side driver")
+
+    if adc_dev and adc_dev != "ADC1":
+        cfg.define("ADC_INSTANCE", adc_dev, width=29)
+    if i2c_dev:
+        n = i2c_dev[-1]
+        if "baro" in parts and "baro" not in spi_groups:
+            cfg.define("BARO_I2C_INSTANCE", f"I2CDEV_{n}", width=29)
+        cfg.define("MAG_I2C_INSTANCE", f"I2CDEV_{n}", width=29)
+    cfg.add()
+
+    cfg.define("GYRO_1_ALIGN", gyro_align, width=29)
+    for owner, define in INSTANCE_DEFINE.items():
+        dev = resolved.get(owner, ("", {}))[0]
+        if dev:
+            cfg.define(define, dev, width=29)
+    cfg.add()
+
+    # ---- PINIO boxes -----------------------------------------------------
+    for i, (net, _pin) in enumerate(pinios, start=1):
+        # A switch feeding a regulator enable is held on by its own divider, so
+        # boot-high (inverted) keeps the rail up and makes the box an off switch.
+        inverted = "VTX" in net.upper()
+        cfg.define(f"PINIO{i}_BOX", str(39 + i), width=29)
+        cfg.define(f"PINIO{i}_CONFIG", "129" if inverted else "1", width=29)
+        cfg.define(f"BOX_USER{i}_NAME", f'"{_box_name(net)}"', width=29)
+        cfg.add()
+        if inverted:
+            cfg.notes.append(
+                f"PINIO{i} ({net}) set to 129 = boot high; confirm the rail's "
+                "default state with the vendor")
+
+    # ---- defaults --------------------------------------------------------
+    if "flash" in parts:
+        cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH", width=29)
+    cfg.define("DEFAULT_DSHOT_BITBANG", "DSHOT_BITBANG_ON", width=29)
+    if "adc_curr" in simple:
+        cfg.define("DEFAULT_CURRENT_METER_SOURCE", "CURRENT_METER_ADC", width=29)
+    if "adc_vbat" in simple:
+        cfg.define("DEFAULT_VOLTAGE_METER_SOURCE", "VOLTAGE_METER_ADC", width=29)
+
+    roles, role_notes = read_connector_roles(words)
+    if roles:
+        cfg.add()
+        for define in ("MSP_UART", "SERIALRX_UART", "GPS_UART", "ESC_SENSOR_UART"):
+            n = roles.get(define)
+            if n and any(k[0] == n for k in uart):
+                cfg.define(define, SERIAL_PORT_NAMES.get(n, f"SERIAL_PORT_UART{n}"),
+                           width=29)
+        cfg.notes.extend(role_notes)
+        cfg.notes.append("UART roles come from connector silkscreen, not from "
+                         "wiring; they are defaults a user can change")
+
+    # A bus with only half its pins is legal but almost always means a net was
+    # dropped, so say so next to the warning that explains why.
+    for n in sorted({k[0] for k in uart}, key=int):
+        have = {d for (i, d) in uart if i == n}
+        if len(have) == 1:
+            cfg.warnings.append(
+                f"UART{n} has only {next(iter(have)).upper()} defined")
+    if (i2c.get("scl") is None) != (i2c.get("sda") is None):
+        cfg.warnings.append(
+            f"I2C has only {'SCL' if i2c.get('scl') else 'SDA'} defined; "
+            "the bus will not work until the other pin is resolved")
+
+    if unknown:
+        cfg.notes.append("nets with no config.h role: "
+                         + ", ".join(f"{l.net}({l.pin})" for l in unknown))
+    if res.unmapped:
+        cfg.notes.append("unconnected pins: " + " ".join(res.unmapped))
+    cfg.warnings.append(f"GYRO_1_ALIGN is a placeholder ({gyro_align}); "
+                        "orientation cannot be read from a schematic")
+    if "adc_curr" in simple:
+        cfg.warnings.append("DEFAULT_CURRENT_METER_SCALE omitted; it depends on "
+                            "the ESC shunt, not the FC")
+
+    meta = {
+        "target": target,
+        "parts": {k: [vars(h) for h in v] for k, v in parts.items()},
+        "agreement": res.agreement,
+        "offset": res.offset,
+        "links": [vars(l) for l in res.links],
+        "unmapped": res.unmapped,
+        "timers": [vars(p) for p in picks],
+        "firmware": fw["firmware"],
+    }
+    return cfg, meta
+
+
+def _box_name(net: str) -> str:
+    n = net.upper().replace("-", " ").replace("_", " ").strip()
+    return "VTX PWR" if "VTX" in n else n
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("pdf", type=Path)
+    ap.add_argument("--board", required=True, help="BOARD_NAME")
+    ap.add_argument("--manufacturer", required=True, help="MANUFACTURER_ID (4 chars)")
+    ap.add_argument("--target", help="FC_TARGET_MCU (auto-detected if omitted)")
+    ap.add_argument("--gyro-align", default="CW0_DEG")
+    ap.add_argument("--reference",
+                    help="the sha256_... REFERENCE token issued by the Betaflight "
+                         "team for a reviewed target. Cannot be computed locally; "
+                         "without it no supported-target block is written.")
+    ap.add_argument("--version", dest="fw_version",
+                    help="VERSION directive (first firmware release the target "
+                         "is valid for), e.g. 4.6.0")
+    ap.add_argument("--trust-symbol", action="store_true",
+                    help="emit nets that the symbol's AF list supports but "
+                         "Betaflight's pin tables do not yet list. Use when you "
+                         "intend to add the missing pin option to the firmware.")
+    ap.add_argument("-o", "--outdir", type=Path,
+                    help="write <outdir>/configs/<MANUFACTURER>/<BOARD>/config.h, "
+                         "the layout the config repo uses - so <outdir> can be "
+                         "passed straight to make as CONFIG_DIR")
+    ap.add_argument("--print", dest="to_stdout", action="store_true")
+    args = ap.parse_args()
+
+    if not (DATA_DIR / "firmware.json").exists():
+        raise SystemExit("data/firmware.json missing - run seed_firmware.py first")
+
+    cfg, meta = build(args.pdf, args.board, args.manufacturer,
+                      args.target, args.gyro_align, args.trust_symbol,
+                      args.reference, args.fw_version)
+    text = "\n".join(cfg.lines).rstrip() + "\n"
+
+    if args.to_stdout or not args.outdir:
+        print(text)
+    if args.outdir:
+        # Mirror the config repo's manufacturer-grouped layout so the directory
+        # works as-is with `make CONFIG=<board> CONFIG_DIR=<outdir>`.
+        dest = args.outdir / "configs" / args.manufacturer / args.board / "config.h"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+        print(f"wrote {dest}", file=sys.stderr)
+
+    print(f"\ntarget {meta['target']}  agreement {meta['agreement']:.0%}  "
+          f"offset {meta['offset']:+.2f}pt", file=sys.stderr)
+    for cat, hits in sorted(meta["parts"].items()):
+        shown = ", ".join(f"{h['marking']}->{h['driver']}"
+                          + ("" if h["fitted"] else " [not fitted]") for h in hits)
+        print(f"  {cat:6} {shown}", file=sys.stderr)
+    for n in cfg.notes:
+        print(f"  note: {n}", file=sys.stderr)
+    for w in cfg.warnings:
+        print(f"  WARN: {w}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
