@@ -237,6 +237,20 @@ real defects in 70 pairs — a wrong AF number that made USART10 unusable on bot
 its pins, and an I2C4 pin with no I2C function at all, copy-pasted from the H7
 block. Every other MCU family is unaudited.
 
+#### Revision drift is real, and cheap to re-check
+
+The N6 datasheet moved from DS14791 Rev 6 to Rev 9 mid-flight, after a PR had
+already been raised against the older one. Re-running the audit took seconds and
+answered it precisely: same seven findings on unmodified master, still clean on
+the branch, and the entire delta between revisions was 11 `LCD_*` functions
+moving from AF15 to AF14 — nothing touching timers, UART, SPI or I2C.
+
+Two things that made that quick rather than anxious. `--dump-af` writes the
+extracted map to JSON, so two revisions can be diffed directly instead of
+re-read by eye. And a PR body should cite the revision it was verified against,
+because a reviewer downloading "the datasheet" gets whatever is current — the
+citation is what makes the claim checkable later.
+
 #### Make it repeatable, not one-shot
 
 It is tempting to treat this as a sweep that ends: audit every family once, fix
