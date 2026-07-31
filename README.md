@@ -68,6 +68,9 @@ generated from a local Betaflight checkout and records which one.
 
 ## Limitations
 
+- **Multi-page PDFs are not handled correctly yet** — pages share a coordinate
+  space and are flattened together. Treat those results as suspect regardless of
+  the agreement score (see [`ROADMAP.md`](ROADMAP.md) §1.1)
 - STM32 only so far; AT32, APM32 and PICO peripheral tables have a different
   shape and are not harvested yet
 - Gyro orientation and the current-meter scale cannot be derived from a schematic
@@ -77,3 +80,7 @@ generated from a local Betaflight checkout and records which one.
   (`DSHOT_DMAR_ON`) needs that added by hand
 - The generated file is a strong first draft, not a substitute for review: check
   the agreement score and every `WARN` before shipping a target
+
+[`ROADMAP.md`](ROADMAP.md) has the full gap analysis: known defects, which
+`config.h` defines are never emitted (with how many real boards use them), and
+what would need circuit-level analysis rather than net-label matching.
