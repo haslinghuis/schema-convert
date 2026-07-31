@@ -74,6 +74,7 @@ PERIPHERALS = ("uart", "i2c", "spi", "timer")
 # Categories, in report order. The first two are defects, the third is context.
 WRONG_AF = "wrong-af"
 NOT_IN_DATASHEET = "not-in-datasheet"
+ABSENT_PERIPHERAL = "absent-peripheral"
 MISSING_PIN = "missing-pin"
 FAILING = (WRONG_AF, NOT_IN_DATASHEET)
 
@@ -699,6 +700,41 @@ def audit(entries: Sequence[PinEntry], table: AfTable, ports: Set[str],
     result.off_package = {e.pin for e in live if e.pin not in table.pins}
     live = [e for e in live if e.pin in table.pins]
 
+    # A firmware table is shared by a whole family; a datasheet describes one
+    # part. When a peripheral instance appears nowhere in the AF table, this
+    # part simply does not have it - I2C4 on an F722, UART9 and USART10 on an
+    # H743, USART7 on a C562. Reporting one "pin not in datasheet" per pin then
+    # buries the real findings under noise that can never be fixed, because the
+    # entries are right for the family's other parts. Say it once, and do not
+    # fail the run for it.
+    # The unit is simply everything before the first underscore. A regex like
+    # [A-Z]+\d* cannot parse I2C4 or I2S2, where the digit sits mid-name, and
+    # silently concludes the part has no I2C at all.
+    known_units = {f.split("_")[0] for funcs in table.pins.values()
+                   for f in funcs if "_" in f}
+    absent, kept = set(), []
+    for e in live:
+        unit = e.signal.split("_")[0]
+        siblings = {unit}
+        # USARTn and UARTn name the same silicon; only conclude it is absent
+        # when neither spelling occurs.
+        if unit.startswith("USART"):
+            siblings.add("UART" + unit[len("USART"):])
+        elif unit.startswith("UART"):
+            siblings.add("USART" + unit[len("UART"):])
+        if siblings & known_units:
+            kept.append(e)
+        else:
+            absent.add(unit)
+    if absent:
+        for unit in sorted(absent):
+            n = sum(1 for e in live if e.signal.split("_")[0] == unit)
+            result.findings.append(Finding(
+                ABSENT_PERIPHERAL, "", unit, "", None, None, "",
+                f"{n} pin(s) skipped: this part has no {unit}; the entries "
+                "belong to other members of the family"))
+    live = kept
+
     for e in sorted(live, key=lambda e: (e.peripheral, e.signal, e.pin)):
         result.checked[e.peripheral] += 1
         hit = table.af(e.pin, datasheet_names(e.signal))
@@ -757,6 +793,7 @@ def audit(entries: Sequence[PinEntry], table: AfTable, ports: Set[str],
 
 HEADINGS = {
     WRONG_AF: "WRONG AF NUMBER      firmware has the pin, the AF value disagrees",
+    ABSENT_PERIPHERAL: "PERIPHERAL NOT ON THIS PART  shared family table, not a defect",
     NOT_IN_DATASHEET: "PIN NOT IN DATASHEET  firmware offers a function the "
                       "silicon does not have there",
     MISSING_PIN: "MISSING PIN          the datasheet has an option the firmware "
@@ -818,7 +855,7 @@ def report(result: Audit, table: AfTable, meta: Dict[str, str], out=sys.stdout) 
               "unproven.")
     p("")
 
-    for kind in (WRONG_AF, NOT_IN_DATASHEET, MISSING_PIN):
+    for kind in (WRONG_AF, NOT_IN_DATASHEET, ABSENT_PERIPHERAL, MISSING_PIN):
         rows = [f for f in result.findings if f.kind == kind]
         p(f"{HEADINGS[kind]}  -  {len(rows)}")
         if not rows:

@@ -395,10 +395,17 @@ seeder's firmware rev in the generated header.
    exercises any of them. A schematic with a second IMU is the single most
    valuable input: 25% of shipped configs have one, and the SPI solver's
    shared-bus path is where it is most likely to be wrong.
-4. **§3.1 audit the remaining families.** H5, G4 and N6 are clean against their
-   datasheets. F7, H7 and C5 still report findings that nobody has read against
-   a rendered table — treat them as unverified, not as defects. No F4 datasheet
-   is available at all, and F4 is the largest family by board count.
+4. ~~**§3.1 audit the remaining families**~~ — done for every datasheet on hand.
+   All seven now exit 0: H5, G4, N6, **F7, H7 and C5**. The F7/H7/C5 findings
+   turned out not to be defects at all — `I2C4` occurs zero times in the F722
+   datasheet, `UART9`/`USART10` zero times in H743, `USART7` zero times in C562,
+   against 16–53 occurrences of their control peripherals. Those parts simply do
+   not have them; the entries are right for the family's other members. The
+   audit now says that once per peripheral instead of once per pin.
+
+   Still outstanding: **no F4 datasheet**, and F4 is the largest family by board
+   count. `stm32f405rg.pdf` is the single highest-value file to drop in.
+   The H5 `TIM13_CH1N`/`TIM14_CH1N` pair also remains reasoned rather than read.
 5. **§4.5 `config.c`** — still unsupported.
 6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
 7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
