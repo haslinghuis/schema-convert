@@ -59,6 +59,43 @@ pdfplumber is deliberately not used: on these Altium plots it returns none of th
 MCU symbol's pin-name strings and merges adjacent labels into nonsense
 (`04-1K0/56%03LED-RED`). poppler returns every one cleanly, with coordinates.
 
+## Testing
+
+```bash
+python3 -m unittest discover tests
+```
+
+Standard library only, a few seconds, three layers:
+
+- **Unit and property tests** against a synthetic MCU and a synthetic sheet —
+  net classification, the SPI bus solver, timer occurrence indices, DMA
+  numbering, preprocessor guard evaluation, and the label→row offset being
+  recovered rather than assumed. These need nothing but the repo.
+- **Invariants over real conversions** — no net dropped in silence, every
+  emitted pin firmware-validated, every `TIMER_PIN_MAP` label defined, SPI
+  assignment conflict-free, DMA options distinct on DMAMUX parts.
+- **Golden digests** of the recovered pin map and of the generated `config.h`.
+
+Vendor schematics are confidential and not in the repository, so the tests that
+need one skip with a message saying where they looked (`SCHEMA_CONVERT_PDF_DIRS`
+overrides the search path; `SCHEMA_CONVERT_FIRMWARE` points at the Betaflight
+tree used to re-run the seeder). Nothing sensitive is committed either: a board
+is identified by the sha256 of its PDF and its output recorded as counts and
+one-way digests, and on a mismatch the actual output is written to the
+gitignored `tests/.actual/` for a local diff. The firmware capability data is
+pinned as a fixture too, so re-seeding from a moving Betaflight tree cannot move
+a golden.
+
+Re-record after an intended change, having read the printed diff:
+
+```bash
+python3 tests/update_golden.py
+```
+
+Behaviour that is wrong but currently tolerated is listed per board under
+`known_defects` and asserted exactly — a new one fails, and so does fixing a
+recorded one.
+
 ## Not in this repo
 
 Vendor schematics and the `config.h` files generated from them are excluded by

@@ -458,8 +458,11 @@ NET_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:.*[-_])?U(?:ART)?(\d)[-_]TX$"), "uart_tx"),
     (re.compile(r"^(?:.*[-_])?U(?:ART)?(\d)[-_]RX$"), "uart_rx"),
     (re.compile(r"^.*[-_]SCK$|^.*[-_]SCLK$"), "spi_sck"),
-    (re.compile(r"^.*[-_]MISO$|^.*[-_]SDI$|^.*[-_]SDO(?:UT)?$"), "spi_sdi_or_sdo"),
-    (re.compile(r"^.*[-_]MOSI$"), "spi_sdo"),
+    # MISO/MOSI name a direction from somebody's point of view, and vendors
+    # disagree about whose - one sheet puts SPI1_MOSI on the MCU's SDI pin and
+    # SPI1_MISO on its SDO pin. So a data line is only checked for being a data
+    # line; which one it is comes from the firmware map, in genconfig.
+    (re.compile(r"^.*[-_](?:MISO|MOSI|SDI|SDO(?:UT)?)$"), "spi_data"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d)$"), "timer"),
     (re.compile(r"^.*LED[-_]?STRIP.*$"), "timer"),
     (re.compile(r"^.*(?:CLOCK|CLKIN)$"), "timer"),
@@ -509,9 +512,7 @@ def afs_support(afs: Sequence[str], kind: str, idx: Optional[str]) -> Optional[b
         return has(rf"U?S?ART{idx or r'\d+'}{d}", rf"LPUART{idx or r'\d+'}{d}")
     if kind == "spi_sck":
         return has(r"SPI\d+SCK", r"I2S\d+CK")
-    if kind == "spi_sdo":
-        return has(r"SPI\d+MOSI", r"SPI\d+SDO")
-    if kind == "spi_sdi_or_sdo":
+    if kind == "spi_data":
         return has(r"SPI\d+MISO", r"SPI\d+MOSI", r"SPI\d+SD[IO]")
     return None
 
@@ -532,10 +533,7 @@ def pin_supports(caps: dict, pin: str, kind: str, idx: Optional[str]) -> bool:
                    for e in caps["uart"].get(pin, []))
     if kind == "spi_sck":
         return any(e["role"] == "sck" for e in caps["spi"].get(pin, []))
-    if kind == "spi_sdo":
-        return any(e["role"] == "sdo" for e in caps["spi"].get(pin, []))
-    if kind == "spi_sdi_or_sdo":
-        # A net called *-SDO is the peripheral's output, i.e. the MCU's input.
+    if kind == "spi_data":
         return any(e["role"] in ("sdi", "sdo") for e in caps["spi"].get(pin, []))
     return True
 

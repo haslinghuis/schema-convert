@@ -1,0 +1,7 @@
+# Test output written on a golden-file mismatch, so the diff can be inspected
+# locally. Derived from vendor schematics - never committed.
+.actual/
+
+# Optional local drop for vendor schematics, if you would rather not keep them
+# in the repo root. Same reason.
+pdfs/

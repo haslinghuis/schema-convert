@@ -1,0 +1,200 @@
+{
+ "//": [
+  "Golden values for the vendor schematics, recorded by tests/update_golden.py.",
+  "",
+  "The schematics themselves are confidential and are not in this repository.",
+  "Nothing here reveals one: a board is identified by the sha256 of its PDF,",
+  "which the suite uses to find it locally, and the output is recorded as counts",
+  "and as one-way digests. A digest cannot be inverted, so committing it",
+  "publishes no net name, no pin assignment and no part number - but it still",
+  "fails the moment the conversion changes. When it does, the actual output is",
+  "written to tests/.actual/<id>/ for a local diff.",
+  "",
+  "known_defects records behaviour that is wrong but currently accepted, so the",
+  "suite is green without pretending. Each entry is asserted exactly: a new",
+  "defect fails, and so does fixing a recorded one - which is the point, since",
+  "the fixture then has to be updated deliberately.",
+  "",
+  "  unaccounted_roles       nets that reached neither the config.h nor a",
+  "                          warning explaining their absence",
+  "  dangling_timer_labels   TIMER_PIN_MAPPING entries naming a define the file",
+  "                          never makes - the target would not compile",
+  "  unvalidated_pin_defines pin defines the firmware tables do not support for",
+  "                          that function",
+  "  incomplete_spi_buses    a bus missing one of SCK/SDI/SDO",
+  "  instances_without_pins  a device pointed at a bus whose pins were not",
+  "                          emitted"
+ ],
+ "recorded_with": {
+  "frozen_firmware_rev": "852a86b41",
+  "frozen_firmware_branch": "master",
+  "tool_rev": "5d0fdae38"
+ },
+ "boards": [
+  {
+   "id": "f7-af-symbol",
+   "sha256": "4334fc148fb04256c97165b5bf98b0e21972143cbdd7f075c9fd9d7231e26491",
+   "note": "F7, one page, symbol carries alternate-function lists, every net agrees; fixed-mapping DMA",
+   "target": "STM32F722",
+   "symbol_rows": 63,
+   "pitch": 3.65,
+   "net_labels": 43,
+   "offset": 0.3042,
+   "agreement": [
+    29,
+    29
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 8,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 63,
+   "timer_rows": 7,
+   "warnings": 2,
+   "notes": 9,
+   "netmap_digest": "d46b96eb33589a849c617f85cf530775f3016c42c2dce8f0252867884165ffa4",
+   "config_digest": "d5409d775665e63ca294922192aa0bd697544a14c030be1c325e4a0bc5327dd5",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "h5-rev-a",
+   "sha256": "fcbf4203064b46c9153ec07e8dee5533a34985ff42c92f57b806991efd73c6c2",
+   "note": "H5 first revision; two nets the firmware tables lack but the symbol backs, and one net on a supply pin",
+   "target": "STM32H562",
+   "symbol_rows": 64,
+   "pitch": 3.65,
+   "net_labels": 46,
+   "offset": 0.3042,
+   "agreement": [
+    28,
+    30
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 1,
+   "unmapped_pins": 5,
+   "firmware_gaps": 2,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 60,
+   "timer_rows": 7,
+   "warnings": 8,
+   "notes": 10,
+   "netmap_digest": "aea630336c55c758794c89504d1db3e3556dd71977020baea0f76da197135408",
+   "config_digest": "01dcf3b7b9ae96730e542bfbaa7f66a4853a60e65eae2c05ee1de835e8187eee",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "h5-rev-b",
+   "sha256": "7086884bec48ccfd3fd8ef00c65528a81c144041407f1277eda854b886bf8d1f",
+   "note": "H5 revised sheet, same board corrected; DMAMUX numbering must stay distinct",
+   "target": "STM32H562",
+   "symbol_rows": 64,
+   "pitch": 3.65,
+   "net_labels": 46,
+   "offset": 0.3042,
+   "agreement": [
+    30,
+    31
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 4,
+   "firmware_gaps": 1,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 62,
+   "timer_rows": 7,
+   "warnings": 4,
+   "notes": 10,
+   "netmap_digest": "74a50131d779dab2af35593e04f738ea26ab13900965485a16d6d35b7acb6bca",
+   "config_digest": "23746da4530dd4e2427612052ae84b058191c9ac252eabf4ff540436b0e39df1",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "f4-bga",
+   "sha256": "0647ea81d6ceaa0863b610cd3957cba66d26744f1e6416b3814cf4367508e1eb",
+   "note": "F4 BGA, symbol carries no AF lists, nets named after the bus rather than the device, and devices whose only net is a chip select",
+   "target": "STM32F405",
+   "symbol_rows": 31,
+   "pitch": 7.18,
+   "net_labels": 17,
+   "offset": 0.5983,
+   "agreement": [
+    8,
+    8
+   ],
+   "orphan_labels": 2,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 4,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 18,
+   "timer_rows": 1,
+   "warnings": 4,
+   "notes": 8,
+   "netmap_digest": "de042d608dffd4378901352cb7ca1ac79fb03b53bb3b5213c12556907636f502",
+   "config_digest": "3d518d399ff70d7576038ae0087fecb44a56686166bf06aa95048660bdff2e3a",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "g4-multipage",
+   "sha256": "96af1f70ca6662a36c647c00c1f706ea9b37cf46bc0d90611fea7a284eae5971",
+   "note": "G4, five sheets in one plot with the MCU on page 4 - the board that exercises per-page symbol detection; eight gutter labels on that page still pair with no row",
+   "target": "STM32G474",
+   "symbol_rows": 31,
+   "pitch": 7.18,
+   "net_labels": 39,
+   "offset": 0.5983,
+   "agreement": [
+    18,
+    18
+   ],
+   "orphan_labels": 8,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 0,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 49,
+   "timer_rows": 5,
+   "warnings": 4,
+   "notes": 4,
+   "netmap_digest": "695a1adb4dafb8de5f26f223082ab2d4f32bd455b36e432074251a8a141d9d29",
+   "config_digest": "5e0453abb354b92ef6acd77921267af5ea25be7b013ee63b2f1bb7740c67e5db",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  }
+ ]
+}

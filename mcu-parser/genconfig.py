@@ -117,23 +117,71 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
 # Bus inference
 # --------------------------------------------------------------------------- #
 
-def spi_candidates(caps: dict, pins: Dict[str, str]) -> Tuple[Set[str], List[str]]:
-    """Which SPI instances can drive this sck/sdi/sdo trio?"""
+DATA_ROLES = ("sck", "sdi", "sdo")
+
+
+def spi_roles_on(caps: dict, dev: str, pin: str) -> Set[str]:
+    """Which roles this pin can serve on this bus, per the firmware map."""
+    return {e["role"] for e in caps["spi"].get(pin, []) if e["dev"] == dev}
+
+
+def resolve_spi_roles(caps: dict, dev: str, pins: Dict[str, str]
+                      ) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Decide what each pin of a bus actually is, from the firmware map.
+
+    The role written on a net is not authoritative. MISO/MOSI are stated from
+    somebody's point of view and vendors disagree about whose: one sheet labels
+    the wire on the MCU's SDI pin `SPI1_MOSI` and the wire on its SDO pin
+    `SPI1_MISO`. Believing the label there yields a bus with two SDIs and no
+    SDO, which cannot compile - and quietly contradicts this tool's own rule
+    that firmware is the source of truth.
+
+    So the pin decides. Where a pin has exactly one role on the bus, that is the
+    answer whatever the label claims. The label only breaks a genuine tie, and a
+    disagreement is reported because it says something real about the sheet.
+    """
+    out: Dict[str, str] = {}
     notes: List[str] = []
-    sets: List[Set[str]] = []
-    for role, pin in pins.items():
-        if role not in ("sck", "sdi", "sdo"):
+    for label_role, pin in sorted(pins.items()):
+        if label_role not in DATA_ROLES:
             continue
-        devs = {e["dev"] for e in caps["spi"].get(pin, []) if e["role"] == role}
-        if not devs:
-            notes.append(f"{pin} has no SPI {role} function")
+        actual = spi_roles_on(caps, dev, pin)
+        if len(actual) == 1:
+            role = next(iter(actual))
+            if role != label_role:
+                notes.append(f"{pin} is labelled {label_role.upper()} but is "
+                             f"{dev} {role.upper()}; following the firmware map")
+        elif label_role in actual:
+            role = label_role            # ambiguous pin, label breaks the tie
+        else:
+            notes.append(f"{pin} has no {dev} data role")
             continue
-        sets.append(devs)
-    if not sets:
-        return set(), notes
-    common = set.intersection(*sets)
+        if role in out and out[role] != pin:
+            notes.append(f"{dev} {role.upper()} claimed by both {out[role]} and {pin}")
+            continue
+        out[role] = pin
+    return out, notes
+
+
+def spi_candidates(caps: dict, pins: Dict[str, str]) -> Tuple[Set[str], List[str]]:
+    """
+    Which SPI instances could drive this trio of pins?
+
+    A bus qualifies when its pins can take *distinct* roles on it - not when
+    each pin happens to support the role its label claims. Asking the weaker
+    question rejects a perfectly good bus whenever a sheet's MISO/MOSI naming
+    runs the other way round.
+    """
+    notes: List[str] = []
+    devs = {e["dev"] for p in pins.values() for e in caps["spi"].get(p, [])}
+    common = set()
+    for dev in sorted(devs):
+        resolved, _ = resolve_spi_roles(caps, dev, pins)
+        if len(resolved) == len([r for r in pins if r in DATA_ROLES]):
+            common.add(dev)
     if not common:
-        notes.append(f"no single SPI bus covers {pins}")
+        notes.append(f"no single SPI bus gives every pin of {pins} a distinct role")
     return common, notes
 
 
@@ -1078,33 +1126,64 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         "sdcard": "SDCARD_CS_PIN",
     }
     # Cross-check any bus the sheet named itself against the firmware map.
+    # Check the pin belongs to the bus its label names - not that it serves the
+    # exact role the label claims, which resolve_spi_roles settles from the
+    # firmware map and reports on separately.
     for dev, pins in spi_named.items():
         for role, pin in pins.items():
-            if not any(e["dev"] == dev and e["role"] == role
-                       for e in caps["spi"].get(pin, [])):
+            if not spi_roles_on(caps, dev, pin):
                 cfg.warnings.append(
-                    f"{dev}_{role.upper()} labelled on {pin}, but {pin} has no "
-                    f"{dev} {role} function")
+                    f"{pin} is labelled {dev}_{role.upper()} but has no {dev} "
+                    "function at all")
 
     all_buses = sorted({d for d, _ in resolved.values() if d} | set(spi_named))
+    emitted_buses: Set[str] = set()
     for dev in all_buses:
         owners = [o for o, (d, _) in resolved.items() if d == dev]
         n = dev[-1]
         pins = dict(spi_named.get(dev, {}))
         for o in owners:
             pins.update({k: v for k, v in resolved[o][1].items() if k != "cs"})
+        # Keyed by label so far; the firmware map has the last word on which
+        # line is which.
+        pins, role_notes = resolve_spi_roles(caps, dev, pins)
+        cfg.notes.extend(f"{dev}: {n}" for n in role_notes)
+
+        # A bus must be all three lines or none. Firmware has no default for
+        # SPIn_SDO_PIN, so declaring SCK and SDI without SDO is not a partial
+        # config - it is a build error (`DEFIO_TAG__SPI1_SDO_PIN undeclared`).
+        # This happens for real: a sheet that swaps its MISO/MOSI labels gets
+        # one of them rejected by the firmware check, and what is left is half
+        # a bus. Emitting nothing and saying so beats emitting something that
+        # cannot compile.
+        missing = [r for r in ("sck", "sdi", "sdo") if r not in pins]
+        if missing:
+            cfg.warnings.append(
+                f"{dev} is incomplete - no {', '.join(m.upper() for m in missing)} "
+                f"(have {', '.join(sorted(k.upper() for k in pins))}); the bus is "
+                "not emitted, since a partial one does not compile")
+            continue
         for role, key in (("sck", "SCK"), ("sdi", "SDI"), ("sdo", "SDO")):
-            if role in pins:
-                cfg.define(f"SPI{n}_{key}_PIN", pins[role])
-        for o in owners:
-            cs = resolved[o][1].get("cs")
-            if cs and o in CS_DEFINE:
-                cfg.define(CS_DEFINE[o], cs)
-            if o == "gyro":
-                if "gyro_exti" in simple:
-                    cfg.define("GYRO_1_EXTI_PIN", simple["gyro_exti"])
-                if "gyro_clkin" in simple:
-                    cfg.define("GYRO_1_CLKIN_PIN", simple["gyro_clkin"])
+            cfg.define(f"SPI{n}_{key}_PIN", pins[role])
+        emitted_buses.add(dev)
+        cfg.add()
+
+    # Chip selects and the gyro's EXTI/CLKIN are plain GPIO: they do not depend
+    # on the bus being resolvable, so they are emitted here rather than inside
+    # the loop above. Nesting them there meant an unresolved bus silently took
+    # GYRO_1_CS_PIN, FLASH_CS_PIN and GYRO_1_EXTI_PIN down with it.
+    wrote_cs = False
+    for owner, (_dev, pins) in sorted(resolved.items()):
+        cs = pins.get("cs")
+        if cs and owner in CS_DEFINE:
+            cfg.define(CS_DEFINE[owner], cs)
+            wrote_cs = True
+    for role, name in (("gyro_exti", "GYRO_1_EXTI_PIN"),
+                       ("gyro_clkin", "GYRO_1_CLKIN_PIN")):
+        if role in simple:
+            cfg.define(name, simple[role])
+            wrote_cs = True
+    if wrote_cs:
         cfg.add()
 
     # ---- discrete IO -----------------------------------------------------
@@ -1202,6 +1281,19 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 spec = dma_streams(caps, p.channel, p.dmaopt)
                 if spec:
                     claimed.add(_stream_of(spec))
+
+    # TIMER_PIN_MAP refers to pins by macro name, so a row naming a define that
+    # was never emitted is an undeclared identifier at build time, not a missing
+    # feature. Anything upstream may have dropped its define - an unresolvable
+    # bus, a firmware-rejected pin - so check rather than assume.
+    defined = {m.group(1) for m in re.finditer(r"^#define\s+([A-Z][A-Z0-9_]+)",
+                                               "\n".join(cfg.lines), re.M)}
+    for p in list(picks):
+        if p.label not in defined:
+            cfg.warnings.append(
+                f"{p.label} has a timer mapping but no pin define was emitted; "
+                "the row is dropped, as it would not compile")
+            picks.remove(p)
 
     if picks:
         width = max(len(p.label) for p in picks) + 1
