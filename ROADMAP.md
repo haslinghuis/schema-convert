@@ -232,23 +232,45 @@ So it wants to be a cheap re-runnable check with a non-zero exit code, suitable
 for CI on any commit touching `src/platform/*/`. The marginal cost over a
 one-shot tool is close to nil.
 
-#### Findings awaiting verification
+#### Verified findings — G4 and N6
 
-`afaudit.py` now exists and reports these on families beyond H5. **None has been
-independently confirmed against the rendered datasheet yet** — they are the
-tool's output, not established firmware bugs, and each needs checking by hand
-before it becomes a PR. Recorded so they are not lost.
+Checked by rendering the datasheet AF tables to images and reading them, not by
+re-running the parser. Two scripts sharing the same fragile column geometry
+cannot verify each other: a quick independent extraction written for this check
+*also* dropped cells (it missed `I2C1_SCL` on a pin whose cell wraps across two
+lines), which is exactly why the visual read was necessary.
 
-| Family | Reported | Kind |
+**STM32G4** — `stm32g474cb.pdf`, Table 13, all five confirmed:
+
+| Firmware | Datasheet | Verdict |
 |---|---|---|
-| H5 | `TIM13_CH1N PF8`, `TIM14_CH1N PF9` | TIM13/TIM14 have a single channel and no complementary output; the same two rows exist in the H7 block they appear copied from |
-| G4 | `I2C4_SDA PB7` firmware AF4, datasheet AF3 | wrong AF number |
-| G4 | `I2C1_SCL PB6`, `I2C2_SDA PF6`, `I2C3_SCL PA10`, `I2C4_SCL PB6` | pin not in datasheet |
-| N6 | `USART7_TX PG12` firmware AF10, datasheet AF8 | wrong AF number |
-| N6 | six `TIM15`/`TIM2`/`TIM3`/`TIM5` rows | look copied from H7, where the AF map differs |
+| `I2C4_SDA PB7` AF4 | PB7 AF3 = `I2C4_SDA`, **AF4 = `I2C1_SDA`** | wrong AF |
+| `I2C1_SCL PB6` AF4 | PB6 has no I2C function at all | wrong pin |
+| `I2C4_SCL PB6` AF3 | PB6 has no I2C function at all | wrong pin |
+| `I2C3_SCL PA10` AF2 | PA10 AF2 empty; `I2C3_SCL` is **PA8** AF2 | wrong pin |
+| `I2C2_SDA PF6` AF4 | PF6 AF4 = `I2C2_`**`SCL`**; `I2C2_SDA` is PF0 AF4 | wrong role |
 
-The H5 timer pair is the most clear-cut: TIM13 and TIM14 are single-channel
-general-purpose timers, so a complementary output cannot exist on them.
+The PB7 one is the most dangerous of the set. AF4 on that pin *is* a valid I2C
+function, just the wrong peripheral — selecting I2C4 SDA there silently routes
+I2C1 SDA instead. The others fail to work at all, which is louder.
+
+**STM32N6** — `stm32n657a0.pdf`, Tables 19 and 20, confirmed:
+
+| Firmware | Datasheet | Verdict |
+|---|---|---|
+| `USART7_TX PG12` AF10 | PG12 **AF8 = `UART7_TX`**; AF10 is empty | wrong AF |
+| `TIM15_CH1 PE5` AF4 | PE5 AF4 = `I2C1_SCL` | wrong pin |
+| `TIM15_CH2 PE6` AF4 | PE6 AF4 = `I2C1_SDA` | wrong pin |
+| `TIM15_CH1N PE4` AF4 | PE4 AF4 empty | wrong pin |
+
+`UART7_RX` sits on PG11 AF8, so the working pair is PG11/PG12 at AF8.
+
+**STM32H5** — `TIM13_CH1N PF8` / `TIM14_CH1N PF9` not yet read visually, but TIM13
+and TIM14 are single-channel timers with no complementary output at all, so a
+`CH1N` cannot exist on them. The same two rows appear in the H7 block they were
+copied from.
+
+Not yet raised upstream.
 
 Category-2 findings on H7, F7 and C5 are mostly peripherals a *sibling* part has
 (UART9/USART10 on H723, I2C4 on F76x, USART6/7 on C591); the report names the
