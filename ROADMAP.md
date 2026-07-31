@@ -408,9 +408,22 @@ seeder's firmware rev in the generated header.
    finding was real: `PA11` was declared `TIM1_CH1N` on both F4 and F7 where the
    silicon has `TIM1_CH4`. Raised as #15510.
 
-   Still outstanding, all timer-table findings nobody has read against a
-   rendered table: H5 and H7 `TIM13_CH1N`/`TIM14_CH1N` on `PF8`/`PF9`, and N6's
-   `TIM15`/`TIM2`/`TIM3`/`TIM5` rows. Treat as unverified, not as defects.
+   The timer findings have now been read against the rendered tables too.
+   H5 and H7 `TIM13_CH1N`/`TIM14_CH1N` on `PF8`/`PF9` were real — those timers
+   have one channel and no complementary output, and both datasheets put
+   `TIM13_CH1`/`TIM14_CH1` at AF9 there. Raised as #15511. H5 turned out to be
+   half-fixed already: its table used `CH1` with a `WAS TIM13_CH1N` note, but the
+   superseded AF macros were left behind.
+
+   **N6 is the one still open, and it is a rewrite rather than a rename.** Its
+   timer table references entries the silicon lacks: `TIM2_CH4`, `TIM5_CH4` and
+   `TIM15_CH2` on `PA3`, `TIM3_CH3` and `TIM15_CH1N` on `PB0`, and
+   `TIM15_CH1N`/`CH1`/`CH2` on `PE4`/`PE5`/`PE6`. DS14791 Rev 6 gives `PA3` only
+   `TIM16_CH1` at AF1, puts `TIM15_CH1` on `PA2` and `TIM15_CH1N` on `PA1`, and
+   gives `PE5`/`PE6` `I2C1_SCL`/`I2C1_SDA` at AF4 — the shape of a block copied
+   from H7. Deciding the intended mapping is a judgement call for someone who
+   knows what the N6 port was aiming at, so it is deliberately not folded into a
+   mechanical rename.
 5. **§4.5 `config.c`** — still unsupported.
 6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
 7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
