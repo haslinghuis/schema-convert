@@ -118,6 +118,32 @@ warning; an unassociable crystal emits nothing and warns rather than guessing.
 Verified against hand-written references: G4 → 8 (matches `SDMODELG473`), F4 → 8
 (matches `JHEF405PRO`), H5 → 25 (matches `NUCLEOH563ZI`), F7 → unchanged.
 
+### 1.3 Fixed-mapping timer DMA options are never de-duplicated
+
+On DMAMUX parts every timer gets a distinct `dmaopt` (§ below). On **fixed-mapping**
+parts (F4, F7) nothing checks the timers against each other. One F7 board has
+MOTOR1/2/3 on `TIM8_CH1/CH2/CH3` all at `dmaopt 0`, which resolves to
+`DMA2_S2_C0` for all three — three motors on one stream.
+
+Latent, because `DSHOT_BITBANG_ON` is always emitted and bitbang does not use the
+timer's own DMA; the hand-written configs in the config repo do the same thing.
+It becomes real the moment a board wants `DSHOT_DMAR_OFF` without bitbang. The
+ADC allocation already dodges streams the timers claimed — the timers just do not
+dodge each other.
+
+Found by the regression suite, which asserts the *designed* property here rather
+than the current behaviour, so this is not encoded as a passing test.
+
+### 1.4 `seed_firmware._eval` mishandles arithmetic guards
+
+The comment says arithmetic guards such as `TARGET_FLASH_SIZE > 512` are treated
+as "no obstacle", and the fallback that would do so only fires when `eval`
+*raises*. It does not raise: the identifier resolves to `False`, so
+`False > 512` evaluates to `False` and silently gates the line off.
+
+Latent — no table currently parsed uses such a guard. The regression suite pins
+the real behaviour rather than the documented one, so a fix has to update both.
+
 ---
 
 ## 2. Coverage — defines never emitted
@@ -205,6 +231,28 @@ what it finds, done. That is not reachable as a steady state.
 So it wants to be a cheap re-runnable check with a non-zero exit code, suitable
 for CI on any commit touching `src/platform/*/`. The marginal cost over a
 one-shot tool is close to nil.
+
+#### Findings awaiting verification
+
+`afaudit.py` now exists and reports these on families beyond H5. **None has been
+independently confirmed against the rendered datasheet yet** — they are the
+tool's output, not established firmware bugs, and each needs checking by hand
+before it becomes a PR. Recorded so they are not lost.
+
+| Family | Reported | Kind |
+|---|---|---|
+| H5 | `TIM13_CH1N PF8`, `TIM14_CH1N PF9` | TIM13/TIM14 have a single channel and no complementary output; the same two rows exist in the H7 block they appear copied from |
+| G4 | `I2C4_SDA PB7` firmware AF4, datasheet AF3 | wrong AF number |
+| G4 | `I2C1_SCL PB6`, `I2C2_SDA PF6`, `I2C3_SCL PA10`, `I2C4_SCL PB6` | pin not in datasheet |
+| N6 | `USART7_TX PG12` firmware AF10, datasheet AF8 | wrong AF number |
+| N6 | six `TIM15`/`TIM2`/`TIM3`/`TIM5` rows | look copied from H7, where the AF map differs |
+
+The H5 timer pair is the most clear-cut: TIM13 and TIM14 are single-channel
+general-purpose timers, so a complementary output cannot exist on them.
+
+Category-2 findings on H7, F7 and C5 are mostly peripherals a *sibling* part has
+(UART9/USART10 on H723, I2C4 on F76x, USART6/7 on C591); the report names the
+excluded siblings so these are not misread as defects.
 
 #### Datasheet coverage is partial
 
@@ -300,10 +348,11 @@ seeder's firmware rev in the generated header.
 
 1. ~~§1.1 multi-page~~ — done
 2. ~~§1.2 `SYSTEM_HSE_MHZ`~~ — done
-3. **§4.1 tests** — everything after this is safer with them
+3. ~~§4.1 tests~~ — done (124 tests, stdlib, ~4s)
 4. **§4.2 / §4.3 / §4.5** — small, high signal-to-noise
 5. **§2 coverage** — mechanical, mostly new `ROLE_RULES` entries
-6. **§3.1 datasheet verification** — highest value, moderate effort, and pays off
+6. **§3.1 datasheet verification** — tool landed; next is verifying its findings
+   on G4/N6/H5 by hand and raising the confirmed ones. Highest value, and pays off
    across Betaflight itself rather than just here. Build it as a CI-able check
    from the start; sourcing an F4 datasheet is the blocking gap for the family
    that matters most by board count
