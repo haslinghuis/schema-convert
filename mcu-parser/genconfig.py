@@ -1310,10 +1310,14 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # was read - and no mention of a rival MCU symbol on another one, which is
     # the case where reading the wrong sheet is possible at all.
     sheet = netmap.describe_pages(sym)
-    if sym.split:
+    if sym.split_across_pages:
         cfg.notes.append(
             f"the MCU symbol is drawn across pages {'+'.join(str(p) for p in sym.pages)}"
             " and the halves were merged; check that they are one part")
+    elif sym.split:
+        cfg.notes.append(
+            f"the MCU symbol is drawn as {len(sym.parts)} boxes on page {sym.page} "
+            "and they were merged; check that they are one part")
     if sym.ignored_pages:
         cfg.warnings.append(
             f"page(s) {', '.join(str(p) for p in sym.ignored_pages)} also carry an "

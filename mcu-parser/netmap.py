@@ -165,11 +165,18 @@ class Symbol:
 
     @property
     def pages(self) -> List[int]:
-        return [p.page for p in self.parts]
+        """The distinct sheets the symbol occupies, in order."""
+        return sorted({p.page for p in self.parts})
 
     @property
     def split(self) -> bool:
+        """Drawn as more than one box, wherever those boxes are."""
         return len(self.parts) > 1
+
+    @property
+    def split_across_pages(self) -> bool:
+        """Drawn on more than one sheet, as opposed to several boxes on one."""
+        return len(self.pages) > 1
 
     @property
     def left_edge(self) -> float:
@@ -498,24 +505,46 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
 
     out: List[Word] = []
     for side, cands in sides.items():
-        best: List[Word] = []
-        best_key = (-1, 0.0)
+        cols = []
         # Labels may be aligned on either edge of their own text, so try both.
         for anchor in ("x0", "x1"):
             groups = cluster([(getattr(w, anchor), w) for w in cands], tol=1.0)
             for col in (c for c in groups if len(c) >= 3):
-                # Pick the column that actually reads like net names, not merely
-                # the nearest one. A BGA sheet puts its ball coordinates (F8, H9,
-                # A3) in exactly the place a net label would sit, and proximity
+                # Score by whether the column reads like net names, not merely
+                # by how near it is. A BGA sheet puts its ball coordinates (F8,
+                # H9, A3) exactly where a net label would sit, and proximity
                 # alone happily picks those.
                 hits = sum(1 for w in col if NET_VOCAB.search(w.text))
                 edge = (max(w.x1 for w in col) if side == "L"
                         else -min(w.x0 for w in col))
-                if (hits, edge) > best_key:
-                    best_key, best = (hits, edge), col
-        if best_key[0] == 0:
-            best = []      # nothing in the gutter resembles a net name
-        out.extend(best)
+                cols.append((hits, edge, col))
+        if not cols:
+            continue
+        cols.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        best_hits, best_edge, _ = cols[0]
+        if best_hits == 0:
+            continue           # nothing in the gutter resembles a net name
+
+        # Not every sheet lines its labels up. Where each is drawn against its
+        # own wire the gutter is several near-parallel columns a few points
+        # apart, and keeping only the strongest drops the rest - one board lost
+        # its whole I2C2 bus that way while reporting nothing amiss.
+        #
+        # So take the neighbouring columns too, but only the words in them that
+        # read like net names on their own. The strongest column is trusted
+        # wholesale because it has already proved itself as a column; the rest
+        # have not, and a BGA sheet fills that same space with ball coordinates
+        # (E10, B10) which would otherwise bind to whatever row they sit level
+        # with.
+        band = pitch * 3
+        keep: Dict[int, Word] = {}
+        for i, (hits, edge, col) in enumerate(cols):
+            if not hits or best_edge - edge > band:
+                continue
+            for w in col:
+                if i == 0 or NET_VOCAB.search(w.text):
+                    keep[id(w)] = w
+        out.extend(keep.values())
     return out
 
 
@@ -736,11 +765,15 @@ def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
     candidates = [i * step for i in range(-18, 19)]
 
     best: Optional[Result] = None
+    best_key: Optional[Tuple] = None
     for off in candidates:
         pairs, orphans = _pair(sym, labels, off)
         sat = chk = 0
+        onpower = 0
         links: List[Link] = []
         for w, row in pairs:
+            if not row.gpio:
+                onpower += 1
             req = net_requirement(w.text)
             ok, checked, sym_ok = True, False, None
             if req and row.gpio:
@@ -752,9 +785,22 @@ def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
                 sat += int(ok)
             links.append(Link(w.text, row.pin, row.side, checked, ok, row.afs,
                               row.gpio, sym_ok))
-        # Prefer agreement, then coverage; a tie goes to the smaller shift.
-        key = (sat, len(pairs), -abs(off))
-        if best is None or key > (best.score[0], len(best.links), -abs(best.offset)):
+        # Prefer agreement, then the absence of evidence against, then coverage;
+        # a tie goes to the smaller shift.
+        #
+        # A pin the firmware says cannot do the job counts *against* the offset.
+        # Only agreements used to count, so two fits with equal agreement were
+        # separated on raw coverage - and the one that paired more labels won
+        # even when the extra pairs were contradictions. One board picked a fit
+        # three quarters of a row out that way, sliding SWDIO onto its
+        # neighbour's pin and several nets onto supply rows.
+        #
+        # Landing on a supply row is the same kind of evidence: no schematic
+        # wires FLASH_CS to VBAT or OTG_FS_DP to VSS. It ranks below a firmware
+        # contradiction because a sheet can legitimately run a net past one.
+        key = (sat, -(chk - sat), -onpower, len(pairs), -abs(off))
+        if best_key is None or key > best_key:
+            best_key = key
             mapped = {l.pin for l in links}
             unmapped = [r.pin for r in sym.rows
                         if r.gpio and r.pin not in mapped]
@@ -812,7 +858,7 @@ def describe_pages(sym: Symbol) -> str:
     if sym.page_count < 2:
         return ""
     where = "+".join(str(p) for p in sym.pages)
-    if sym.split:
+    if sym.split_across_pages:
         return f" on pages {where} of {sym.page_count} (merged)"
     return f" on page {where} of {sym.page_count}"
 
