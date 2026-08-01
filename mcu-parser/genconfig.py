@@ -133,9 +133,11 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^USB[-_]?DETECT$|^VBUS[-_]?DETECT$"), "usb_detect"),
     (re.compile(r"^VTX[-_]?SW$|^VTX[-_]?(?:PWR|POWER|EN)$"), "pinio"),
     (re.compile(r"^USER(\d)$|^PINIO(\d)$"), "pinio"),
-    # A trailing _SW or _EN is a switched rail: CAM_SW, BEC_EN, VTX_EN. These are
-    # PINIO outputs, which is different from CAM-Controll (a PWM camera-OSD line).
-    (re.compile(r"^[A-Z0-9]+[-_](?:SW|EN)$", re.I), "pinio"),
+    # A trailing switch/enable is a switched rail: CAM_SW, BEC-SWITCH, VTX_EN.
+    # These are PINIO outputs, which is different from CAM-Controll (a PWM
+    # camera-OSD line). Spelled out in full as well as abbreviated - one board
+    # writes BEC-SWITCH, and losing it meant emitting only one of its two PINIOs.
+    (re.compile(r"^[A-Z0-9]+[-_](?:SW|SWITCH|EN|ENABLE)$", re.I), "pinio"),
     (re.compile(r"^(?:FC[-_])?SW(?:DIO|CLK)$|^BOOT$|^OTG[+-]$|^DD?[+-]$|^NRST$"), "ignore"),
 ]
 
@@ -1043,6 +1045,9 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
                  f"({near:.0f}pt to the nearest, {rival}), so the device shares "
                  "that bus")
 
+
+# drivers/pinio.h: #define PINIO_COUNT 4
+PINIO_COUNT = 4
 
 TRANSISTOR_RE = re.compile(r"^Q\d{1,3}$")
 
@@ -2017,8 +2022,15 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     if adc_pins:
         cfg.add()
 
-    # PINIO order follows the sheet: a VTX switch is conventionally PINIO1.
+    # The numbering carries no meaning - a PINIO is just a pin the user can
+    # toggle, and vendors assign the indices however they like - so this only
+    # needs to be deterministic, not clever. drivers/pinio.h caps it at 4.
     pinios.sort(key=lambda t: (0 if "VTX" in t[0].upper() else 1, t[0]))
+    if len(pinios) > PINIO_COUNT:
+        cfg.warnings.append(
+            f"{len(pinios)} PINIO nets but the firmware carries {PINIO_COUNT}: "
+            f"{', '.join(n for n, _ in pinios[PINIO_COUNT:])} left out")
+        pinios = pinios[:PINIO_COUNT]
     for i, (_net, pin) in enumerate(pinios, start=1):
         cfg.define(f"PINIO{i}_PIN", pin)
     if pinios:
@@ -2190,18 +2202,28 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     cfg.add()
 
     # ---- PINIO boxes -----------------------------------------------------
+    # The config byte is two things at once: bit 0 puts the pin in push-pull
+    # output mode and bit 7 inverts it. drivers/pinio.c switches only on the
+    # mode bit, so leaving PINIOn_CONFIG out entirely never configures the pin
+    # as an output at all and the box does nothing - a value has to be emitted.
+    #
+    # Which one is a board property that no schematic states. Shipped configs
+    # use both, and at least one board inverts in hardware as well, so the net
+    # name is not evidence either. 129 is emitted because of how the two fail:
+    # pinioInit drives an inverted pin high at boot and a plain one low, so on a
+    # switched rail 129 comes up powered and 1 comes up dead - which looks like
+    # broken hardware rather than an inverted switch. It is a safe default, not
+    # a reading of the sheet, and it is flagged as such on every PINIO.
     for i, (net, _pin) in enumerate(pinios, start=1):
-        # A switch feeding a regulator enable is held on by its own divider, so
-        # boot-high (inverted) keeps the rail up and makes the box an off switch.
-        inverted = "VTX" in net.upper()
         cfg.define(f"PINIO{i}_BOX", str(39 + i), width=29)
-        cfg.define(f"PINIO{i}_CONFIG", "129" if inverted else "1", width=29)
+        cfg.define(f"PINIO{i}_CONFIG", "129", width=29)
         cfg.define(f"BOX_USER{i}_NAME", f'"{_box_name(net)}"', width=29)
         cfg.add()
-        if inverted:
-            cfg.notes.append(
-                f"PINIO{i} ({net}) set to 129 = boot high; confirm the rail's "
-                "default state with the vendor")
+        cfg.warnings.append(
+            f"PINIO{i} ({net}) is set to 129 (boot high, box switches off). The "
+            "polarity is a board property, not something a schematic shows - "
+            "shipped configs use both 129 and 1, and some boards invert in "
+            "hardware. Confirm it with the vendor; 1 boots the rail off")
 
     # ---- defaults --------------------------------------------------------
     # Which log device to default to. Both can be fitted; the corpus splits

@@ -233,6 +233,18 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(net=net):
                 self.assertEqual(genconfig.classify(net)[0], want)
 
+    def test_a_switched_rail_is_a_pinio_however_it_is_spelled(self):
+        # One board writes BEC-SWITCH, which the abbreviated rule missed - so
+        # only one of its two PINIOs was emitted, and it was the other one.
+        for net in ("CAM_SW", "BEC-SWITCH", "VTX_EN", "BEC_ENABLE", "VTX-PWR",
+                    "USER1", "PINIO2"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], "pinio")
+
+    def test_a_camera_control_line_is_not_a_pinio(self):
+        # CAM-Controll is a PWM line to the camera's OSD, not a switched rail.
+        self.assertEqual(genconfig.classify("CAM-CONTROL")[0], "camera_control")
+
     def test_a_beeper_keeps_its_role_with_a_PIN_suffix(self):
         for net in ("BEEPER", "BUZZER", "BEEPER_PIN", "BUZZER-"):
             with self.subTest(net=net):
