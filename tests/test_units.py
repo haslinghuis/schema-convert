@@ -382,6 +382,112 @@ class SpiSolverTests(unittest.TestCase):
         self.assertTrue(any("PC13" in n or "distinct role" in n for n in notes), notes)
 
 
+class ResistorValueTests(unittest.TestCase):
+    """genconfig.resistor_ohms: the spellings a resistor value arrives in."""
+
+    def test_values(self):
+        for text, ohms in (("100K", 100e3), ("10k", 10e3), ("1M", 1e6),
+                           ("100R", 100.0), ("13.7K", 13.7e3), ("100kΩ", 100e3),
+                           ("4K7", 4700.0), ("0R", 0.0)):
+            with self.subTest(text=text):
+                self.assertEqual(genconfig.resistor_ohms(text), ohms)
+
+    def test_the_suffix_can_carry_the_decimal_point(self):
+        # 4K7 is 4.7k, not 4k. Reading it as 4k turns a 22:1 divider into 26:1.
+        self.assertEqual(genconfig.resistor_ohms("4K7"),
+                         genconfig.resistor_ohms("4.7K"))
+
+    def test_non_values(self):
+        for text in ("R25", "0402", "GND", "ADC_BATT", "C29", "10"):
+            with self.subTest(text=text):
+                self.assertIsNone(genconfig.resistor_ohms(text))
+
+
+class VbatDividerTests(unittest.TestCase):
+    """
+    genconfig.read_vbat_divider: DEFAULT_VOLTAGE_METER_SCALE off the sheet.
+
+    voltage.c makes the scale exactly 10 * (Rtop + Rbottom) / Rbottom, so the
+    divider on the schematic *is* the define. The firmware default of 110 is
+    right only for an 11:1 divider; on any other board leaving it produces a
+    silently wrong battery voltage.
+    """
+
+    PITCH = 5.0
+
+    def sheet(self, top="100K", bottom="10K", *, leg=200.0, supply="VBAT",
+              gnd=True, extra=()):
+        """A divider drawn as one vertical leg through the ADC node."""
+        y = 400.0
+        words = [Word("ADC_BATT", leg - 40, y, leg - 10, y + 2)]
+        if supply:
+            words.append(Word(supply, leg, y - 44, leg + 16, y - 42))
+        words += [Word("R18", leg, y - 22, leg + 10, y - 20),
+                  Word(top, leg, y - 16, leg + 16, y - 14),
+                  Word("R25", leg, y + 16, leg + 10, y + 18),
+                  Word(bottom, leg, y + 22, leg + 16, y + 24)]
+        if gnd:
+            words.append(Word("GND", leg, y + 40, leg + 12, y + 42))
+        return words + list(extra)
+
+    def read(self, words):
+        return genconfig.read_vbat_divider(words, [], "ADC_BATT", self.PITCH)
+
+    def test_the_default_divider_gives_the_firmware_default(self):
+        self.assertEqual(self.read(self.sheet("100K", "10K"))[0], 110)
+
+    def test_a_divider_that_is_not_the_default_is_what_matters(self):
+        # These are the boards the firmware default is wrong for.
+        self.assertEqual(self.read(self.sheet("20K", "1K"))[0], 210)
+        self.assertEqual(self.read(self.sheet("150K", "10K"))[0], 160)
+
+    def test_either_anchor_alone_is_enough(self):
+        # One board labels its supply and draws ground as a bare symbol.
+        self.assertEqual(self.read(self.sheet(gnd=False))[0], 110)
+        self.assertEqual(self.read(self.sheet(supply=None))[0], 110)
+
+    def test_with_no_anchor_at_all_it_declines(self):
+        scale, why = self.read(self.sheet(supply=None, gnd=False))
+        self.assertIsNone(scale)
+        self.assertIn("no resistor pair", why)
+
+    def test_a_resistor_from_a_neighbouring_circuit_is_not_joined_in(self):
+        # A third resistor within reach but on its own leg. Taking "one above,
+        # one below" without requiring a shared leg found two above and either
+        # gave up or picked the wrong pair.
+        stray = [Word("R53", 130.0, 380.0, 140.0, 382.0),
+                 Word("47K", 130.0, 386.0, 146.0, 388.0)]
+        self.assertEqual(self.read(self.sheet(extra=stray))[0], 110)
+
+    def test_an_upside_down_reading_is_not_emitted(self):
+        # 10K over 100K is 1.1:1 - scale 11, below anything a battery sense
+        # uses, so it is refused rather than emitted.
+        scale, why = self.read(self.sheet("10K", "100K"))
+        self.assertIsNone(scale)
+        self.assertIn("not a usable scale", why)
+
+    def test_a_scale_beyond_the_firmware_field_is_refused(self):
+        # vbatscale is a uint8_t in voltage.h.
+        scale, _ = self.read(self.sheet("1M", "1K"))
+        self.assertIsNone(scale)
+
+    def test_designators_without_values_decline_with_a_reason(self):
+        words = [Word("ADC_BATT", 160.0, 400.0, 190.0, 402.0),
+                 Word("VBAT", 200.0, 356.0, 216.0, 358.0),
+                 Word("R18", 200.0, 378.0, 210.0, 380.0),
+                 Word("R25", 200.0, 416.0, 210.0, 418.0),
+                 Word("GND", 200.0, 440.0, 212.0, 442.0)]
+        scale, why = self.read(words)
+        self.assertIsNone(scale)
+        self.assertIn("designators without the values", why)
+
+    def test_a_net_drawn_only_at_the_mcu_says_so(self):
+        words = self.sheet()
+        scale, why = genconfig.read_vbat_divider(words, words, "ADC_BATT", self.PITCH)
+        self.assertIsNone(scale)
+        self.assertIn("not drawn anywhere but the MCU", why)
+
+
 class TraceCsBusTests(unittest.TestCase):
     """
     genconfig.trace_cs_bus: which bus a chip-select-only device joins.

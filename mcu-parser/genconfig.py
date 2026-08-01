@@ -115,9 +115,15 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SCL[-_]?(\d)?$"), "i2c_scl"),
     (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SDA[-_]?(\d)?$"), "i2c_sda"),
     # Both orderings appear in the wild: ADC-BATT and VBAT_ADC.
-    (re.compile(r"^(?:ADC[-_])?(?:BATT|VBAT|BAT)(?:[-_]ADC)?$"), "adc_vbat"),
-    (re.compile(r"^(?:ADC[-_])?(?:CURR|CURRENT|ISENSE)(?:[-_]ADC)?$"), "adc_curr"),
-    (re.compile(r"^(?:ADC[-_])?RSSI(?:[-_]ADC)?$"), "adc_rssi"),
+    # The sense nets arrive with the index and the qualifier in every position:
+    # ADC_BATT, VBAT-ADC1, VBATT-ADC, BATT_VOLTAGE, BAT1_V. VBUS is deliberately
+    # not in here - that is USB detect, not the battery.
+    (re.compile(r"^(?:ADC[-_])?V?BATT?\d?(?:[-_](?:ADC|VOLTAGE|VOLT|V))?[-_]?\d?$"),
+     "adc_vbat"),
+    (re.compile(r"^(?:ADC[-_])?(?:CURR|CURRENT|ISENSE|I?SENSE)\d?(?:[-_]ADC)?\d?$"),
+     "adc_curr"),
+    (re.compile(r"^(?:ADC[-_])?BATT?\d?[-_](?:CURRENT|CURR|I)$"), "adc_curr"),
+    (re.compile(r"^(?:ADC[-_])?RSSI\d?(?:[-_]ADC)?\d?$"), "adc_rssi"),
     (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^LED[-_]?0$"), "led0"),
     (re.compile(r"^LED[-_]?1$"), "led1"),
     (re.compile(r"^LED[-_]?2$"), "led2"),
@@ -840,6 +846,116 @@ SERIAL_PORT_NAMES = {  # configs spell 1/2/3/6 as USART, the rest as UART
 
 
 SPI_LINE_RE = re.compile(r"SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)", re.I)
+
+# 100K, 10k, 1M, 4K7, 13.7K, 100R, 100kΩ. The suffix carries the decimal point
+# in the 4K7 spelling, which is why this is not just a number and a multiplier.
+RESISTOR_RE = re.compile(r"^(\d+(?:\.\d+)?)([KMR])(\d*)(?:Ω|OHM)?$", re.I)
+DESIGNATOR_RE = re.compile(r"^R\d{1,3}$")
+# What the top of a battery divider is tied to. GND is matched separately.
+SUPPLY_RE = re.compile(r"^(?:VBAT\w*|VIN|BAT\+?|BATT|V\+|VCC|VDD|\+?\d{1,2}V\d?)$",
+                       re.I)
+# vbatscale is a uint8_t in voltage.h, so anything above this is not a scale and
+# means the two resistors were misread.
+MAX_VBAT_SCALE = 255
+
+
+def resistor_ohms(text: str) -> Optional[float]:
+    m = RESISTOR_RE.match(text)
+    if not m:
+        return None
+    whole, mult, frac = m.group(1), m.group(2).upper(), m.group(3)
+    value = float(f"{whole}.{frac}") if frac else float(whole)
+    return value * {"R": 1.0, "K": 1e3, "M": 1e6}[mult]
+
+
+def read_vbat_divider(words: Sequence[Word], mcu_labels: Sequence[Word],
+                      net: str, pitch: float
+                      ) -> Tuple[Optional[int], Optional[str]]:
+    """
+    DEFAULT_VOLTAGE_METER_SCALE, read off the divider the ADC net sits in.
+
+    The scale is not a free parameter: voltage.c computes
+
+        volts = adc * vbatscale * Vref / 10 / (0xFFF * vbatresdivval)
+
+    which with the shipped vbatresdivval of 10 makes full scale 0.33 * vbatscale
+    volts. A divider of ratio r puts the battery's full scale at 3.3 * r, so
+
+        vbatscale = 10 * (R_top + R_bottom) / R_bottom
+
+    exactly. 100K/10K gives 110, which is the firmware default and why so many
+    boards need no define at all - and why a board with any other divider gets a
+    silently wrong battery voltage if the default is left in place.
+
+    The divider is read structurally rather than by taking the two nearest
+    values: the ADC net is drawn at the midpoint, one resistor above it toward
+    the battery and one below it toward ground. Picking the two nearest values
+    instead reads whatever else is on that part of the sheet - on one board that
+    was a filter resistor, and the answer would have been 223 rather than 110.
+    """
+    seen = {id(w) for w in mcu_labels}
+    occ = [w for w in words
+           if id(w) not in seen and w.text.upper() == net.upper()]
+    if not occ:
+        return None, (f"DEFAULT_VOLTAGE_METER_SCALE omitted: {net} is not drawn "
+                      "anywhere but the MCU, so its divider is not on this sheet")
+
+    reach = max(pitch * 8, 45.0)
+    for h in sorted(occ, key=lambda w: (w.page, w.y0)):
+        local = [w for w in words if w.page == h.page
+                 and abs(w.x0 - h.x0) <= reach and abs(w.y0 - h.y0) <= reach]
+
+        # A designator takes the value nearest to it; the two are drawn as a
+        # pair, well inside the spacing between one resistor and the next.
+        placed: List[Tuple[float, float, float]] = []      # x, dy, ohms
+        for d in (w for w in local if DESIGNATOR_RE.match(w.text)):
+            vals = [(abs(v.x0 - d.x0) + abs(v.y0 - d.y0), resistor_ohms(v.text))
+                    for v in local if resistor_ohms(v.text)]
+            vals = [(gap, ohms) for gap, ohms in vals if gap <= pitch * 2 + 6]
+            if vals:
+                placed.append((d.x0, d.y0 - h.y0, min(vals, key=lambda t: t[0])[1]))
+
+        # The divider is two resistors on the *same vertical leg*, one either
+        # side of the node. Without that constraint any unrelated resistor that
+        # happens to be within reach joins in: on two boards here a third one
+        # from a neighbouring circuit sat 34pt to the other side of the node,
+        # and taking "one above, one below" alone found two candidates above.
+        legs: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
+        for x, dy, ohms in placed:
+            legs[round(x / 4.0)].append((dy, ohms))
+        pairs = [(sorted(v)[0], sorted(v)[-1], k) for k, v in legs.items()
+                 if len(v) == 2 and sorted(v)[0][0] < 0 < sorted(v)[-1][0]]
+        if len(pairs) != 1:
+            continue
+        (_, top), (_, bottom), leg = pairs[0]
+        if not bottom:
+            continue
+
+        # Corroborate the orientation on that leg: the battery above it, or
+        # ground below. Either alone is enough - one board labels its supply
+        # and draws ground as a bare symbol with no text at all - and reading a
+        # divider upside down turns 21:1 into 1.05:1, which the range check
+        # below rejects on its own for any ratio a battery sense uses.
+        legx = leg * 4.0
+        anchored = any(
+            (w.y0 > h.y0 and w.text.upper() == "GND")
+            or (w.y0 < h.y0 and SUPPLY_RE.match(w.text))
+            for w in local if abs(w.x0 - legx) <= reach)
+        if not anchored:
+            continue
+        scale = round(10 * (top + bottom) / bottom)
+        if not 20 <= scale <= MAX_VBAT_SCALE:
+            return None, (f"DEFAULT_VOLTAGE_METER_SCALE omitted: the divider at "
+                          f"{net} reads as {top:g}/{bottom:g} ohms, which is not "
+                          "a usable scale - check the sheet")
+        return scale, (f"DEFAULT_VOLTAGE_METER_SCALE {scale} from the divider at "
+                       f"{net}: {top:g} ohms to the battery over {bottom:g} ohms "
+                       f"to ground, so 10 x ({top:g}+{bottom:g})/{bottom:g}")
+
+    return None, ("DEFAULT_VOLTAGE_METER_SCALE omitted: no resistor pair with "
+                  f"values reads as a divider around {net} - sheets often give "
+                  "the designators without the values, and the firmware default "
+                  "of 110 is only right for a 100K/10K divider")
 
 
 def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
@@ -2096,16 +2212,14 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cfg.warnings.append("DEFAULT_CURRENT_METER_SCALE omitted; it depends on "
                             "the ESC shunt, not the FC")
     if "adc_vbat" in simple:
-        # 15% of the corpus sets this, and the value is sitting on the sheet -
-        # but only as two resistors, which needs component pins associated to
-        # nets by geometry (a partial netlist), not the label matching this tool
-        # does. The firmware default is 110, which happens to be right for a
-        # 100K/10K divider; guessing it for a board with any other divider gives
-        # a silently wrong battery voltage, so nothing is emitted.
-        cfg.warnings.append(
-            "DEFAULT_VOLTAGE_METER_SCALE omitted; it is set by the VBAT "
-            "divider, which cannot be read from net labels alone - measure it "
-            "or ask the vendor rather than trusting the firmware default of 110")
+        scale, why = read_vbat_divider(words, labels,
+                                       net_of.get(simple["adc_vbat"], ""),
+                                       sym.pitch)
+        if scale is not None:
+            cfg.define("DEFAULT_VOLTAGE_METER_SCALE", str(scale), width=29)
+            cfg.notes.append(why)
+        else:
+            cfg.warnings.append(why)
 
     meta = {
         "target": target,
