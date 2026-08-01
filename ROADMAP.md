@@ -26,6 +26,8 @@ be judged against:
 | UART pins emitted | 299 | 576 |
 | boards with any UART pin | 34 | 70 |
 | boards at 100% agreement | 86 | 89 |
+| SPI devices needing a hand-set instance | 77 | 32 |
+| boards whose SPI section is complete | 60 | 78 |
 
 Run it before and after any change to extraction or classification. A change
 that improves one board and quietly costs three is the normal failure mode
@@ -493,17 +495,59 @@ plain sight need following a two-resistor network:
 **Effort:** high. Needs component pins associated to nets by geometry, i.e. a
 partial netlist, not just labels. Highest-value single piece is the VBAT divider.
 
-### 3.3 CS-only devices cannot be placed on a bus — the largest functional gap
+### 3.3 CS-only devices — mostly SOLVED, and it did not need a netlist
 
-If a sheet gives a device only a chip-select and its data lines are drawn
-elsewhere, the SPI instance is left to a human. Fixable by tracing wires, which
-needs the same netlist work as §3.2.
+The original entry said this was fixable only by tracing wires, needing the same
+netlist work as §3.2. That turned out to be the wrong diagnosis, and it was the
+measurement that showed it: 77 cases across 43 boards, but only 13 of them were
+on boards with a single bus. The rest had two to four buses and looked genuinely
+ambiguous *from the MCU side*.
 
-Now measured rather than estimated. Across the 104 readable boards the tool
-says "*X* has only a CS net on this sheet" **72 times**: 26 for the OSD, 23 for
-the gyro, 23 for the flash. That is by a wide margin the most common reason a
-generated config still needs hand-finishing, and it is the same underlying
-capability §3.2 needs. If one piece of work is done next, this is it.
+They are not ambiguous on the sheet. **The bus was never unknown, only written
+down somewhere else.** Where a sheet names its buses generically — `SPI2-SCK`
+rather than `OSD-SCK` — the association is drawn at the *device*, where the same
+net labels appear a second time: the part's SCK/SDI/SDO carry the bus names and
+its CS carries the chip-select name, all within a few points of each other. On
+one four-bus board each chip-select sits 9–32pt from its own bus's lines and
+211pt from the next.
+
+So it is decidable by proximity, with no netlist. `trace_cs_bus()` finds the
+chip-select away from the MCU and reads which bus's lines it is sitting among.
+Deliberately conservative — the nearest bus must be at least three times nearer
+than the runner-up and have two of its three lines in the same cluster — and
+where it declines it says which test failed. Checked against hand-written
+configs for the three corpus boards that have one: **5 instances resolved, all 5
+agree, 4 declined rather than guessed, none wrong.**
+
+Asking why the remainder still failed found the rest of it. 24 sat on boards
+where *no* bus had been resolved at all, because two more namings were read as
+nothing: `SPI3-FLASH_SCK` / `SPI1-ICM1_MOSI`, which state bus and device at
+once and so matched neither rule, and `SCK3` / `MISO3`, the plain bus form with
+the index on the other side. That last shape keeps recurring — it is the same
+thing as `TX4` versus `UART4_TX` (§1.8), and it is worth assuming both orders
+exist for any indexed net.
+
+Crucially, none of this lets a label overrule the firmware. The tracer returns
+a bus *label*; the traced device is handed that bus's data pins and
+`assign_spi_buses` names the instance from the pins, exactly as for a device
+whose own nets were labelled. A sheet that mislabels its own bus still cannot
+talk the generator past the map — the same rule that stopped SPI roles being
+taken from net names.
+
+| | before | after |
+|---|---|---|
+| CS-only devices left to a human | 77 | **32** |
+| second-IMU refusals | 16 | **4** |
+| `*_SPI_INSTANCE` emitted | 69 | **127** |
+| `GYRO_2_*` emitted | 14 | **55** |
+| boards whose SPI section needs no hand-editing | 60 | **78** / 104 |
+
+**What is left: 32 cases.** 12 find their bus but only one of its lines nearby
+(nearly all flash chips, which sheets tend to draw with the CS on its own); 5
+have a chip-select that never appears away from the MCU at all, so there is no
+second occurrence to read; the rest are on boards with no bus resolved for other
+reasons. These are the genuine §3.2 netlist cases, and they are now a tail
+rather than the main body of the problem.
 
 ### 3.4 Only STM32 families are harvested — 14 boards blocked
 
@@ -637,10 +681,11 @@ seeder's firmware rev in the generated header.
    Worth keeping as a lesson: the "shape of a copied block" read came from the
    finding list, not from the table. Looking at the table first would have
    scoped it correctly and sooner.
-5. **§3.3 CS-only devices** — now the clear top priority, and no longer a guess:
-   the corpus needs this 72 times, against 26 OSDs, 23 gyros and 23 flash chips
-   whose bus cannot be resolved. It also unlocks §3.2, which needs the same
-   partial netlist.
+5. ~~**§3.3 CS-only devices**~~ — largely done, and without the netlist it was
+   assumed to need: 77 cases down to 32, and boards whose SPI section needs no
+   hand-editing up from 60 to 78 of 104. The bus is read at the device end,
+   where the sheet already states it. The 32 that remain are the real §3.2
+   cases.
 6. **The cheap multiplicities**: §2.4 second I2C bus, §2.5 second PINIO. Both
    are visible in the one shipping-config comparison there is (§2.2), both are
    small, and between them they account for two of its three differences.
