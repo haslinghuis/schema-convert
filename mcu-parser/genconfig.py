@@ -1044,6 +1044,33 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
                  "that bus")
 
 
+TRANSISTOR_RE = re.compile(r"^Q\d{1,3}$")
+
+
+def beeper_driver(words: Sequence[Word], mcu_labels: Sequence[Word], net: str,
+                  pitch: float) -> Optional[str]:
+    """
+    The transistor designator drawn on the beeper net, if there is one.
+
+    Corroboration only: BEEPER_INVERTED is emitted either way, because a sheet
+    that does not show a transistor has not shown that there isn't one, and a
+    beeper wired the other way round simply never sounds.
+    """
+    if not net:
+        return None
+    seen = {id(w) for w in mcu_labels}
+    reach = max(pitch * 6, 35.0)
+    for h in (w for w in words
+              if id(w) not in seen and w.text.upper() == net.upper()):
+        near = [(((w.x0 - h.x0) ** 2 + (w.y0 - h.y0) ** 2) ** .5, w.text)
+                for w in words
+                if w.page == h.page and TRANSISTOR_RE.match(w.text)]
+        near = [t for t in near if t[0] <= reach]
+        if near:
+            return min(near)[1]
+    return None
+
+
 def read_connector_roles(words: Sequence[Word]) -> Tuple[Dict[str, str], List[str]]:
     """
     Read the labelled connectors and work out what each UART is for.
@@ -2124,10 +2151,23 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     if "beeper" in simple:
         # An NPN/transistor low-side driver sounds when the pin is driven high,
         # which is what BEEPER_INVERTED selects. Bare open-drain buzzers are the
-        # exception and would need this removed.
+        # exception and would need this removed. 554 of the 582 configs in the
+        # corpus that drive a beeper set it, so it stays the default.
+        #
+        # A transistor drawn on the beeper net corroborates it. Its absence does
+        # not refute it: what a sheet omits is not evidence, and a wrong flip
+        # here is a beeper that never sounds. So this only ever strengthens the
+        # note - the define does not depend on it.
         cfg.define("BEEPER_INVERTED", width=29)
         cfg.add()
-        cfg.notes.append("BEEPER_INVERTED assumes a transistor low-side driver")
+        q = beeper_driver(words, labels, net_of.get(simple["beeper"], ""),
+                          sym.pitch)
+        cfg.notes.append(
+            f"BEEPER_INVERTED: {q} is drawn on the beeper net, which is the "
+            "low-side driver it selects" if q else
+            "BEEPER_INVERTED assumes a transistor low-side driver; no transistor "
+            "was found on the beeper net, which does not mean there is none - "
+            "remove it only if the buzzer is driven straight from the pin")
 
     if adc_dev and adc_dev != "ADC1":
         cfg.define("ADC_INSTANCE", adc_dev, width=29)

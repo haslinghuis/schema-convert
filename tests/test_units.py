@@ -382,6 +382,31 @@ class SpiSolverTests(unittest.TestCase):
         self.assertTrue(any("PC13" in n or "distinct role" in n for n in notes), notes)
 
 
+class BeeperDriverTests(unittest.TestCase):
+    """
+    genconfig.beeper_driver: the transistor on the beeper net, if drawn.
+
+    Corroboration only. 554 of the 582 corpus configs that drive a beeper set
+    BEEPER_INVERTED, so it is emitted either way; a sheet that does not show a
+    transistor has not shown that there is none.
+    """
+
+    def test_a_transistor_on_the_net_is_reported(self):
+        words = [Word("BEEPER", 100, 300, 130, 302),
+                 Word("Q1", 110, 292, 118, 294)]
+        self.assertEqual(genconfig.beeper_driver(words, [], "BEEPER", 5.0), "Q1")
+
+    def test_a_distant_transistor_is_not_on_this_net(self):
+        words = [Word("BEEPER", 100, 300, 130, 302),
+                 Word("Q1", 100, 900, 108, 902)]
+        self.assertIsNone(genconfig.beeper_driver(words, [], "BEEPER", 5.0))
+
+    def test_the_mcu_side_label_is_not_the_evidence(self):
+        words = [Word("BEEPER", 100, 300, 130, 302),
+                 Word("Q1", 110, 292, 118, 294)]
+        self.assertIsNone(genconfig.beeper_driver(words, words, "BEEPER", 5.0))
+
+
 class ResistorValueTests(unittest.TestCase):
     """genconfig.resistor_ohms: the spellings a resistor value arrives in."""
 
