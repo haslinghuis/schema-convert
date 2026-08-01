@@ -534,8 +534,28 @@ absent it says so rather than falling back on 110.
   deliberately not treated as evidence the other way — a sheet that does not
   draw a transistor has not shown there is none, and a wrong flip is a beeper
   that never sounds.
-- **PINIO polarity** — still assumed from the net name. The real answer is
-  whether the regulator enable is held up by its own divider.
+- **PINIO polarity — not derivable, and the old rule was wrong.** This entry
+  used to say the real answer is whether the regulator enable is held up by its
+  own divider. That understates it: a PINIO is just a pin the user can toggle,
+  vendors assign the indices however they like, shipped configs use both 129 and
+  1 across every category of rail, and at least one board inverts in *hardware*
+  as well. The net name carries no information about any of it.
+
+  The generator used to infer 129 from the name mentioning VTX and 1 otherwise,
+  which was wrong in the common case — of the corpus configs whose PINIO is a
+  BEC or power rail, 93% use 129 and that rule gave them 1.
+
+  A value must still be emitted: `drivers/pinio.c` switches only on the mode
+  bit, so omitting `PINIOn_CONFIG` never configures the pin as an output and the
+  box does nothing. So 129 is emitted on the basis of *how the two fail*, not of
+  what the sheet says — `pinioInit` drives an inverted pin high at boot and a
+  plain one low, so a switched rail comes up powered with 129 and dead with 1,
+  and dead reads as broken hardware rather than an inverted switch. It is
+  flagged as a default rather than a reading, on every PINIO.
+
+  Separately, a board writing `BEC-SWITCH` had that net dropped entirely, so
+  only one of its two PINIOs was emitted — the camera one. Both are emitted now
+  and both match the hand-written config.
 - **`DEFAULT_CURRENT_METER_SCALE`** — genuinely ESC-dependent when the FC just
   filters a sense line, but a board with an on-board shunt could be computed.
 
