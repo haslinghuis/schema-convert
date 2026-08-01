@@ -823,6 +823,85 @@ SERIAL_PORT_NAMES = {  # configs spell 1/2/3/6 as USART, the rest as UART
 }
 
 
+SPI_LINE_RE = re.compile(r"SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)", re.I)
+
+
+def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
+                 buses: Dict[str, Dict[str, str]], pitch: float
+                 ) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Which bus a chip-select-only device joins, read from the other end of the wire.
+
+    When a sheet names its buses generically - SPI2-SCK rather than OSD-SCK - the
+    MCU side says only that some buses exist and that some device has a chip
+    select. Which go together is drawn at the *device*, where the same net labels
+    appear a second time: the part's SCK/SDI/SDO carry the bus names and its CS
+    carries the chip-select name, all within a few points of each other.
+
+    So the bus was never unknown, only stated elsewhere on the sheet. Find the
+    chip-select away from the MCU and see whose lines it is sitting among. On one
+    four-bus board each chip-select sits 9-32pt from its own bus and 211pt from
+    the next, which is the kind of margin this can be decided on.
+
+    Deliberately conservative, because a wrong bus is worse than none: the
+    nearest bus must be several times nearer than the runner-up and have at
+    least two of its three lines in the same cluster.
+
+    Returns the bus *label*, never an instance. The instance is still settled
+    from the pins by assign_spi_buses, so a sheet that mislabels its own bus
+    cannot talk the generator past the firmware map - the same rule that stopped
+    SPI roles being taken from net names.
+    """
+    seen = {id(w) for w in mcu_labels}
+    outside = [w for w in words if id(w) not in seen]
+    hits = [w for w in outside if w.text.upper() == cs_net.upper()]
+    if not hits:
+        return None, None
+
+    lines: Dict[str, List[Word]] = defaultdict(list)
+    for w in outside:
+        m = SPI_LINE_RE.fullmatch(w.text)
+        if m and f"SPI{m.group(1)}" in buses:
+            lines[f"SPI{m.group(1)}"].append(w)
+    if not lines:
+        return None, None
+
+    def gap(a: Word, b: Word) -> float:
+        return ((a.x0 - b.x0) ** 2 + (a.y0 - b.y0) ** 2) ** 0.5
+
+    best: Optional[Tuple[float, str, float, List[Word], Word]] = None
+    for h in hits:
+        ranked = sorted(
+            (min(gap(h, w) for w in ws if w.page == h.page), bus, ws)
+            for bus, ws in lines.items() if any(w.page == h.page for w in ws))
+        if not ranked:
+            continue
+        near, bus, ws = ranked[0]
+        runner = ranked[1][0] if len(ranked) > 1 else float("inf")
+        if best is None or near < best[0]:
+            best = (near, bus, runner, ws, h)
+    if best is None:
+        return None, None
+
+    near, bus, runner, ws, h = best
+    radius = max(near * 5, pitch * 3)
+    roles = {SPI_LINE_RE.fullmatch(w.text).group(2).lower()
+             for w in ws if w.page == h.page and gap(h, w) <= radius}
+    if len(roles) < 2:
+        return None, (f"{cs_net}: {bus} is the nearest bus where it is drawn away "
+                      f"from the MCU, but only {len(roles)} of its lines are with "
+                      "it, so the grouping is not clear enough to use")
+    if runner < near * 3:
+        return None, (f"{cs_net}: {bus} is nearest where it is drawn away from the "
+                      f"MCU ({near:.0f}pt) but another bus is nearly as close "
+                      f"({runner:.0f}pt), so which one it joins cannot be told")
+    rival = ("no other bus is drawn near it" if runner == float("inf")
+             else f"next bus {runner:.0f}pt")
+    return bus, (f"{cs_net} is drawn among {bus}'s lines away from the MCU "
+                 f"({near:.0f}pt to the nearest, {rival}), so the device shares "
+                 "that bus")
+
+
 def read_connector_roles(words: Sequence[Word]) -> Tuple[Dict[str, str], List[str]]:
     """
     Read the labelled connectors and work out what each UART is for.
@@ -1604,6 +1683,24 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             cfg.add()
 
     # ---- SPI buses -------------------------------------------------------
+    # A device with only a chip select is not necessarily on an unknown bus: on
+    # a sheet that names its buses generically, which device joins which is
+    # drawn at the device rather than at the MCU. Hand the traced device that
+    # bus's data pins and let assign_spi_buses name the instance from the pins,
+    # exactly as it does for a device whose own nets were labelled.
+    for owner, pins in spi_groups.items():
+        if set(pins) != {"cs"}:
+            continue
+        cs_net = net_of.get(pins["cs"])
+        if not cs_net:
+            continue
+        bus, note = trace_cs_bus(words, labels, cs_net, spi_named, sym.pitch)
+        if note:
+            cfg.notes.append(note)
+        if bus:
+            for role, pin in spi_named[bus].items():
+                pins.setdefault(role, pin)
+
     # Emit in bus order so the file reads like the hand-written ones.
     assigned, notes = assign_spi_buses(caps, spi_groups)
     cfg.notes.extend(notes)

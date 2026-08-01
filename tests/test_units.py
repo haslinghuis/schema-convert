@@ -359,6 +359,70 @@ class SpiSolverTests(unittest.TestCase):
         self.assertTrue(any("PC13" in n or "distinct role" in n for n in notes), notes)
 
 
+class TraceCsBusTests(unittest.TestCase):
+    """
+    genconfig.trace_cs_bus: which bus a chip-select-only device joins.
+
+    A sheet that names its buses generically (SPI2-SCK, not OSD-SCK) says at the
+    MCU only that some buses exist and some device has a chip select. Which go
+    together is drawn at the device, where the labels appear a second time.
+    """
+
+    BUSES = {"SPI1": {"sck": "PA5", "sdi": "PA6", "sdo": "PA7"},
+             "SPI2": {"sck": "PB13", "sdi": "PB14", "sdo": "PB15"}}
+    PITCH = 4.0
+
+    def device(self, x, y, bus, cs=None):
+        """One part's worth of labels: its three bus lines, optionally a CS."""
+        out = [Word(f"{bus}-SCK", x, y, x + 20, y + 2),
+               Word(f"{bus}-MISO", x, y + 8, x + 20, y + 10),
+               Word(f"{bus}-MOSI", x, y + 16, x + 20, y + 18)]
+        if cs:
+            out.append(Word(cs, x, y - 8, x + 20, y - 6))
+        return out
+
+    def test_a_cs_among_one_buss_lines_is_traced_to_it(self):
+        words = self.device(100, 500, "SPI1", cs="GYRO_CS") + self.device(600, 500, "SPI2")
+        bus, note = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertEqual(bus, "SPI1")
+        self.assertIn("SPI1", note)
+
+    def test_a_second_bus_just_as_close_is_refused(self):
+        # Two parts drawn side by side: nothing distinguishes them, and a wrong
+        # bus is worse than none.
+        words = (self.device(100, 500, "SPI1", cs="GYRO_CS")
+                 + self.device(118, 500, "SPI2"))
+        bus, note = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertIsNone(bus)
+        self.assertIn("cannot be told", note)
+
+    def test_a_lone_line_is_not_a_bus_grouping(self):
+        words = [Word("SPI1-SCK", 100, 500, 120, 502),
+                 Word("GYRO_CS", 100, 492, 120, 494)]
+        bus, note = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertIsNone(bus)
+        self.assertIn("not clear enough", note)
+
+    def test_the_mcu_side_labels_are_not_the_evidence(self):
+        # The same names appear in the MCU's own gutter. Reading those would
+        # just measure how the pin rows happen to be ordered on the symbol.
+        mcu = self.device(100, 500, "SPI1", cs="GYRO_CS")
+        bus, note = genconfig.trace_cs_bus(mcu, mcu, "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertIsNone(bus)
+        self.assertIsNone(note)
+
+    def test_a_bus_the_mcu_never_named_is_not_a_candidate(self):
+        words = self.device(100, 500, "SPI4", cs="GYRO_CS")
+        bus, _ = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertIsNone(bus)
+
+    def test_labels_on_another_sheet_are_not_neighbours(self):
+        words = (self.device(100, 500, "SPI1", cs="GYRO_CS")
+                 + [Word("SPI2-SCK", 101, 500, 121, 502, 2)])
+        bus, _ = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
+        self.assertEqual(bus, "SPI1")
+
+
 class I2cTests(unittest.TestCase):
     def setUp(self):
         self.caps = fake_caps()
