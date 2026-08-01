@@ -176,6 +176,45 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(genconfig.classify("VTX-SW")[0], "pinio")
         self.assertEqual(genconfig.classify("S1")[0], "motor")
 
+    def test_a_uart_is_recognised_with_the_index_on_either_side(self):
+        # TX4 and UART4_TX are both ordinary spellings and appear on comparable
+        # numbers of boards. Only the first was recognised, so on two thirds of
+        # the corpus the UART nets reached the config as unclassified and the
+        # generated file had no serial ports at all.
+        for net, want in (("TX4", ("uart_tx", "4")), ("RX1", ("uart_rx", "1")),
+                          ("UART-TX4", ("uart_tx", "4")),
+                          ("UART4_TX", ("uart_tx", "4")),
+                          ("UART7_RX", ("uart_rx", "7")),
+                          ("USART3_RX", ("uart_rx", "3")),
+                          ("USART2_TX", ("uart_tx", "2"))):
+            with self.subTest(net=net):
+                role, idx, _ = genconfig.classify(net)
+                self.assertEqual((role, idx), want)
+
+    def test_an_i2c_net_need_not_carry_its_bus_number(self):
+        # The bus is settled by the pins, not the name, so a bare SCL/SDA is
+        # as usable as I2C1-SCL.
+        for net, want in (("SCL", ("i2c_scl", None)), ("SDA", ("i2c_sda", None)),
+                          ("SCL1", ("i2c_scl", "1")), ("SDA2", ("i2c_sda", "2")),
+                          ("I2C_SCL", ("i2c_scl", None)),
+                          ("I2C1-SCL", ("i2c_scl", "1")),
+                          ("I2C2_SDA", ("i2c_sda", "2"))):
+            with self.subTest(net=net):
+                role, idx, _ = genconfig.classify(net)
+                self.assertEqual((role, idx), want)
+
+    def test_leds_are_numbered_as_the_sheet_numbers_them(self):
+        for net, want in (("LED0", "led0"), ("LED1", "led1"), ("LED2", "led2"),
+                          ("LED-1", "led1"), ("LED-2", "led2"),
+                          ("LED-STATUS", "led0"), ("LED-STRIP", "led_strip")):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], want)
+
+    def test_a_beeper_keeps_its_role_with_a_PIN_suffix(self):
+        for net in ("BEEPER", "BUZZER", "BEEPER_PIN", "BUZZER-"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], "beeper")
+
 
 class NetRequirementTests(unittest.TestCase):
     """netmap.net_requirement: what a net name says the pin must be able to do."""

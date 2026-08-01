@@ -86,18 +86,27 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # Without the data nets the card is a CS with nowhere to go, so
     # SDCARD_SPI_INSTANCE - and with it USE_SDCARD_SPI - can never be resolved.
     (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),
+    # Both orders occur, on comparable numbers of boards: TX4 / UART-TX4 put the
+    # index last, UART4_TX and USART3_RX put it first. Only the first form was
+    # recognised, so on a fifth of the corpus the UART nets - the most common
+    # thing on a flight controller - reached the config as unclassified.
     (re.compile(r"^(?:.*[-_])?TX(\d)(?:[-_]?R)?$"), "uart_tx"),
     (re.compile(r"^(?:.*[-_])?RX(\d)(?:[-_]?R)?$"), "uart_rx"),
-    (re.compile(r"^I2C(\d)[-_]SCL$"), "i2c_scl"),
-    (re.compile(r"^I2C(\d)[-_]SDA$"), "i2c_sda"),
+    (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?TX(?:[-_]?R)?$"), "uart_tx"),
+    (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?RX(?:[-_]?R)?$"), "uart_rx"),
+    # The bus is settled by the pins, not the name, so the index is optional -
+    # plenty of sheets just write SCL / SDA, or SCL1 / SDA1.
+    (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SCL[-_]?(\d)?$"), "i2c_scl"),
+    (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SDA[-_]?(\d)?$"), "i2c_sda"),
     # Both orderings appear in the wild: ADC-BATT and VBAT_ADC.
     (re.compile(r"^(?:ADC[-_])?(?:BATT|VBAT|BAT)(?:[-_]ADC)?$"), "adc_vbat"),
     (re.compile(r"^(?:ADC[-_])?(?:CURR|CURRENT|ISENSE)(?:[-_]ADC)?$"), "adc_curr"),
     (re.compile(r"^(?:ADC[-_])?RSSI(?:[-_]ADC)?$"), "adc_rssi"),
-    (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^LED0$"), "led0"),
-    (re.compile(r"^LED1$"), "led1"),
+    (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^LED[-_]?0$"), "led0"),
+    (re.compile(r"^LED[-_]?1$"), "led1"),
+    (re.compile(r"^LED[-_]?2$"), "led2"),
     (re.compile(r"^LED[-_]?STRIP$|^WS2812$|^LED[-_]?DATA$"), "led_strip"),
-    (re.compile(r"^(?:BEEPER|BUZZER|BZ)[-_]?$"), "beeper"),
+    (re.compile(r"^(?:BEEPER|BUZZER|BZ)[-_]?(?:PIN)?$"), "beeper"),
     (re.compile(r"^CAM[-_]?CONTROLL?$|^CAMERA[-_]?CONTROL$|^CC$"), "camera_control"),
     (re.compile(r"^USB[-_]?DETECT$|^VBUS[-_]?DETECT$"), "usb_detect"),
     (re.compile(r"^VTX[-_]?SW$|^VTX[-_]?(?:PWR|POWER|EN)$"), "pinio"),
@@ -1718,7 +1727,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
 
     # ---- discrete IO -----------------------------------------------------
     IO_DEFINE = [
-        ("led0", "LED0_PIN"), ("led1", "LED1_PIN"),
+        ("led0", "LED0_PIN"), ("led1", "LED1_PIN"), ("led2", "LED2_PIN"),
         ("beeper", "BEEPER_PIN"), ("led_strip", "LED_STRIP_PIN"),
         ("camera_control", "CAMERA_CONTROL_PIN"),
         ("usb_detect", "USB_DETECT_PIN"),
