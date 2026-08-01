@@ -26,8 +26,9 @@ be judged against:
 | UART pins emitted | 299 | 576 |
 | boards with any UART pin | 34 | 70 |
 | boards at 100% agreement | 86 | 89 |
-| SPI devices needing a hand-set instance | 77 | 32 |
-| boards whose SPI section is complete | 60 | 78 |
+| SPI devices needing a hand-set instance | 77 | 27 |
+| boards whose SPI section is complete | 60 | 83 |
+| boards with a computed `DEFAULT_VOLTAGE_METER_SCALE` | 0 | 11 |
 
 Run it before and after any change to extraction or classification. A change
 that improves one board and quietly costs three is the normal failure mode
@@ -476,24 +477,67 @@ APM32 have none either. "Everything has been verified" cannot be claimed for a
 family whose datasheet is missing, and the tool should say so rather than
 reporting a clean run.
 
-### 3.2 No circuit-level analysis
+### 3.2 Circuit-level analysis — the VBAT divider is DONE
 
-Everything today is net-label and component matching. Several values sitting in
-plain sight need following a two-resistor network:
+Everything used to be net-label and component matching. The highest-value piece
+of circuit reading is now implemented, and it did not need a general netlist
+either — the same "find the net away from the MCU and look at what is drawn
+around it" that solved §3.3.
 
-- **`DEFAULT_VOLTAGE_METER_SCALE`** — the VBAT divider. One board's `100K/10K`
-  gives exactly the default 110, which was confirmed by hand; a board with a
-  different divider silently gets the wrong scale.
-- **`BEEPER_INVERTED`** — currently *assumed*. Determined by hand from
-  `BEEPER → 1K → NPN base, collector → BUZZER-`. A bare open-drain buzzer would
-  need it removed, and the tool would not notice.
-- **PINIO polarity** — `129` vs `1` is assumed from the net name. The real answer
-  is whether the regulator enable is held up by its own divider.
+**`DEFAULT_VOLTAGE_METER_SCALE` — done.** The scale is not a free parameter.
+`voltage.c` computes
+
+```
+volts = adc * vbatscale * Vref / 10 / (0xFFF * vbatresdivval)
+```
+
+which with the shipped `vbatresdivval` of 10 puts full scale at
+`0.33 * vbatscale` volts, so for a divider of ratio *r*
+
+```
+vbatscale = 10 * (Rtop + Rbottom) / Rbottom
+```
+
+exactly. `100K/10K` gives 110 — the firmware default, which is why so many
+boards need no define and why any other divider silently misreports the battery.
+Read from the code, not from the comment beside it, which describes only the
+10k:1k case.
+
+Read **structurally**, not by taking the two nearest values: the ADC net sits at
+the midpoint of one vertical leg with a resistor either side. Requiring that
+shared leg is what separates the divider from everything else nearby — on two
+boards a third resistor from a neighbouring circuit sat 34pt the other side of
+the node, and on one the two nearest values would have given 223 instead of 110.
+Orientation is anchored by a supply above or ground below (either alone: one
+board draws ground as a bare symbol with no text), and `vbatscale` is a
+`uint8_t`, so anything over 255 is refused.
+
+Verified against hand-written configs, and the ones that matter are the
+non-default boards the roadmap insisted on: `20K/1K` → **210** against a config
+that says 210, and `150K/10K` → **160** against a config that says 160. A third
+computes 110 from `100K/10K` against a config that leaves it unset. No board
+gets a scale that disagrees with its config.
+
+11 boards now carry a computed scale — 8 at 110, 2 at 210, 1 at 160. Widening
+the sense-net vocabulary at the same time (`VBAT-ADC1`, `VBATT-ADC`,
+`BATT_VOLTAGE`, `BAT1_V`) took `ADC_VBAT_PIN` from 48 boards to 63.
+
+**The limit is the sheets, not the method.** Of the boards with a VBAT node, 23
+give the resistor *designators* with no values anywhere — one names the divider
+only as an annotated "20：1" — so there is nothing to read. That is worth
+stating plainly: this will never reach every board, and where the values are
+absent it says so rather than falling back on 110.
+
+- **`BEEPER_INVERTED`** — corroborated, not decided. 554 of the 582 corpus
+  configs that drive a beeper set it, so it stays the default; on 10 boards the
+  sheet shows the transistor and the note now names it. Its absence is
+  deliberately not treated as evidence the other way — a sheet that does not
+  draw a transistor has not shown there is none, and a wrong flip is a beeper
+  that never sounds.
+- **PINIO polarity** — still assumed from the net name. The real answer is
+  whether the regulator enable is held up by its own divider.
 - **`DEFAULT_CURRENT_METER_SCALE`** — genuinely ESC-dependent when the FC just
   filters a sense line, but a board with an on-board shunt could be computed.
-
-**Effort:** high. Needs component pins associated to nets by geometry, i.e. a
-partial netlist, not just labels. Highest-value single piece is the VBAT divider.
 
 ### 3.3 CS-only devices — mostly SOLVED, and it did not need a netlist
 
@@ -534,20 +578,29 @@ whose own nets were labelled. A sheet that mislabels its own bus still cannot
 talk the generator past the map — the same rule that stopped SPI roles being
 taken from net names.
 
+A second shape turned up in the tail and is handled too. The rule wanted two of
+a bus's three lines clustered round the chip-select, which is what a small part
+looks like — but a flash chip is drawn as a large symbol with its CS and one
+data line together and the other two coming off the far side, 130pt away. That
+is still a third of the way to the next bus, so a second sufficient condition
+now applies: *every* one of the winning bus's lines is nearer than anything
+belonging to another bus. Where a rival's lines interleave it still declines.
+
 | | before | after |
 |---|---|---|
-| CS-only devices left to a human | 77 | **32** |
+| CS-only devices left to a human | 77 | **27** |
 | second-IMU refusals | 16 | **4** |
-| `*_SPI_INSTANCE` emitted | 69 | **127** |
+| `*_SPI_INSTANCE` emitted | 69 | **132** |
 | `GYRO_2_*` emitted | 14 | **55** |
-| boards whose SPI section needs no hand-editing | 60 | **78** / 104 |
+| boards whose SPI section needs no hand-editing | 60 | **83** / 104 |
 
-**What is left: 32 cases.** 12 find their bus but only one of its lines nearby
-(nearly all flash chips, which sheets tend to draw with the CS on its own); 5
-have a chip-select that never appears away from the MCU at all, so there is no
-second occurrence to read; the rest are on boards with no bus resolved for other
-reasons. These are the genuine §3.2 netlist cases, and they are now a tail
-rather than the main body of the problem.
+Against the three corpus boards with an exactly-matching hand-written config,
+**9 instances agree and none disagree**; the rest are declined with a reason
+rather than guessed.
+
+**What is left: 27 cases**, on boards where no bus is resolved for other reasons
+or whose chip-select never appears away from the MCU at all, so there is no
+second occurrence to read. Those genuinely need wire tracing.
 
 ### 3.4 Only STM32 families are harvested — 14 boards blocked
 
@@ -697,6 +750,7 @@ seeder's firmware rev in the generated header.
 8. **§3.4 AT32** — 14 boards, the whole of the non-STM32 gap.
 9. **§2.3 SDIO** for the SD card, which is how boards actually wire it.
 10. **§4.5 `config.c`** — still unsupported.
-11. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
-    only on a board whose ratio is *not* 100K/10K: the one known divider gives
-    exactly the default 110, so a wrong implementation would look correct.
+11. ~~**§3.2 circuit analysis**~~ — the VBAT divider is done and checked on two
+    boards whose ratio is *not* 100K/10K, which was the condition this entry
+    set. What remains is PINIO polarity and the current-meter scale, both
+    smaller and neither blocking.
