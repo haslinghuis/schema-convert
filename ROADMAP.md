@@ -6,6 +6,32 @@ what would bite first, not by effort.
 Percentages are the share of the 619 configs in the Betaflight config repo that
 use a given define — a proxy for how often a gap will actually be hit.
 
+## The corpus is the instrument
+
+Everything below §1.4 was found by running **168 vendor schematics** end to end
+rather than by reading the code. That is worth stating plainly, because none of
+those defects were visible on the three boards the tool had been developed
+against, and several were invisible *by construction*: they dropped input
+silently while every diagnostic the tool prints stayed clean.
+
+The measurements that matter are aggregate, and they are what a change should
+be judged against:
+
+| | before the corpus | now |
+|---|---|---|
+| schematics that yield a pin map | 104 / 168 | 104 / 168 |
+| MCU pins read | 3090 | 3615 |
+| nets checked against firmware | 1637 | 1733 |
+| of those, agreeing | 1601 | 1691 |
+| UART pins emitted | 299 | 576 |
+| boards with any UART pin | 34 | 70 |
+| boards at 100% agreement | 86 | 89 |
+
+Run it before and after any change to extraction or classification. A change
+that improves one board and quietly costs three is the normal failure mode
+here, and only the aggregate shows it. Two of the three fixes below looked
+correct on their motivating board and were caught this way.
+
 ---
 
 ## 1. Defects
@@ -164,6 +190,86 @@ is what `#ifdef`-style guards ask; a comparison or arithmetic use asks for its
 tries both ways rather than resolving to `False` by accident. The test that
 pinned the old behaviour was updated in the same change.
 
+### 1.5 Only one box of a split MCU symbol was read — FIXED
+
+A large package is routinely plotted as **several boxes on one sheet**, one per
+port group. Detection returned a single box per page, so the rest of the
+package was dropped — and dropped invisibly: every pin it did read was correct
+and agreement stayed at 100%. One H743 board read **43 of its 100 pins** and
+reported nothing wrong. §1.1 had fixed the same failure *across* sheets; this
+was the same thing within one.
+
+Four causes, and only the first is the one you would guess:
+
+- Only the strongest aligned column per page was kept. Boxes are now peeled off
+  one at a time and offered to the existing split-symbol test.
+- **Altium stamps an invisible annotation token beside everything it draws** —
+  `PIU1014` (pin 14 of U10), `COU8`, `NLTX2` — placed closer than the gap that
+  separates the pieces of a split pin name. Absorbing one turned `PC0` into
+  `PC0PIU108`, which no longer reads as a pin. This is what actually hid the
+  right-hand column on most of these sheets, and it had already been seen
+  without being recognised: the `PIC1301 → PB3` pairing in §1.1 is the same
+  token.
+- Labels were matched to a part through a dict **keyed by page**, so two boxes
+  on one sheet collapsed to whichever was stored last. Ownership is now
+  geometric.
+- A box only has a gutter on a side it has pin names on. Searching the empty
+  side reached across the gap and collected the neighbouring box's labels.
+
+Also: ST's own dash qualifier is now accepted in a pin name (`PA0-WKUP`,
+`PC14-OSC32_IN`, and `PB8-BOOT0`, which is where G4 keeps BOOT0), and a part
+number with a wildcarded digit (`STM32F7X2RXT`) resolves when exactly one
+seeded target fits.
+
+### 1.6 The label gutter is not always one column — FIXED
+
+Net labels were assumed to form one aligned column per side. Where a sheet
+draws each label against its own wire the gutter is several near-parallel
+columns a few points apart, and only the strongest was kept. One board lost its
+**entire I2C2 bus** that way while reporting nothing amiss.
+
+Neighbouring columns are now taken too, but only the words in them that read
+like net names on their own — a BGA sheet fills that same space with ball
+coordinates (`E10`, `B10`), and those would otherwise bind to whatever row they
+sit level with. The strongest column is still trusted wholesale, having already
+proved itself as a column.
+
+### 1.7 A firmware contradiction did not count against an offset — FIXED
+
+Widening the gutter made one board *worse*, which exposed an older bug.
+
+Offsets were scored on agreements only; a pin the firmware says **cannot** do
+the job counted for nothing. So two fits with equal agreement were separated on
+raw coverage, and the fit that paired more labels won even when its extra pairs
+were contradictions. That board chose an offset three quarters of a row out,
+sliding `SWDIO` onto its neighbour's pin and eight nets onto supply rows.
+
+Contradictions now rank directly, then supply-row landings — below
+contradictions, since a sheet can legitimately run a net past a supply pin, but
+no schematic wires `FLASH_CS` to `VBAT`. The board reads 19/19 where it read
+16/16 before.
+
+The general lesson: **the scorer only counted evidence for, never evidence
+against.** Anywhere a fit is chosen by search, check that both are counted.
+
+### 1.8 Half the UART spellings were unclassified — FIXED
+
+Counting what came out of the generator as "no config.h role" across the corpus
+made this one impossible to miss: `UART4_TX`/`UART4_RX` unclassified on **21
+boards**, `UART1` on 14, `UART3` on 14, `UART2` and `UART5` on 13 each.
+
+Only one of the two orderings was matched. `TX4` and `UART-TX4` put the index
+last and were recognised; `UART4_TX` and `USART3_RX` put it first and were not.
+Both are ordinary. **Two thirds of the corpus generated a config with no serial
+ports in it at all** — while netmap had validated every one of those nets
+against the firmware tables and reported them fine. The two halves of the tool
+disagreed about what a UART net looks like and nothing compared them.
+
+Smaller cases of the same shape: I2C nets that carry no bus number (`SCL`,
+`SDA1` — the bus comes from the pins, so the number was never needed), `LED2`
+having no rule at all, `LED-1`/`LED-2` spelled with a dash, and `BEEPER_PIN`
+losing its role to a suffix.
+
 ---
 
 ## 2. Coverage — defines never emitted
@@ -174,15 +280,15 @@ set against the corpus.
 | Define | Boards | Note |
 |---|---|---|
 | `DEFAULT_CURRENT_METER_SCALE` | 61% | ESC-dependent; see §3.2 |
-| ~~`RX_PPM_PIN`~~ | 54% | done |
-| ~~`DEFAULT_DSHOT_BURST`~~ | 51% | done, with `TIMUPn_DMA_OPT` |
-| ~~`GYRO_2_*`~~ | 25% | done — **unproven on hardware**, no dual-gyro board in the corpus |
-| ~~`ESCSERIAL_PIN`~~ | 18% | done |
+| ~~`RX_PPM_PIN`~~ | 54% | done — no corpus board wires one; see §2.3 |
+| ~~`DEFAULT_DSHOT_BURST`~~ | 51% | done, with `TIMUPn_DMA_OPT`; never triggered in the corpus |
+| ~~`GYRO_2_*`~~ | 25% | done and **proven**; see §2.2 |
+| ~~`ESCSERIAL_PIN`~~ | 18% | done — no corpus board wires one; see §2.3 |
 | `DEFAULT_VOLTAGE_METER_SCALE` | 15% | computable; see §3.2 |
-| ~~`USE_SDCARD`~~ | 15% | done — **unproven**, no SD-card board in the corpus |
+| `USE_SDCARD` | 15% | SPI form done; boards use **SDIO/SDMMC**, unimplemented — §2.3 |
 
-`MOTOR5-8`, `UART6+`, `SPI4`, `ADC_RSSI_PIN` show up as absent only because the
-three test boards lack them — those are built generically and do work.
+`MOTOR5-8`, `UART6+`, `SPI4`, `ADC_RSSI_PIN` are built generically and do work;
+across the corpus 18 boards emit `MOTOR5-8` and 16 emit `SPI4`+.
 
 ### 2.1 Burst DShot is not supported
 
@@ -192,10 +298,60 @@ safe default but not always the right one — four motors on one timer is the ca
 burst exists for, and the tool already detects exactly that when choosing a
 shared timer.
 
-### 2.2 Dual-gyro boards
+### 2.2 Dual-gyro boards — DONE, and now proven on hardware sheets
 
-25% of boards have a second gyro. `netmap` would map `GYRO2-CS` fine; the
-classifier has no rule and the SPI solver has no concept of a second IMU.
+Three corpus boards emit a complete `GYRO_2_*` set (`SPI_INSTANCE`, `CS_PIN`,
+`EXTI_PIN`, `ALIGN`, and `CLKIN_PIN` on two of them). This was the roadmap's
+single highest-value unknown and it is now closed.
+
+One of the three is a **shipping board whose hand-written config is in the
+config repo**, which makes it the strongest verification available anywhere in
+this project — the same board, converted independently by a human. Of the
+defines both files carry, **52 agree exactly and 3 differ**:
+
+| | hand-written | generated | verdict |
+|---|---|---|---|
+| `ADC1_DMA_OPT` | 8 | 10 | both free channels; benign |
+| `BARO_I2C_INSTANCE` | `I2CDEV_2` | `I2CDEV_1` | generator emits only one I2C bus — see §2.4 |
+| `PINIO1_PIN` | *BEC switch* | *camera switch* | generator emits only one PINIO — see §2.5 |
+
+`GYRO_1_*` matches exactly. `GYRO_2_*` is emitted by the generator and **absent
+from the hand-written config**, though the sheet carries a full second bus,
+chip-select and interrupt for it. Either the shipped config is missing a gyro
+the board has, or this sheet is a later revision than the config was written
+from. Worth resolving with the vendor; it is not a generator defect.
+
+The refusal path is exercised too. A different dual-gyro board gives its second
+IMU only a chip-select, and the tool declines to emit `GYRO_2_*` at all —
+correctly, since `GYRO_2_CS_PIN` alone would raise `GYRO_COUNT` to 2 with no bus
+behind it — and says exactly which three defines a human must add.
+
+### 2.3 Still unproven after 168 schematics
+
+`USE_SDCARD`, `RX_PPM_PIN`, `ESCSERIAL_PIN` and burst DShot are implemented and
+unit-tested, and **not one board in the corpus emits any of them**. That is a
+much stronger statement than the old "no board in the corpus exercises them",
+and it changes what the gap is:
+
+- **SD card.** 22 boards mention a card, but the ones that wire it do so over
+  **SDIO/SDMMC**, not SPI — nets like `SDMMC1-CK`, `SDMMC1-CMD`, `SDMMC1-D0..D3`.
+  Only the SPI form is implemented, so `SDIO_CK_PIN` and friends are never
+  emitted. This is a missing feature, not an unproven one.
+- **PPM and escserial** genuinely do not appear. Both are legacy; the corpus
+  suggests they are no longer worth chasing.
+
+### 2.4 Only one I2C bus is emitted
+
+A board with I2C1 *and* I2C2 gets one of them, and any device on the other is
+attributed to the wrong bus — the reference comparison above lands the baro on
+`I2CDEV_1` where the hand-written config has `I2CDEV_2`. `netmap` resolves both
+buses correctly and firmware-validates every pin; the generator collapses them.
+
+### 2.5 Only one PINIO is emitted
+
+Boards routinely have two switched rails (a BEC/VTX switch and a camera
+switch); `PINIO2_PIN`/`PINIO2_BOX` are never emitted, and which of the two
+candidates becomes `PINIO1` is arbitrary rather than ordered.
 
 ---
 
@@ -337,16 +493,53 @@ plain sight need following a two-resistor network:
 **Effort:** high. Needs component pins associated to nets by geometry, i.e. a
 partial netlist, not just labels. Highest-value single piece is the VBAT divider.
 
-### 3.3 CS-only devices cannot be placed on a bus
+### 3.3 CS-only devices cannot be placed on a bus — the largest functional gap
 
 If a sheet gives a device only a chip-select and its data lines are drawn
 elsewhere, the SPI instance is left to a human. Fixable by tracing wires, which
 needs the same netlist work as §3.2.
 
-### 3.4 Only STM32 families are harvested
+Now measured rather than estimated. Across the 104 readable boards the tool
+says "*X* has only a CS net on this sheet" **72 times**: 26 for the OSD, 23 for
+the gyro, 23 for the flash. That is by a wide margin the most common reason a
+generated config still needs hand-finishing, and it is the same underlying
+capability §3.2 needs. If one piece of work is done next, this is it.
+
+### 3.4 Only STM32 families are harvested — 14 boards blocked
 
 AT32, APM32, PICO and X32 keep their peripheral tables in a different shape.
 `seed_firmware.py` skips them, so those boards cannot be converted at all.
+
+**AT32F435 is 14 of the 168 schematics** — the third-largest family in the
+corpus after H7 (64) and F7 (20), ahead of G4 and F4. It is the only non-STM32
+part that appears at all, so the whole of §3.4 is really just AT32.
+
+### 3.5 The MCU is often not named on the sheet
+
+27 schematics carry no part number anywhere in their text — not written
+differently, simply absent. Auto-detection has nothing to match, so the run
+stops before the symbol is ever looked at.
+
+This is worth separating from "cannot be converted", because those boards are
+otherwise fine. Given `--target` by hand they read **98 pins at 27/27, 96 at
+42/42, 62 at 13/13** — all at 100% agreement. The whole loss is the one line of
+provenance nobody wrote on the drawing.
+
+Inferring the part from the pin evidence would violate §1 (firmware is the
+source of truth, and the MCU identity is what selects the tables), so the
+options are to take a hint from the filename or to keep asking for `--target`.
+Whichever, the error should say what it looked for.
+
+### 3.6 Scanned schematics have no text layer
+
+17 of the 168 are images with no extractable text. Nothing here can read them
+without OCR, and that is a dependency this repo will not take. The tool should
+say "this PDF has no text layer" rather than "could not detect FC_TARGET_MCU",
+which sends the reader looking for the wrong problem.
+
+A further handful of corpus files are not schematics at all — wiring diagrams,
+a datasheet, calibration notes, one PID paper. Recognising and naming that case
+costs little and stops it looking like a parse failure.
 
 ---
 
@@ -404,11 +597,16 @@ seeder's firmware rev in the generated header.
 
 1. ~~§1.1 multi-page~~, ~~§1.2 `SYSTEM_HSE_MHZ`~~, ~~§4.1 tests~~ — done
 2. ~~§4.2 / §4.3 / §4.4 / §4.6~~, ~~§1.3 / §1.4~~, ~~§2 coverage~~ — done
-3. **Validate what is unproven.** `GYRO_2_*`, `USE_SDCARD`, `RX_PPM`, `ESCSERIAL`
-   and burst DShot are implemented and unit-tested, but no board in the corpus
-   exercises any of them. A schematic with a second IMU is the single most
-   valuable input: 25% of shipped configs have one, and the SPI solver's
-   shared-bus path is where it is most likely to be wrong.
+3. ~~**Validate what is unproven.**~~ — done, by a 168-schematic corpus.
+   `GYRO_2_*` is proven three times over and checked against a shipping board's
+   hand-written config (§2.2). `RX_PPM`, `ESCSERIAL` and burst DShot are
+   confirmed absent from every board in the corpus, which retires them as
+   priorities. `USE_SDCARD` turned out to be the wrong shape: boards wire the
+   card over SDIO, which is not implemented (§2.3).
+
+   The corpus also found four extraction defects that three boards could never
+   have shown (§1.5–§1.8), the largest of which was losing half the pins of
+   every split symbol without any diagnostic changing.
 4. ~~**§3.1 audit the remaining families**~~ — done, and every family with a
    datasheet on hand now audits clean: F4, F7, G4, H5, H7, C5, N6. The F7/H7/C5 findings
    turned out not to be defects at all — `I2C4` occurs zero times in the F722
@@ -439,8 +637,21 @@ seeder's firmware rev in the generated header.
    Worth keeping as a lesson: the "shape of a copied block" read came from the
    finding list, not from the table. Looking at the table first would have
    scoped it correctly and sooner.
-5. **§4.5 `config.c`** — still unsupported.
-6. **§3.3 CS-only devices** and **§3.4 non-STM32 families**.
-7. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
-   only on a board whose ratio is *not* 100K/10K: the one known divider gives
-   exactly the default 110, so a wrong implementation would look correct.
+5. **§3.3 CS-only devices** — now the clear top priority, and no longer a guess:
+   the corpus needs this 72 times, against 26 OSDs, 23 gyros and 23 flash chips
+   whose bus cannot be resolved. It also unlocks §3.2, which needs the same
+   partial netlist.
+6. **The cheap multiplicities**: §2.4 second I2C bus, §2.5 second PINIO. Both
+   are visible in the one shipping-config comparison there is (§2.2), both are
+   small, and between them they account for two of its three differences.
+7. **§3.5 / §3.6 say what actually went wrong.** 44 of the 168 schematics fail
+   with a message that sends the reader after the wrong thing. Distinguishing
+   "no text layer", "not a schematic", and "the sheet never names the MCU — try
+   `--target`" is nearly free and turns a third of the corpus from *failed* into
+   *actionable*.
+8. **§3.4 AT32** — 14 boards, the whole of the non-STM32 gap.
+9. **§2.3 SDIO** for the SD card, which is how boards actually wire it.
+10. **§4.5 `config.c`** — still unsupported.
+11. **§3.2 circuit analysis** — highest effort. Start with the VBAT divider, and
+    only on a board whose ratio is *not* 100K/10K: the one known divider gives
+    exactly the default 110, so a wrong implementation would look correct.
