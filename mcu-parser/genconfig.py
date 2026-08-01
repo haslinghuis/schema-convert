@@ -59,9 +59,25 @@ ALIAS_FILE = DATA_DIR / "aliases.json"
 
 # Each rule: (regex, role, group-is-index). Order matters; first match wins.
 ROLE_RULES: List[Tuple[re.Pattern, str]] = [
+    # Some sheets name both at once - SPI3-FLASH_SCK, SPI2_OSD_SCK,
+    # SPI1-ICM1_MOSI - which is the most informative spelling there is, and was
+    # matched by neither the bus rule nor the device rule. The bus number in it
+    # is redundant: assign_spi_buses resolves the instance from the pins through
+    # the firmware map, and the pin decides what the label claims. So the device
+    # is what is kept.
+    (re.compile(r"^SPI\d[-_](?:GYRO|IMU|MPU|ICM)(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"),
+     "gyro_spi"),
+    (re.compile(r"^SPI\d[-_](?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"),
+     "osd_spi"),
+    (re.compile(r"^SPI\d[-_]FLASH[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "flash_spi"),
+    (re.compile(r"^SPI\d[-_]BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
+    (re.compile(r"^SPI\d[-_]SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),
     # Some sheets name the bus explicitly (SPI1_SCK) instead of naming the device
     # on it (GYRO-SCK). Take that at face value - it removes the guesswork.
+    # The index sits on either side, as it does for the UARTs: SPI3_SCK and SCK3
+    # are the same bus.
     (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
+    (re.compile(r"^(SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)$"), "spi_bus"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
     (re.compile(r"^SERVO(\d+)$"), "servo"),
     # A PPM receiver and the ESC 1-wire passthrough both drive a timer input

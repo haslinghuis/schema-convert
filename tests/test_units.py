@@ -191,6 +191,29 @@ class ClassifyTests(unittest.TestCase):
                 role, idx, _ = genconfig.classify(net)
                 self.assertEqual((role, idx), want)
 
+    def test_a_net_naming_both_bus_and_device_keeps_the_device(self):
+        # SPI3-FLASH_SCK is the most informative spelling a sheet can use, and
+        # matched neither the bus rule nor the device rule. The bus number in it
+        # is redundant - the instance comes from the pins through the firmware
+        # map - so what matters is that the device is recovered.
+        for net, want in (("SPI3-FLASH_SCK", ("flash_spi", "sck")),
+                          ("SPI2_OSD_SCK", ("osd_spi", "sck")),
+                          ("SPI1-ICM1_MOSI", ("gyro_spi", "sdo")),
+                          ("SPI4-ICM2_SCK", ("gyro2_spi", "sck")),
+                          ("SPI2-BARO_MISO", ("baro_spi", "sdi"))):
+            with self.subTest(net=net):
+                role, _, sub = genconfig.classify(net)
+                self.assertEqual((role, sub), want)
+
+    def test_a_bus_net_is_recognised_with_the_index_on_either_side(self):
+        for net, want in (("SPI3_SCK", ("3", "sck")), ("SCK3", ("3", "sck")),
+                          ("MISO3", ("3", "sdi")), ("MOSI3", ("3", "sdo")),
+                          ("SPI1_MISO", ("1", "sdi"))):
+            with self.subTest(net=net):
+                role, idx, sub = genconfig.classify(net)
+                self.assertEqual(role, "spi_bus")
+                self.assertEqual((idx, sub), want)
+
     def test_an_i2c_net_need_not_carry_its_bus_number(self):
         # The bus is settled by the pins, not the name, so a bare SCL/SDA is
         # as usable as I2C1-SCL.
