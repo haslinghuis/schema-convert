@@ -34,7 +34,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:/(.*))?$")
+# A pin name, optionally carrying ST's own dash qualifier and then an AF list:
+#   PB2   PA0-WKUP   PC14-OSC32_IN   PC6/TIM3_CH1/TIM8_CH1/USART6_TX
+# The qualifier names a second *fixed* function of the pin (wakeup, oscillator),
+# not an alternate function, so it is dropped rather than parsed as one.
+PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:-[A-Z0-9_]+)?(?:/(.*))?$")
 
 # Supply and system pins. They are not routable, but they occupy rows in the
 # symbol, so knowing where they are is what lets the tool say "this net landed on
@@ -209,6 +213,21 @@ def cluster(items: Sequence[Tuple[float, object]], tol: float) -> List[List[obje
     return groups
 
 
+# Altium stamps an invisible annotation token beside everything it draws:
+# PIU1014 (pin 14 of U10), COU8 (component U8), NLTX2 (net label TX2). They are
+# placed within a hair of the object they annotate - closer than the gap that
+# separates the pieces of a split pin name - so absorbing one destroys the name
+# it is attached to: 'PC0' + 'PIU108' becomes 'PC0PIU108', which no longer reads
+# as a pin, and the row is dropped with it.
+#
+# The designator letters are spelled out rather than [A-Z]{1,3}, which would
+# also swallow real alternate functions - G4 pin names carry COMP1_OUT.
+ANNOT_RE = re.compile(
+    r"^(?:PI|CO)(?:C|R|L|D|Q|U|Y|J|P|X|FB|TP|SW|RN|BT|VR)\d{1,6}$"
+    r"|^NL[A-Z0-9_]*$",
+)
+
+
 def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
     """
     Rejoin pin-name strings that the extractor split into several words.
@@ -219,6 +238,8 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
     on the symbol edge, but the piece holding the PXn token ends early, so it
     misses the edge cluster and the whole row - pin and net - is silently lost.
     Stitching the pieces back together first restores the true row extent.
+
+    An annotation token ends the name rather than joining it; see ANNOT_RE.
     """
     out: List[Word] = []
     for w in words:
@@ -233,18 +254,19 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
             if not nxt:
                 break
             v = min(nxt, key=lambda v: v.x0)
+            if ANNOT_RE.match(v.text):
+                break
             text, x1 = text + v.text, v.x1
         out.append(Word(text, w.x0, w.y0, x1, w.y1, w.page))
     return out
 
 
-def _find_part(words: Sequence[Word], page: int, min_pins: int
-               ) -> Optional[Tuple[SymbolPart, float]]:
-    """
-    The symbol on one sheet, as (part, row pitch), or None if this sheet has
-    none. Returns rather than raises: most pages of a set carry no MCU at all.
-    """
-    tagged: List[Tuple[Word, str, List[str], bool]] = []
+Tagged = Tuple[Word, str, List[str], bool]
+
+
+def _tag_pins(words: Sequence[Word]) -> List[Tagged]:
+    """Every word that reads as a pin name or a supply pin, with its AF list."""
+    tagged: List[Tagged] = []
     for w in assemble_pin_names(words):
         m = PIN_RE.match(w.text)
         if m:
@@ -255,7 +277,53 @@ def _find_part(words: Sequence[Word], page: int, min_pins: int
         p = POWER_PIN_RE.match(w.text)
         if p:
             tagged.append((w, p.group(1).upper(), [], False))
+    return tagged
 
+
+def _find_part(words: Sequence[Word], page: int, min_pins: int
+               ) -> Optional[Tuple[SymbolPart, float]]:
+    """
+    The strongest symbol on one sheet, as (part, row pitch), or None if this
+    sheet has none. Returns rather than raises: most pages carry no MCU at all.
+    """
+    got = _part_from_tagged(_tag_pins(words), page, min_pins)
+    return (got[0], got[1]) if got else None
+
+
+def _find_parts(words: Sequence[Word], page: int, min_pins: int,
+                limit: int = 6) -> List[Tuple[SymbolPart, float]]:
+    """
+    Every distinct symbol box on one sheet, strongest first.
+
+    A large MCU is routinely drawn as several boxes on the *same* sheet - one
+    per port group, often with a separate supply box. Each is its own edge
+    alignment, so keeping only the strongest silently drops the others: the
+    pins that were read stay correct and agreement stays at 100%, which is
+    precisely what makes the loss invisible. One H743 board here read 43 of its
+    100 pins that way and reported no problem at all.
+
+    So peel boxes off one at a time and let the caller decide which of them are
+    the same MCU - the merge test is the same one used for a symbol split
+    across sheets, and it is what rejects a second MCU or a repeated symbol.
+    """
+    tagged = _tag_pins(words)
+    out: List[Tuple[SymbolPart, float]] = []
+    for _ in range(limit):
+        got = _part_from_tagged(tagged, page, min_pins)
+        if not got:
+            break
+        part, pitch, used = got
+        out.append((part, pitch))
+        tagged = [t for t in tagged if id(t) not in used]
+    return out
+
+
+def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int
+                      ) -> Optional[Tuple[SymbolPart, float, set]]:
+    """
+    The strongest aligned column pair in `tagged`, plus the items it consumed
+    so a caller can look for the next box in what is left over.
+    """
     left = max(cluster([(t[0].x0, t) for t in tagged], tol=1.0), key=len, default=[])
     right = max(cluster([(t[0].x1, t) for t in tagged], tol=1.0), key=len, default=[])
     # A pin name belongs to whichever edge claimed it; drop the overlap so a
@@ -289,7 +357,8 @@ def _find_part(words: Sequence[Word], page: int, min_pins: int
     ys = sorted({round(r.y, 2) for r in rows})
     gaps = [round(b - a, 2) for a, b in zip(ys, ys[1:]) if 0.5 < b - a < 20]
     pitch = min(gaps) if gaps else 3.66
-    return SymbolPart(page, rows, left_edge, right_edge), pitch
+    used = {id(t) for t in left} | {id(t) for t in right}
+    return SymbolPart(page, rows, left_edge, right_edge), pitch, used
 
 
 def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
@@ -333,7 +402,7 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8,
         by_page = {page: by_page.get(page, [])}
 
     found = [got for p, ws in sorted(by_page.items())
-             if (got := _find_part(ws, p, min_pins))]
+             for got in _find_parts(ws, p, min_pins)]
     if not found:
         raise SystemExit("Could not find an MCU symbol - no aligned pin-name column")
 
@@ -347,9 +416,9 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8,
         if _is_split_half(parts, pitch, part, part_pitch):
             parts.append(part)
             pitches.append(part_pitch)
-        elif len(part.pins) >= min_pins:
+        elif len(part.pins) >= min_pins and part.page not in ignored:
             ignored.append(part.page)
-    parts.sort(key=lambda p: p.page)
+    parts.sort(key=lambda p: (p.page, -len(p.rows)))
     return Symbol(parts, min(pitches), npages, sorted(ignored))
 
 
@@ -390,8 +459,18 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
     coordinates, so words from the others sit inside the row band too and would
     compete - on equal terms - to be the net-label column.
     """
-    return [w for part in sym.parts
-            for w in _labels_for_part(words, part, sym.pitch)]
+    # A label drawn between two boxes of the same symbol is in the right-hand
+    # gutter of one and the left-hand gutter of the other, so it is collected
+    # twice. Keep one copy; which row it belongs to is settled by _owner(),
+    # which picks the nearer edge.
+    seen: set = set()
+    out: List[Word] = []
+    for part in sym.parts:
+        for w in _labels_for_part(words, part, sym.pitch):
+            if id(w) not in seen:
+                seen.add(id(w))
+                out.append(w)
+    return out
 
 
 def _labels_for_part(words: Sequence[Word], part: SymbolPart,
@@ -399,7 +478,12 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
     pad = pitch * 2
     lo, hi = part.y_min - pad, part.y_max + pad
 
-    sides: Dict[str, List[Word]] = {"L": [], "R": []}
+    # Only a side this part actually has pin names on can have a net-label
+    # gutter. A tall MCU is often drawn as two separate boxes on one sheet, and
+    # each is found as a one-sided part; searching the empty side would reach
+    # across the gap and collect the *other* box's labels, binding every net
+    # twice and leaving one box's rows with nothing.
+    sides: Dict[str, List[Word]] = {r.side: [] for r in part.rows}
     for w in words:
         if w.page != part.page:
             continue
@@ -407,9 +491,9 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
             continue
         if JUNK_RE.search(w.text) or POWER_RE.match(w.text):
             continue
-        if w.x1 < part.left_edge:
+        if w.x1 < part.left_edge and "L" in sides:
             sides["L"].append(w)
-        elif w.x0 > part.right_edge:
+        elif w.x0 > part.right_edge and "R" in sides:
             sides["R"].append(w)
 
     out: List[Word] = []
@@ -586,20 +670,44 @@ class Result:
         return out
 
 
+def _owner(sym: Symbol, w: Word) -> Optional[Tuple[SymbolPart, str]]:
+    """
+    The part whose gutter this label sits in, and which side of it.
+
+    Keyed on geometry rather than on the page, because two parts of one symbol
+    are routinely drawn side by side on the *same* sheet. A page lookup silently
+    keeps whichever of them was stored last, and every label then resolves
+    against that one box - so the other box's nets pair with nothing and its
+    pins are all reported unconnected.
+    """
+    best: Optional[Tuple[SymbolPart, str, float]] = None
+    for p in sym.parts:
+        if p.page != w.page:
+            continue
+        for side in ("L", "R"):
+            if not any(r.side == side for r in p.rows):
+                continue
+            if side == "L" and w.x1 < p.left_edge:
+                d = p.left_edge - w.x1
+            elif side == "R" and w.x0 > p.right_edge:
+                d = w.x0 - p.right_edge
+            else:
+                continue
+            if best is None or d < best[2]:
+                best = (p, side, d)
+    return (best[0], best[1]) if best else None
+
+
 def _pair(sym: Symbol, labels: Sequence[Word], offset: float
           ) -> Tuple[List[Tuple[Word, PinRow]], List[Word]]:
-    parts = {p.page: p for p in sym.parts}
     pairs, orphans = [], []
     for w in labels:
-        part = parts.get(w.page)
-        if part is None:
+        owner = _owner(sym, w)
+        if owner is None:
             orphans.append(w)
             continue
-        side = "L" if w.x1 < part.left_edge else "R"
+        part, side = owner
         cands = [r for r in part.rows if r.side == side]
-        if not cands:
-            orphans.append(w)
-            continue
         best = min(cands, key=lambda r: abs(r.y - (w.y0 + offset)))
         if abs(best.y - (w.y0 + offset)) <= sym.pitch / 2:
             pairs.append((w, best))
@@ -679,12 +787,21 @@ def detect_target(words: Sequence[Word], data: dict) -> Optional[str]:
     """
     blob = " ".join(w.text.upper() for w in words)
     names = {n.upper(): n for n in data["targets"]}
-    for m in re.finditer(r"STM32([FGHCN]\d)(\d{2})", blob):
+    for m in re.finditer(r"STM32([FGHCN]\d)([\dX]{2})", blob):
         family, digits = m.group(1), m.group(2)
         exact = names.get(f"STM32{family}{digits}")
         if exact:
             return exact
         siblings = sorted(n for u, n in names.items() if u.startswith(f"STM32{family}"))
+        # A sheet may name the part with an X standing in for a digit -
+        # STM32F7X2RXT covers the whole F7x2 line. Accept it only when exactly
+        # one seeded target fits, so a genuine ambiguity still asks for --target.
+        if "X" in digits:
+            pat = re.compile("STM32" + family + digits.replace("X", r"\d"))
+            fits = [n for n in siblings if pat.fullmatch(n.upper())]
+            if len(fits) == 1:
+                return fits[0]
+            continue
         if len(siblings) == 1:
             return siblings[0]
     return None

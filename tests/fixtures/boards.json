@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "852a86b41",
   "frozen_firmware_branch": "master",
-  "tool_rev": "31e2da7b7"
+  "tool_rev": "7892cc1a4"
  },
  "boards": [
   {
@@ -135,31 +135,35 @@
    "sha256": "0647ea81d6ceaa0863b610cd3957cba66d26744f1e6416b3814cf4367508e1eb",
    "note": "F4 BGA, symbol carries no AF lists, nets named after the bus rather than the device, and devices whose only net is a chip select",
    "target": "STM32F405",
-   "symbol_rows": 31,
+   "symbol_rows": 60,
    "pitch": 7.18,
-   "net_labels": 17,
+   "net_labels": 32,
    "offset": 0.5983,
    "agreement": [
-    8,
-    8
+    12,
+    12
    ],
-   "orphan_labels": 2,
+   "orphan_labels": 1,
    "nets_on_power_pins": 0,
-   "unmapped_pins": 4,
+   "unmapped_pins": 17,
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 18,
-   "timer_rows": 1,
-   "warnings": 5,
-   "notes": 8,
-   "netmap_digest": "de042d608dffd4378901352cb7ca1ac79fb03b53bb3b5213c12556907636f502",
-   "config_digest": "cc43d2bbe4487f38f0cd29ee57b0705ca58468c82f90055121c24e5cc0c140b7",
+   "config_defines": 33,
+   "timer_rows": 2,
+   "warnings": 8,
+   "notes": 12,
+   "netmap_digest": "4d16bf2feb6ae74edf4e50efd56f383921c0b43e643749c8af483bd46c369ee9",
+   "config_digest": "a43533137491cf554eaac570302670f362de3b6b019f43daad32ec0b729b2187",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
-    "unaccounted_roles": [],
+    "unaccounted_roles": [
+     "unclassified",
+     "unclassified",
+     "unclassified"
+    ],
     "unvalidated_pin_defines": []
    }
   },
@@ -168,15 +172,15 @@
    "sha256": "96af1f70ca6662a36c647c00c1f706ea9b37cf46bc0d90611fea7a284eae5971",
    "note": "G4, five sheets in one plot with the MCU on page 4 - the board that exercises per-page symbol detection; eight gutter labels on that page still pair with no row",
    "target": "STM32G474",
-   "symbol_rows": 31,
+   "symbol_rows": 32,
    "pitch": 7.18,
-   "net_labels": 39,
+   "net_labels": 32,
    "offset": 0.5983,
    "agreement": [
     18,
     18
    ],
-   "orphan_labels": 8,
+   "orphan_labels": 0,
    "nets_on_power_pins": 0,
    "unmapped_pins": 0,
    "firmware_gaps": 0,
@@ -184,10 +188,10 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 49,
    "timer_rows": 5,
-   "warnings": 6,
+   "warnings": 5,
    "notes": 5,
-   "netmap_digest": "695a1adb4dafb8de5f26f223082ab2d4f32bd455b36e432074251a8a141d9d29",
-   "config_digest": "74b9bf01dfed5a487de1f7044cb4a4e54a1f182b8b3846ead474907ecc64d5fb",
+   "netmap_digest": "6028cfd5ac6c9bfafc424e269e2970013637cad25c9657d362c13ca75780b96d",
+   "config_digest": "d4a34c013cc9bec2b2b1e2419c0c82caa26b971fd4d377578ced53602ffaf844",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

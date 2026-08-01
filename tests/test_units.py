@@ -616,6 +616,73 @@ class AssemblePinNameTests(unittest.TestCase):
         words = [Word("R21", 10, 100, 20, 103)]
         self.assertEqual(netmap.assemble_pin_names(words), [])
 
+    def test_an_altium_annotation_token_is_not_absorbed(self):
+        # Altium stamps PIU1014 / COU8 / NLTX2 beside everything it draws, and
+        # places them closer than the gap between the pieces of a split name.
+        # Absorbing one leaves 'PC0PIU108', which no longer reads as a pin, so
+        # the row and its net were dropped with no sign anything was lost.
+        for annot in ("PIU108", "PIC202", "COU8", "NLTX2"):
+            with self.subTest(annot=annot):
+                words = [Word("PC0", 147.3, 86.5, 152.3, 89.5),
+                         Word(annot, 154.0, 86.5, 166.0, 89.5)]
+                got = netmap.assemble_pin_names(words)
+                self.assertEqual([g.text for g in got], ["PC0"])
+
+    def test_a_real_alternate_function_starting_CO_is_still_absorbed(self):
+        # COMP1_OUT is a genuine G4 alternate function; the annotation guard
+        # spells out the designator letters rather than matching CO[A-Z]+.
+        words = [Word("PA1/", 10, 100, 20, 103),
+                 Word("COMP1_OUT", 20.5, 100, 40, 103)]
+        got = netmap.assemble_pin_names(words)
+        self.assertEqual([g.text for g in got], ["PA1/COMP1_OUT"])
+
+
+class PinNameFormTests(unittest.TestCase):
+    """netmap.PIN_RE: the spellings a pin name arrives in."""
+
+    def test_a_bare_pin(self):
+        self.assertEqual(netmap.PIN_RE.match("PB2").group(1), "PB2")
+
+    def test_sts_own_dash_qualifier_is_part_of_the_name(self):
+        # ST writes the pin's second fixed function after a dash. Rejecting the
+        # whole token loses the row: PB8-BOOT0 is where G4 keeps BOOT0.
+        for text, pin in (("PA0-WKUP", "PA0"), ("PC14-OSC32_IN", "PC14"),
+                          ("PH0-OSC_IN", "PH0"), ("PB8-BOOT0", "PB8")):
+            with self.subTest(text=text):
+                m = netmap.PIN_RE.match(text)
+                self.assertIsNotNone(m)
+                self.assertEqual(m.group(1), pin)
+
+    def test_a_qualifier_is_not_read_as_an_alternate_function(self):
+        # It names a fixed function, not an AF, so it must not become evidence
+        # that the pin supports something.
+        self.assertIsNone(netmap.PIN_RE.match("PA0-WKUP").group(2))
+
+    def test_an_af_list_still_parses(self):
+        m = netmap.PIN_RE.match("PC6/TIM3_CH1/USART6_TX")
+        self.assertEqual((m.group(1), m.group(2)), ("PC6", "TIM3_CH1/USART6_TX"))
+
+
+class TargetDetectionTests(unittest.TestCase):
+    """netmap.detect_target: part number on the sheet -> FC_TARGET_MCU."""
+
+    DATA = {"targets": {"STM32F722": {}, "STM32F745": {}, "STM32H743": {}}}
+
+    def detect(self, text):
+        return netmap.detect_target([Word(text, 0, 0, 10, 3)], self.DATA)
+
+    def test_an_exact_part_wins(self):
+        self.assertEqual(self.detect("STM32F722RET6"), "STM32F722")
+
+    def test_a_wildcard_digit_resolves_when_only_one_target_fits(self):
+        # Vendors label the symbol with an X standing in for a digit, so one
+        # sheet covers the whole line. STM32F7X2 can only be the F722 here.
+        self.assertEqual(self.detect("STM32F7X2RXT"), "STM32F722")
+
+    def test_an_ambiguous_wildcard_asks_rather_than_guesses(self):
+        data = {"targets": {"STM32F722": {}, "STM32F732": {}}}
+        self.assertIsNone(netmap.detect_target([Word("STM32F7X2", 0, 0, 10, 3)], data))
+
 
 class SyntheticSheetTests(unittest.TestCase):
     """
@@ -737,6 +804,96 @@ class SyntheticSheetTests(unittest.TestCase):
         labels = netmap.find_net_labels(words, sym)
         self.assertEqual(sorted(l.text for l in labels),
                          sorted(n for _, n in self.LEFT + self.RIGHT))
+
+
+class TwoBoxSheetTests(unittest.TestCase):
+    """
+    One MCU drawn as two boxes on a single sheet - the ordinary way a large
+    package is plotted, one box per port group.
+
+    Taking only the strongest box read half the package and said nothing about
+    it: the pins that were read were all correct and agreement stayed at 100%,
+    so the loss was invisible in every diagnostic the tool prints. On the
+    corpus this was the single biggest source of missing pins.
+    """
+
+    PITCH = 4.0
+    RISE = 0.3
+
+    # Box A is left-aligned with its labels out to the left; box B sits well to
+    # its right, right-aligned, with its labels further right again. Both share
+    # a y band - which is what makes a page-keyed lookup collapse them into one.
+    #
+    # A's names are all the same width, so they share an x1 as well as an x0 and
+    # the two alignments hold the identical set; the guard against counting a
+    # single column twice then blanks the right edge, and A comes out as a
+    # left-only box. B's names differ in width, so only their x1 agrees and B
+    # comes out right-only. That is the real shape of these plots, and it is
+    # why one pass over the sheet can only ever find one of the two.
+    BOX_A = [("PA5", "GYRO-SCK"), ("PA6", "GYRO-MISO"), ("PA7", "GYRO-MOSI"),
+             ("PB8", "I2C1-SCL"), ("PB9", "I2C1-SDA"), ("PB6", "TX1"),
+             ("PB3", None), ("PB4", None), ("PB5", None), ("PA0", None),
+             ("PA1", None), ("PB0", None), ("PA8", None)]
+    BOX_B = [("PC6", "MOTOR1"), ("PC7", "MOTOR2"), ("PC8", "MOTOR3"),
+             ("PA10", "RX1"), ("PB13", "SPI2_SCK"), ("PB14", "SPI2_MISO"),
+             ("PB15", "SPI2_MOSI"), ("PC9", None), ("PB10", None),
+             ("PC1", None), ("PC2", None), ("PC3", None)]
+
+    A_EDGE, B_EDGE = 60.0, 200.0
+
+    def sheet(self):
+        words = []
+        for i, (name, net) in enumerate(self.BOX_A):
+            y = 100 + i * self.PITCH
+            words.append(Word(name, self.A_EDGE, y, self.A_EDGE + 4 * len(name), y + 2))
+            if net:
+                words.append(Word(net, 1.0, y - self.RISE, 9.0, y - self.RISE + 2))
+        for i, (name, net) in enumerate(self.BOX_B):
+            y = 100 + i * self.PITCH
+            words.append(Word(name, self.B_EDGE - 4 * len(name), y, self.B_EDGE, y + 2))
+            if net:
+                words.append(Word(net, 205.0, y - self.RISE, 225.0, y - self.RISE + 2))
+        return words
+
+    def test_the_boxes_are_one_sided_as_the_real_plots_are(self):
+        sym = netmap.find_symbol(self.sheet())
+        self.assertEqual(len(sym.parts), 2)
+        sides = sorted("".join(sorted({r.side for r in p.rows})) for p in sym.parts)
+        self.assertEqual(sides, ["L", "R"])
+
+    def test_both_boxes_are_found(self):
+        sym = netmap.find_symbol(self.sheet())
+        self.assertEqual(sorted(r.pin for r in sym.rows),
+                         sorted(n for n, _ in self.BOX_A + self.BOX_B))
+
+    def test_every_net_on_both_boxes_binds(self):
+        words = self.sheet()
+        sym = netmap.find_symbol(words)
+        res = netmap.resolve(sym, netmap.find_net_labels(words, sym), fake_caps())
+        self.assertEqual(res.orphans, [])
+        self.assertEqual(res.agreement, 1.0)
+        self.assertEqual({l.net: l.pin for l in res.links},
+                         {net: name for name, net in self.BOX_A + self.BOX_B if net})
+
+    def test_a_label_is_bound_once_not_once_per_box(self):
+        # A label drawn between the boxes is in one box's right gutter and the
+        # other's left, so it is collected twice; binding it twice would report
+        # the same net on two different pins.
+        words = self.sheet()
+        sym = netmap.find_symbol(words)
+        res = netmap.resolve(sym, netmap.find_net_labels(words, sym), fake_caps())
+        nets = [l.net for l in res.links]
+        self.assertEqual(len(nets), len(set(nets)))
+
+    def test_a_box_does_not_claim_the_other_boxs_gutter(self):
+        # Box A has pin names only on its left edge, so it has no right-hand
+        # gutter. Searching one anyway reaches across the gap and takes box B's
+        # labels, which then bind to A's rows and strand B's.
+        words = self.sheet()
+        sym = netmap.find_symbol(words)
+        a = min(sym.parts, key=lambda p: p.left_edge)
+        got = {w.text for w in netmap._labels_for_part(words, a, sym.pitch)}
+        self.assertEqual(got, {net for _, net in self.BOX_A if net})
 
 
 # --------------------------------------------------------------------------- #
