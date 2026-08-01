@@ -525,6 +525,35 @@ class TraceCsBusTests(unittest.TestCase):
         self.assertIsNone(bus)
         self.assertIn("cannot be told", note)
 
+    def test_a_part_with_its_pins_spread_around_it_still_traces(self):
+        # A flash chip is drawn as a large symbol: its CS and one data line sit
+        # together while the other two come off the far side. They are still all
+        # nearer than anything on another bus, which is the thing that decides
+        # it - requiring them to cluster would leave this board to a reviewer.
+        words = [Word("FLASH_CS", 100, 500, 130, 502),
+                 Word("SPI1-MISO", 100, 505, 130, 507),
+                 Word("SPI1-SCK", 100, 630, 130, 632),
+                 Word("SPI1-MOSI", 100, 631, 130, 633),
+                 Word("SPI2-SCK", 100, 800, 130, 802),
+                 Word("SPI2-MISO", 100, 805, 130, 807),
+                 Word("SPI2-MOSI", 100, 810, 130, 812)]
+        bus, note = genconfig.trace_cs_bus(words, [], "FLASH_CS", self.BUSES,
+                                           self.PITCH)
+        self.assertEqual(bus, "SPI1")
+
+    def test_a_spread_out_part_is_refused_when_a_rival_is_interleaved(self):
+        # Same shape, but the other bus's lines fall between this one's. Nothing
+        # then says which part the far labels belong to.
+        words = [Word("FLASH_CS", 100, 500, 130, 502),
+                 Word("SPI1-MISO", 100, 505, 130, 507),
+                 Word("SPI1-SCK", 100, 700, 130, 702),
+                 Word("SPI2-SCK", 100, 600, 130, 602),
+                 Word("SPI2-MISO", 100, 605, 130, 607)]
+        bus, note = genconfig.trace_cs_bus(words, [], "FLASH_CS", self.BUSES,
+                                           self.PITCH)
+        self.assertIsNone(bus)
+        self.assertIn("not clear enough", note)
+
     def test_a_lone_line_is_not_a_bus_grouping(self):
         words = [Word("SPI1-SCK", 100, 500, 120, 502),
                  Word("GYRO_CS", 100, 492, 120, 494)]

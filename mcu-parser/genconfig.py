@@ -1017,12 +1017,22 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
 
     near, bus, runner, ws, h = best
     radius = max(near * 5, pitch * 3)
+    own = sorted(gap(h, w) for w in ws if w.page == h.page)
     roles = {SPI_LINE_RE.fullmatch(w.text).group(2).lower()
              for w in ws if w.page == h.page and gap(h, w) <= radius}
-    if len(roles) < 2:
+    # Either the bus's lines cluster tightly around the chip select, or - when
+    # the part is drawn as a large symbol with its pins spread around it - every
+    # one of them is still nearer than anything belonging to another bus. A
+    # flash chip is routinely the second shape: its CS and one data line sit
+    # together while the other two come off the far side, 130pt away, which is
+    # still a third of the distance to the next bus.
+    clustered = len(roles) >= 2
+    enclosed = len(own) >= 2 and own[-1] < runner
+    if not (clustered or enclosed):
         return None, (f"{cs_net}: {bus} is the nearest bus where it is drawn away "
                       f"from the MCU, but only {len(roles)} of its lines are with "
-                      "it, so the grouping is not clear enough to use")
+                      "it and the rest are no nearer than another bus, so the "
+                      "grouping is not clear enough to use")
     if runner < near * 3:
         return None, (f"{cs_net}: {bus} is nearest where it is drawn away from the "
                       f"MCU ({near:.0f}pt) but another bus is nearly as close "
