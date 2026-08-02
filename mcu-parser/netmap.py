@@ -389,6 +389,51 @@ def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
     return abs(part_pitch - pitch) <= pitch * 0.1
 
 
+# Words any flight-controller sheet has in quantity, whatever the vendor's
+# naming style. Used only to tell "this text means nothing" from "this text
+# means something the tool did not expect".
+SCHEMATIC_VOCAB = re.compile(
+    r"^(?:P[A-K]\d{1,2}|GND|VCC|VDD|VSS|VBAT|3V3|5V|NRST|BOOT0?|"
+    r"(?:SPI|I2C|USART|UART|TIM|ADC|DMA)\d|MOTOR\d?|SCL|SDA|SCK|MISO|MOSI)",
+    re.I,
+)
+
+
+def describe_unreadable(words: Sequence[Word]) -> Optional[str]:
+    """
+    Why this document yielded nothing, when the answer is not about geometry.
+
+    Two cases look identical from here and neither is a parse failure, so
+    reporting them as one sends the reader after the wrong problem:
+
+      * A scan. No text layer at all, and nothing short of OCR will help.
+      * A text layer that carries no characters. Some CAD exporters write every
+        glyph as a Type 3 drawing procedure named /0, /1, /2 ... with no
+        ToUnicode map, so the extractor recovers the byte codes rather than the
+        letters and 'Interface Type' comes back as 'RNLC@S?ICÿTFCA'. There is
+        plenty of text, and none of it means anything.
+
+    Both are recognised by the same test: a real sheet carries this vocabulary
+    in quantity. Returns None when the text is fine and the failure really is
+    the symbol.
+    """
+    if len(words) < 25:
+        return ("This PDF has no text layer - it is a scan or an image export, "
+                "so there is nothing to read. Ask the vendor for the PDF their "
+                "CAD tool produced rather than a printed or photographed copy.")
+    known = sum(1 for w in words if SCHEMATIC_VOCAB.match(w.text))
+    if known >= 5:
+        return None
+    return (f"This PDF's text carries no characters: {len(words)} words were "
+            f"extracted and {known} of them read as anything a schematic "
+            "contains - no pin names, no GND, no bus names. The fonts are drawn "
+            "glyphs with no character mapping (pdffonts will show Type 3, "
+            "Custom encoding, uni=no), so the extractor recovers the internal "
+            "codes instead of the letters. Nothing here can read it. Ask the "
+            "vendor to re-export with embedded standard fonts, or for the "
+            "source schematic.")
+
+
 def find_symbol(words: Sequence[Word], min_pins: int = 8,
                 page: Optional[int] = None) -> Symbol:
     """
@@ -411,7 +456,9 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8,
     found = [got for p, ws in sorted(by_page.items())
              for got in _find_parts(ws, p, min_pins)]
     if not found:
-        raise SystemExit("Could not find an MCU symbol - no aligned pin-name column")
+        raise SystemExit(describe_unreadable(words)
+                         or "Could not find an MCU symbol - no aligned pin-name "
+                            "column")
 
     # Strength is distinct GPIO pins, not rows: a single-column symbol whose
     # names cluster on both alignments would otherwise count itself twice.
@@ -877,7 +924,10 @@ def main() -> int:
     data = json.loads(DATA_FILE.read_text()) if DATA_FILE.exists() else {"targets": {}}
     target = args.target or detect_target(words, data)
     if not target:
-        raise SystemExit("Could not detect FC_TARGET_MCU - pass --target")
+        raise SystemExit(describe_unreadable(words)
+                         or "Could not detect FC_TARGET_MCU: no part number on "
+                            "the sheet matches a seeded target. Many sheets "
+                            "simply never name the MCU - pass --target")
     caps, data = load_caps(target)
 
     sym = find_symbol(words, page=args.page)

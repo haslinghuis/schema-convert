@@ -1553,7 +1553,10 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     words = extract_words(pdf)
     target = target or netmap.detect_target(words, fw)
     if not target:
-        raise SystemExit("Could not detect FC_TARGET_MCU - pass --target")
+        raise SystemExit(netmap.describe_unreadable(words)
+                         or "Could not detect FC_TARGET_MCU: no part number on "
+                            "the sheet matches a seeded target. Many sheets "
+                            "simply never name the MCU - pass --target")
     caps = fw["targets"][target]
 
     sym = find_symbol(words, page=page)

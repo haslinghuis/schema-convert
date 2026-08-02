@@ -864,6 +864,17 @@ class TargetDetectionTests(unittest.TestCase):
     def test_no_part_number_at_all(self):
         self.assertIsNone(netmap.detect_target([w("R21", 0, 0)], {"targets": {}}))
 
+    def test_a_wildcard_digit_resolves_when_only_one_target_fits(self):
+        # Vendors label the symbol with an X standing in for a digit, so one
+        # sheet covers a whole line. STM32F7X2 can only be the F722 here.
+        data = {"targets": {"STM32F722": {}, "STM32F745": {}}}
+        self.assertEqual(netmap.detect_target([w("STM32F7X2RXT", 0, 0)], data),
+                         "STM32F722")
+
+    def test_an_ambiguous_wildcard_asks_rather_than_guesses(self):
+        data = {"targets": {"STM32F722": {}, "STM32F732": {}}}
+        self.assertIsNone(netmap.detect_target([w("STM32F7X2", 0, 0)], data))
+
 
 # --------------------------------------------------------------------------- #
 # Geometry
@@ -961,25 +972,42 @@ class PinNameFormTests(unittest.TestCase):
         self.assertEqual((m.group(1), m.group(2)), ("PC6", "TIM3_CH1/USART6_TX"))
 
 
-class TargetDetectionTests(unittest.TestCase):
-    """netmap.detect_target: part number on the sheet -> FC_TARGET_MCU."""
+class UnreadableDocumentTests(unittest.TestCase):
+    """
+    netmap.describe_unreadable: why nothing came out, when it is not geometry.
 
-    DATA = {"targets": {"STM32F722": {}, "STM32F745": {}, "STM32H743": {}}}
+    Reporting "no aligned pin-name column" for a document whose text carries no
+    characters sends the reader to look at the symbol, which is not the problem
+    and cannot be made into one.
+    """
 
-    def detect(self, text):
-        return netmap.detect_target([Word(text, 0, 0, 10, 3)], self.DATA)
+    def words(self, texts):
+        return [Word(t, 10.0 + 8 * i, 100.0, 30.0 + 8 * i, 103.0)
+                for i, t in enumerate(texts)]
 
-    def test_an_exact_part_wins(self):
-        self.assertEqual(self.detect("STM32F722RET6"), "STM32F722")
+    def test_a_readable_sheet_gets_no_special_message(self):
+        # The caller then falls back to its own wording, which is accurate.
+        ws = self.words(["PA5", "PA6", "GND", "SPI1", "MOTOR1", "VBAT"] * 6)
+        self.assertIsNone(netmap.describe_unreadable(ws))
 
-    def test_a_wildcard_digit_resolves_when_only_one_target_fits(self):
-        # Vendors label the symbol with an X standing in for a digit, so one
-        # sheet covers the whole line. STM32F7X2 can only be the F722 here.
-        self.assertEqual(self.detect("STM32F7X2RXT"), "STM32F722")
+    def test_a_scan_is_named_as_one(self):
+        self.assertIn("no text layer",
+                      netmap.describe_unreadable(self.words(["1", "2"])))
 
-    def test_an_ambiguous_wildcard_asks_rather_than_guesses(self):
-        data = {"targets": {"STM32F722": {}, "STM32F732": {}}}
-        self.assertIsNone(netmap.detect_target([Word("STM32F7X2", 0, 0, 10, 3)], data))
+    def test_text_that_carries_no_characters_is_named_as_that(self):
+        # What a Type 3 font with /0 /1 /2 glyph names and no ToUnicode gives
+        # back: plenty of words, none of them meaning anything.
+        soup = [">?@AB?@C", "RNLC@S?IC", "TFCA", "QGAHKC", "ECFGH@IC"] * 30
+        why = netmap.describe_unreadable(self.words(soup))
+        self.assertIn("carries no characters", why)
+        self.assertIn("Type 3", why)
+
+    def test_a_handful_of_real_tokens_is_enough_to_trust_the_text(self):
+        # An unusual sheet is not an unreadable one; the threshold is low so a
+        # board the tool merely does not understand is not mislabelled.
+        ws = self.words(["@@@", "###", "%%%"] * 30
+                        + ["PA5", "PB3", "GND", "VCC", "SPI2"])
+        self.assertIsNone(netmap.describe_unreadable(ws))
 
 
 class SyntheticSheetTests(unittest.TestCase):
