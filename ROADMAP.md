@@ -647,16 +647,41 @@ source of truth, and the MCU identity is what selects the tables), so the
 options are to take a hint from the filename or to keep asking for `--target`.
 Whichever, the error should say what it looked for.
 
-### 3.6 Scanned schematics have no text layer
+### 3.6 Unreadable documents are now named, and one class was invisible — DONE
 
-17 of the 168 are images with no extractable text. Nothing here can read them
-without OCR, and that is a dependency this repo will not take. The tool should
-say "this PDF has no text layer" rather than "could not detect FC_TARGET_MCU",
-which sends the reader looking for the wrong problem.
+A submission arrived that cannot be converted at all, and the tool blamed the
+geometry: first "could not detect FC_TARGET_MCU", then, once told the target,
+"no aligned pin-name column". Neither is the problem.
 
-A further handful of corpus files are not schematics at all — wiring diagrams,
-a datasheet, calibration notes, one PID paper. Recognising and naming that case
-costs little and stops it looking like a parse failure.
+Its fonts are **Type 3 with a custom encoding, no embedded font file and no
+ToUnicode map**, and the `/Differences` array names the glyphs `/0 /1 /2 …
+/141` — sequential numbers carrying no character information at all, with the
+shapes drawn by `CharProcs`. Every glyph is a drawing procedure. `pdftotext`
+recovers the internal byte codes instead of the letters, so *Interface Type*
+comes back as `RNLC@S?ICÿTFCA`. 1904 words over seven pages, not one of them a
+pin name. Only OCR could read it, and that is a dependency this repo will not
+take.
+
+The lesson is the reclassification. Naming the two non-parse failures — no text
+layer at all, and a text layer that carries no characters — split the 64
+schematics that yield nothing into:
+
+| | |
+|---|---|
+| never name their MCU (read fine with `--target`, §3.5) | 32 |
+| scans, no text layer | 16 |
+| **text present, fonts unmappable** | **12** |
+| text fine, symbol genuinely not found | 3 |
+| `pdftotext` crash | 1 |
+
+**Those 12 were already in the corpus and had been counted as geometry
+failures.** A whole class of defect was invisible because the diagnostic
+described the last thing that failed rather than the first. That is the same
+shape as §1.5 and §1.8 — the tool knew, and did not say.
+
+A handful of corpus files are also not schematics at all — wiring diagrams, a
+datasheet, calibration notes, one PID paper. They fall into the "never names
+its MCU" bucket, which is harmless but not precise.
 
 ---
 
@@ -762,11 +787,11 @@ seeder's firmware rev in the generated header.
 6. **The cheap multiplicities**: §2.4 second I2C bus, §2.5 second PINIO. Both
    are visible in the one shipping-config comparison there is (§2.2), both are
    small, and between them they account for two of its three differences.
-7. **§3.5 / §3.6 say what actually went wrong.** 44 of the 168 schematics fail
-   with a message that sends the reader after the wrong thing. Distinguishing
-   "no text layer", "not a schematic", and "the sheet never names the MCU — try
-   `--target`" is nearly free and turns a third of the corpus from *failed* into
-   *actionable*.
+7. ~~**§3.5 / §3.6 say what actually went wrong.**~~ — done, and it uncovered a
+   defect class nobody knew was there: 12 corpus schematics whose fonts carry no
+   character mapping had been counted as geometry failures. §3.5 remains as a
+   *capability* gap — 32 sheets never name their MCU, and read at 100%
+   agreement the moment you pass `--target`.
 8. **§3.4 AT32** — 14 boards, the whole of the non-STM32 gap.
 9. **§2.3 SDIO** for the SD card, which is how boards actually wire it.
 10. **§4.5 `config.c`** — still unsupported.
