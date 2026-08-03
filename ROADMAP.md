@@ -35,6 +35,30 @@ that improves one board and quietly costs three is the normal failure mode
 here, and only the aggregate shows it. Two of the three fixes below looked
 correct on their motivating board and were caught this way.
 
+## What is still open
+
+Sizes are measured against the 168-schematic corpus, not estimated. The detail
+is in each section; this is the index.
+
+| | | boards |
+|---|---|---|
+| §2.4 | **Second I2C bus** — `genconfig` holds one `{scl, sda}`, so the second overwrites the first. No board emits two. Small, mechanical. | 29 show the collision |
+| §3.3 | Chip-select-only devices whose CS is never drawn away from the MCU — the genuine wire-tracing cases | 27 devices |
+| §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
+| §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
+| §2.3 | SD card over **SDIO/SDMMC** — only the SPI form is implemented | 12 |
+| §4.5 | `config.c` is neither emitted nor detected as needed | — |
+
+Not worth prioritising, and the reason matters:
+
+- **§2.1 burst DShot.** `TIMUPn_DMA_OPT` is never emitted, but **no** corpus
+  board puts all four motors on one timer, which is the case burst exists for.
+- **§3.2 remainder.** PINIO polarity and `DEFAULT_CURRENT_METER_SCALE` are not
+  derivable from a schematic *at all* — closed as impossible, not open. Both are
+  flagged for the vendor rather than guessed.
+- **21 sheets print no crystal frequency anywhere.** Not recoverable from the
+  PDF; `--hse-mhz` or the vendor.
+
 ---
 
 ## 1. Defects
@@ -522,13 +546,22 @@ Category-2 findings on H7, F7 and C5 are mostly peripherals a *sibling* part has
 (UART9/USART10 on H723, I2C4 on F76x, USART6/7 on C591); the report names the
 excluded siblings so these are not misread as defects.
 
-#### Datasheet coverage is partial
+#### Datasheet coverage is now complete for every family that is harvested
 
-Locally available under `manufacturers/datasheets/`: C5, F7, G4, H5, H7, N6.
-**No F4 datasheet at all** — and F4 is roughly 250 of the 619 boards. AT32 and
-APM32 have none either. "Everything has been verified" cannot be claimed for a
-family whose datasheet is missing, and the tool should say so rather than
-reporting a clean run.
+Locally available under `manufacturers/datasheets/`: **F4** (`stm32f405-407.pdf`,
+DS8626), C5, F7, G4, H5, H7, N6. F4 was the blocking gap — roughly 250 of the
+619 boards — and is closed; its audit reads 119/120 firmware pairs out of the AF
+table and comes back clean apart from `TIM1_CH1N` on `PA11`, which the silicon
+has as `TIM1_CH4`, raised as #15510 and still open.
+
+What remains uncovered is AT32 and APM32, and that is not a datasheet problem:
+`seed_firmware.py` does not harvest their tables at all (§3.4), so there is
+nothing to audit *against*. Getting their datasheets is worth nothing until that
+lands.
+
+The principle stands either way: "everything has been verified" cannot be
+claimed for a family whose datasheet is missing, and the tool should say so
+rather than reporting a clean run.
 
 ### 3.2 Circuit-level analysis — the VBAT divider is DONE
 

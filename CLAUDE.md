@@ -101,8 +101,14 @@ worktrees. `seed_firmware.py` prefers the newest one on `master`; pass
 `--firmware` to pin it. Some clones carry uncommitted work: never commit, stash,
 revert or switch branches in a tree you did not create.
 
-Datasheets are in `../manufacturers/datasheets/`. There is no F4 datasheet, which
-is the blocking gap for the largest family by board count.
+Datasheets are in `../manufacturers/datasheets/`. Every STM32 family the seeder
+harvests now has one: F4 (`stm32f405-407.pdf`, DS8626), F7, G4, H5, H7, C5, N6.
+
+F4 was the blocking gap and is closed. Its audit comes back clean apart from
+`TIM1_CH1N` on `PA11`, which the silicon has as `TIM1_CH4` — raised as #15510
+and still open, so expect that one finding until it merges. The remaining
+families without a datasheet are AT32 and APM32, and those are not harvested at
+all yet (ROADMAP §3.4), so nothing can be audited against them.
 
 ---
 
