@@ -69,7 +69,18 @@ input reached that state before adding the check.
 
 Vendor schematics are confidential unreleased hardware, and the configs generated
 from them describe the same boards. `.gitignore` covers `*.pdf`, `configs/`,
-`config.h`, and the generated `data/firmware.json`.
+`config.h` and `out/`.
+
+`data/firmware.json` **is** committed, which reverses the earlier rule. Without
+it a clone converts nothing, which rules out handing this to anyone who does not
+already keep a firmware checkout. Every byte of it is harvested from Betaflight's
+own GPL sources, so there is nothing confidential in it — but note *why* it was
+nearly a leak anyway: it used to record the path of the tree it came from, and
+one tree on this machine is named after the vendor submission it was cut for.
+The seeder now records rev, branch and date and deliberately not the path.
+
+That is the general shape to watch for. The risk is rarely the data; it is the
+provenance stapled to it — a checkout path, a filename, a directory name.
 
 Board and manufacturer names are scrubbed from docs too — examples use
 `EXAMPLEH562` / `CUST`. Before pushing:

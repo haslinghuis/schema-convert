@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # The capability snapshot goes stale on its own; nothing else here does.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # poppler supplies pdftotext, the only non-stdlib dependency.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      # The schematics are not in the repo, so the board tests skip. That is the
+      # supported path and is asserted: an empty PDF directory must skip, not fail.
+      - run: python3 -m unittest discover tests -v
+        env:
+          SCHEMA_CONVERT_PDF_DIRS: ""
+
+  seed-drift:
+    name: Capability data vs Betaflight master
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check out Betaflight
+        uses: actions/checkout@v4
+        with:
+          repository: betaflight/betaflight
+          ref: master
+          path: .betaflight
+          fetch-depth: 1
+      - name: Compare the committed tables against a fresh harvest
+        run: python3 tests/check_seed_drift.py --firmware .betaflight

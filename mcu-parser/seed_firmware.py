@@ -692,11 +692,15 @@ def firmware_revision(fw: Path) -> Dict[str, str]:
             ).stdout.strip()
         except Exception:
             return ""
+    # Deliberately no path. This file is committed, and a checkout path is both
+    # a local absolute path and, on these machines, a board codename - one tree
+    # here is named after the vendor submission it was cut for. The rev, date
+    # and branch are what make the seed traceable; where it was generated is
+    # nobody's business and cannot be scrubbed once published.
     return {
         "rev": git("rev-parse", "--short=9", "HEAD"),
         "date": git("log", "-1", "--format=%cs"),
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
-        "path": str(fw),
     }
 
 
