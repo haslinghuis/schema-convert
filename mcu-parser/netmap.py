@@ -435,18 +435,29 @@ def _find_parts(words: Sequence[Word], page: int, min_pins: int,
     across sheets, and it is what rejects a second MCU or a repeated symbol.
     """
     tagged = _tag_pins(words)
+    # Top or bottom is judged against the box found so far, not against every
+    # pin-shaped word on the sheet: other components carry pin names too, and on
+    # one board that stretched the reference to twice the symbol's height and
+    # put its bottom edge above the midpoint - so it came back labelled T, and
+    # its labels were then looked for on the wrong side.
+    frame: Optional[Tuple[float, float, float, float]] = None
     out: List[Tuple[SymbolPart, float]] = []
     for _ in range(limit):
-        got = _part_from_tagged(tagged, page, min_pins)
+        got = _part_from_tagged(tagged, page, min_pins, frame)
         if not got:
             break
         part, pitch, used = got
+        frame = (part.left_edge, part.top_edge, part.right_edge, part.bottom_edge) \
+            if frame is None else (
+                min(frame[0], part.left_edge), min(frame[1], part.top_edge),
+                max(frame[2], part.right_edge), max(frame[3], part.bottom_edge))
         out.append((part, pitch))
         tagged = [t for t in tagged if id(t) not in used]
     return out
 
 
-def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int
+def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
+                      frame: Optional[Tuple[float, float, float, float]] = None
                       ) -> Optional[Tuple[SymbolPart, float, set]]:
     """
     The strongest edge in `tagged`, plus the items it consumed so a caller can
@@ -464,8 +475,13 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int
     """
     if not tagged:
         return None
-    box = (min(t[0].x0 for t in tagged), min(t[0].y0 for t in tagged),
-           max(t[0].x1 for t in tagged), max(t[0].y1 for t in tagged))
+    # Top or bottom is decided against the whole symbol's extent, not against
+    # whatever is left on this pass. Edges are peeled off one at a time, so by
+    # the time the last one is reached it is the only thing left and would
+    # always look like the top of itself - which is how a bottom edge came back
+    # labelled T, with its labels then searched for above it.
+    box = frame or (min(t[0].x0 for t in tagged), min(t[0].y0 for t in tagged),
+                    max(t[0].x1 for t in tagged), max(t[0].y1 for t in tagged))
 
     def biggest(coord) -> List[Tagged]:
         return max(cluster([(coord(t[0]), t) for t in tagged], tol=1.0),
@@ -549,11 +565,31 @@ def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
     """
     mine = set().union(*(p.pins for p in accepted))
     theirs = part.pins
-    if len(theirs) < 12 or len(theirs) * 3 < len(mine):
+    if not theirs or mine & theirs:
         return False
-    if mine & theirs:
+    if abs(part_pitch - pitch) > pitch * 0.1:
         return False
-    return abs(part_pitch - pitch) <= pitch * 0.1
+
+    # Substantial in its own right - the original test, and the only one
+    # available across sheets, where there is no geometry to appeal to.
+    if len(theirs) >= 12 and len(theirs) * 3 >= len(mine):
+        return True
+
+    # Or touching what has already been accepted. The four edges of a QFP
+    # symbol meet at its corners while a second MCU elsewhere on the sheet does
+    # not, so a small edge can be admitted on position instead of size: the
+    # size test alone dropped a real 11-pin bottom edge for being smaller than a
+    # third of the rest of its own symbol. It is an *additional* way in, not a
+    # replacement - two columns of one symbol are routinely drawn far enough
+    # apart to fail an adjacency test, and requiring it lost 20 pins on a board
+    # that had been read correctly for weeks.
+    reach = pitch * 6
+    return any(
+        part.left_edge <= p.right_edge + reach
+        and p.left_edge <= part.right_edge + reach
+        and part.top_edge <= p.bottom_edge + reach
+        and p.top_edge <= part.bottom_edge + reach
+        for p in accepted if p.page == part.page)
 
 
 # Words any flight-controller sheet has in quantity, whatever the vendor's
