@@ -42,7 +42,6 @@ is in each section; this is the index.
 
 | | | boards |
 |---|---|---|
-| §2.4 | **Second I2C bus** — `genconfig` holds one `{scl, sda}`, so the second overwrites the first. No board emits two. Small, mechanical. | 29 show the collision |
 | §3.3 | Chip-select-only devices whose CS is never drawn away from the MCU — the genuine wire-tracing cases | 27 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
@@ -402,24 +401,41 @@ and it changes what the gap is:
 - **PPM and escserial** genuinely do not appear. Both are legacy; the corpus
   suggests they are no longer worth chasing.
 
-### 2.4 Only one I2C bus is emitted — OPEN, and larger than it first looked
+### 2.4 Second I2C bus — DONE
 
-A board with I2C1 *and* I2C2 gets one of them, and any device on the other is
-attributed to the wrong bus — the shipping-config comparison in §2.2 lands the
-baro on `I2CDEV_1` where the hand-written config has `I2CDEV_2`. `netmap`
-resolves both buses correctly and firmware-validates every pin; `genconfig`
-collapses them, because it keeps a single `i2c` dict of `{scl, sda}` and the
-second bus simply overwrites the first.
+`genconfig` kept a single `i2c` dict of `{scl, sda}`, so a board with I2C1 *and*
+I2C2 lost whichever was read first and the survivor wore the other's name. It
+was not rare, it was structurally impossible: **no board in the corpus emitted
+more than one I2C bus.** The visible symptom was the note *"net names say I2C2
+but the pins are I2C1"*, on 29 boards.
 
-Measured: **no board in the corpus emits more than one I2C bus** — it is not
-rare, it is structurally impossible. 69 emit exactly one and 35 none. The
-visible symptom is the note *"net names say I2C2 but the pins are I2C1"*, which
-fires on **29 boards**: that is the surviving pins of one bus wearing the
-surviving name of the other.
+Fixed by keying the collected nets on the index in their name, so each bus is
+its own group — the same shape as `spi_named`. The *instance* still comes from
+the pins through the firmware map; the index only says which nets belong
+together, and `infer_i2c_bus` still reports it when the two disagree.
 
-This is now the second-largest coverage gap after the §3.3 tail, and unlike
-that one it is a small mechanical change — the same shape as the PINIO fix in
-§2.5, which is what it should be modelled on.
+That left the second half: **which bus each device is on**. An I2C part has no
+chip select, so the trick that settles SPI (§3.3) does not apply — there is no
+per-device net to follow. The part itself is the anchor instead: a baro marked
+`DPS310` is drawn with its SCL and SDA beside it. `i2c_bus_for()` reads those,
+with the same discipline as the SPI tracer — nearest bus must be 3× nearer than
+the next, MCU-side labels excluded, and it declines rather than guesses.
+
+| | before | after |
+|---|---|---|
+| I2C SCL/SDA pins emitted | 138 | **202** |
+| boards emitting two I2C buses | 0 | **27** |
+| boards showing the name/pin collision | 29 | **0** |
+
+17 baro/mag parts are traced to a bus by their own nets and 3 refused as
+ambiguous. 27 boards gain defines, none lose any, and all four golden fixtures
+are byte-identical.
+
+On the one board with a hand-written config to check against, the whole I2C
+block now matches it exactly — including `BARO_I2C_INSTANCE I2CDEV_2`, which
+was `_1` before, off a `DPS310` traced 23pt from I2C2's nets against 423pt to
+the next. That board is now down to **a single difference** across 62 agreeing
+defines: `ADC1_DMA_OPT` 8 against 10, two equally free DMAMUX channels.
 
 ### 2.5 Two PINIOs — DONE
 
@@ -870,10 +886,8 @@ seeder's firmware rev in the generated header.
    hand-editing up from 60 to 78 of 104. The bus is read at the device end,
    where the sheet already states it. The 32 that remain are the real §3.2
    cases.
-6. **§2.4 second I2C bus** — §2.5 is done; this is the half that is left, and
-   it is bigger than it looked: no board emits two I2C buses because the
-   generator cannot hold two, and 29 boards visibly show the collision. Small,
-   mechanical, and modelled on the PINIO fix.
+6. ~~**§2.4 second I2C bus**~~ — done, both halves: every bus is emitted, and
+   each device is attributed to its own by the nets drawn around it.
 7. ~~**§3.5 / §3.6 say what actually went wrong.**~~ — done, and it uncovered a
    defect class nobody knew was there: 12 corpus schematics whose fonts carry no
    character mapping had been counted as geometry failures. §3.5 remains as a

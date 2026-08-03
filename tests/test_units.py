@@ -411,6 +411,60 @@ class SpiSolverTests(unittest.TestCase):
         self.assertTrue(any("PC13" in n or "distinct role" in n for n in notes), notes)
 
 
+class I2cDeviceBusTests(unittest.TestCase):
+    """
+    genconfig.i2c_bus_for: which I2C bus a part sits on.
+
+    An I2C device has no chip select, so the trick that settles SPI does not
+    apply - there is no per-device net to follow. The part itself is the anchor:
+    a baro is drawn with its SCL and SDA beside it, and on a two-bus board those
+    say which one.
+    """
+
+    def part(self, marking="DPS310", x=100.0, y=500.0, page=1):
+        return genconfig.PartHit(marking, marking, True, x, y, page)
+
+    def sheet(self, entries):
+        return [Word(t, x, y, x + 24, y + 3, pg) for t, x, y, pg in entries]
+
+    def test_a_part_among_one_buss_nets_is_traced_to_it(self):
+        words = self.sheet([("I2C2_SCL", 105, 505, 1), ("I2C2_SDA", 105, 512, 1),
+                            ("I2C1_SCL", 600, 505, 1), ("I2C1_SDA", 600, 512, 1)])
+        dev, why = genconfig.i2c_bus_for(self.part(), words, [], ["I2C1", "I2C2"])
+        self.assertEqual(dev, "I2C2")
+        self.assertIn("I2C2", why)
+
+    def test_one_bus_needs_no_decision(self):
+        words = self.sheet([("I2C1_SCL", 105, 505, 1)])
+        dev, why = genconfig.i2c_bus_for(self.part(), words, [], ["I2C1"])
+        self.assertIsNone(dev)
+        self.assertIsNone(why)
+
+    def test_a_part_between_two_buses_is_refused(self):
+        words = self.sheet([("I2C1_SCL", 105, 505, 1), ("I2C2_SCL", 108, 508, 1)])
+        dev, why = genconfig.i2c_bus_for(self.part(), words, [], ["I2C1", "I2C2"])
+        self.assertIsNone(dev)
+        self.assertIn("sits between two I2C buses", why)
+
+    def test_the_mcu_side_labels_are_not_the_evidence(self):
+        words = self.sheet([("I2C2_SCL", 105, 505, 1), ("I2C2_SDA", 105, 512, 1)])
+        dev, _ = genconfig.i2c_bus_for(self.part(), words, words, ["I2C1", "I2C2"])
+        self.assertIsNone(dev)
+
+    def test_a_bus_on_another_sheet_is_not_a_neighbour(self):
+        words = self.sheet([("I2C1_SCL", 105, 505, 2), ("I2C2_SCL", 400, 505, 1),
+                            ("I2C2_SDA", 400, 512, 1)])
+        dev, _ = genconfig.i2c_bus_for(self.part(), words, [], ["I2C1", "I2C2"])
+        self.assertEqual(dev, "I2C2")
+
+    def test_the_index_is_read_on_either_side(self):
+        # SCL2/SDA2 is the same bus as I2C2_SCL, as it is for the UARTs.
+        words = self.sheet([("SCL2", 105, 505, 1), ("SDA2", 105, 512, 1),
+                            ("SCL1", 600, 505, 1)])
+        dev, _ = genconfig.i2c_bus_for(self.part(), words, [], ["I2C1", "I2C2"])
+        self.assertEqual(dev, "I2C2")
+
+
 class McuCrystalTests(unittest.TestCase):
     """
     genconfig.find_mcu_crystal: which crystal on the sheet clocks the MCU.

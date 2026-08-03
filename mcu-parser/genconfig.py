@@ -515,6 +515,59 @@ def assign_spi_buses(caps: dict, groups: Dict[str, Dict[str, str]]
     return out, notes
 
 
+I2C_LINE_RE = re.compile(r"(?:I2C[-_]?(\d)[-_]?)?(SCL|SDA)[-_]?(\d)?$", re.I)
+
+
+def i2c_bus_for(part: "PartHit", words: Sequence[Word], mcu_labels: Sequence[Word],
+                buses: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Which I2C bus a part sits on, read from the nets drawn around it.
+
+    An I2C device has no chip select, so the trick that settles SPI (§3.3) does
+    not apply - there is no per-device net to follow. What there is instead is
+    the part itself: a baro marked BMP280 is drawn with its SCL and SDA beside
+    it, and on a board with two buses those nets say which one.
+
+    Same discipline as trace_cs_bus: the nearest bus must be clearly nearer than
+    the next, MCU-side labels are excluded, and where it is not decisive it
+    returns None so the caller keeps the default rather than guessing.
+    """
+    if len(buses) < 2:
+        return None, None
+    seen = {id(w) for w in mcu_labels}
+    ranked: List[Tuple[float, str]] = []
+    for dev in buses:
+        n = dev[-1]
+        best = None
+        for w in words:
+            if id(w) in seen or w.page != part.page:
+                continue
+            m = I2C_LINE_RE.fullmatch(w.text)
+            if not m or (m.group(1) or m.group(3)) != n:
+                continue
+            d = ((w.x0 - part.x) ** 2 + (w.y0 - part.y) ** 2) ** 0.5
+            best = d if best is None else min(best, d)
+        if best is not None:
+            ranked.append((best, dev))
+    if not ranked:
+        return None, None
+    ranked.sort()
+    near, dev = ranked[0]
+    runner = ranked[1][0] if len(ranked) > 1 else float("inf")
+    if runner < near * 3:
+        return None, (f"{part.marking} sits between two I2C buses "
+                      f"({dev} {near:.0f}pt, {ranked[1][1]} {runner:.0f}pt); "
+                      "which one it is on cannot be told from the sheet")
+    rival = "no other bus is drawn near it" if runner == float("inf") else \
+            f"next bus {runner:.0f}pt"
+    return dev, (f"{part.marking} is drawn among {dev}'s nets "
+                 f"({near:.0f}pt to the nearest, {rival})")
+
+
+def _pins_of(pins: Dict[str, str]) -> str:
+    return "/".join(pins[r] for r in ("scl", "sda") if pins.get(r)) or "?"
+
+
 def infer_i2c_bus(caps: dict, scl: Optional[str], sda: Optional[str],
                   declared: Optional[str]) -> Tuple[Optional[str], List[str]]:
     notes: List[str] = []
@@ -1495,6 +1548,11 @@ class PartHit:
     driver: str        # the firmware's key, e.g. ICM42688P
     marking: str       # as printed on the sheet
     fitted: bool       # False when marked (NC)/(DNP)
+    # Where it is drawn. An I2C part carries no chip select, so the only way to
+    # tell which bus it sits on is what is drawn around it - see i2c_bus_for().
+    x: float = 0.0
+    y: float = 0.0
+    page: int = 1
 
 
 def detect_parts(words: Sequence[Word], drivers: dict, aliases: dict
@@ -1508,7 +1566,11 @@ def detect_parts(words: Sequence[Word], drivers: dict, aliases: dict
     made the chosen part vary between runs for no visible reason.
     """
     found: Dict[str, List[PartHit]] = defaultdict(list)
-    tokens = sorted({w.text for w in words})
+    # Keep one position per distinct token - the first it is drawn at.
+    where: Dict[str, Word] = {}
+    for w in words:
+        where.setdefault(w.text, w)
+    tokens = sorted(where)
     for cat, parts in drivers.items():
         lookup = {_norm(p): p for p in parts}
         alias = {_norm(k): v for k, v in aliases.get(cat, {}).items()}
@@ -1522,8 +1584,10 @@ def detect_parts(words: Sequence[Word], drivers: dict, aliases: dict
                 if not driver or driver in seen:
                     continue
                 seen.add(driver)
+                at = where[tok]
                 found[cat].append(
-                    PartHit(driver, tok, not NOT_FITTED_RE.search(tok)))
+                    PartHit(driver, tok, not NOT_FITTED_RE.search(tok),
+                            at.x0, at.y0, at.page))
                 break
     for cat in found:
         found[cat].sort(key=lambda h: (not h.fitted, h.driver))
@@ -1706,7 +1770,10 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     motors: Dict[int, str] = {}
     servos: Dict[int, str] = {}
     uart: Dict[Tuple[str, str], str] = {}
-    i2c: Dict[str, str] = {}
+    # One entry per bus the sheet names, keyed by the index in the net name.
+    # A single {scl, sda} could only ever hold one bus, so a board with I2C1 and
+    # I2C2 lost whichever came first and the survivor wore the wrong name.
+    i2c_named: Dict[str, Dict[str, str]] = defaultdict(dict)
     spi_groups: Dict[str, Dict[str, str]] = defaultdict(dict)
     spi_named: Dict[str, Dict[str, str]] = defaultdict(dict)   # bus stated on the sheet
     simple: Dict[str, str] = {}
@@ -1747,8 +1814,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         elif role in ("uart_tx", "uart_rx"):
             uart[(idx or "1", role[-2:])] = l.pin
         elif role in ("i2c_scl", "i2c_sda"):
-            i2c[role[-3:]] = l.pin
-            i2c.setdefault("declared", idx or "1")
+            i2c_named[idx or ""][role[-3:]] = l.pin
         elif role == "spi_bus":
             spi_named[f"SPI{idx or '1'}"][sub or "sck"] = l.pin
         elif role.endswith("_spi"):
@@ -1918,18 +1984,35 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cfg.add()
 
     # ---- I2C -------------------------------------------------------------
-    i2c_dev = None
-    if i2c.get("scl") or i2c.get("sda"):
-        i2c_dev, notes = infer_i2c_bus(caps, i2c.get("scl"), i2c.get("sda"),
-                                       i2c.get("declared"))
+    # Every bus the sheet names, not just the last one to be read. The instance
+    # still comes from the pins through the firmware map - the index in the net
+    # name only says which nets belong together, and infer_i2c_bus reports it
+    # when the two disagree.
+    i2c_buses: List[Tuple[str, Dict[str, str]]] = []
+    for declared, pins in sorted(i2c_named.items()):
+        dev, notes = infer_i2c_bus(caps, pins.get("scl"), pins.get("sda"),
+                                   declared or None)
         cfg.notes.extend(notes)
-        if i2c_dev:
-            n = i2c_dev[-1]
-            if i2c.get("scl"):
-                cfg.define(f"I2C{n}_SCL_PIN", i2c["scl"])
-            if i2c.get("sda"):
-                cfg.define(f"I2C{n}_SDA_PIN", i2c["sda"])
-            cfg.add()
+        if dev:
+            i2c_buses.append((dev, pins))
+    seen_dev: Dict[str, Dict[str, str]] = {}
+    for dev, pins in i2c_buses:
+        if dev in seen_dev:
+            cfg.warnings.append(
+                f"two sets of I2C nets both resolve to {dev} "
+                f"({_pins_of(seen_dev[dev])} and {_pins_of(pins)}); only the "
+                "first is emitted - check which pins the board really uses")
+            continue
+        seen_dev[dev] = pins
+        n = dev[-1]
+        if pins.get("scl"):
+            cfg.define(f"I2C{n}_SCL_PIN", pins["scl"])
+        if pins.get("sda"):
+            cfg.define(f"I2C{n}_SDA_PIN", pins["sda"])
+    i2c_buses = [(d, p) for d, p in i2c_buses if seen_dev.get(d) is p]
+    i2c_dev = i2c_buses[0][0] if i2c_buses else None
+    if i2c_buses:
+        cfg.add()
 
     # ---- SPI buses -------------------------------------------------------
     # A device with only a chip select is not necessarily on an unknown bus: on
@@ -2259,10 +2342,29 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     if adc_dev and adc_dev != "ADC1":
         cfg.define("ADC_INSTANCE", adc_dev, width=29)
     if i2c_dev:
-        n = i2c_dev[-1]
+        # With one bus there is nothing to decide. With two, the baro is often
+        # on the other one from the mag - so read each part's own nets rather
+        # than putting both on the first bus, which was wrong on the one board
+        # here with a hand-written config to check against.
+        devs = [d for d, _ in i2c_buses]
         if "baro" in parts and "baro" not in spi_groups:
-            cfg.define("BARO_I2C_INSTANCE", f"I2CDEV_{n}", width=29)
-        cfg.define("MAG_I2C_INSTANCE", f"I2CDEV_{n}", width=29)
+            hit = parts["baro"][0]
+            found, why = i2c_bus_for(hit, words, labels, devs)
+            if why:
+                cfg.notes.append(f"BARO_I2C_INSTANCE: {why}")
+            cfg.define("BARO_I2C_INSTANCE",
+                       f"I2CDEV_{(found or i2c_dev)[-1]}", width=29)
+        mag = parts.get("mag") or []
+        found, why = i2c_bus_for(mag[0], words, labels, devs) if mag else (None, None)
+        if why:
+            cfg.notes.append(f"MAG_I2C_INSTANCE: {why}")
+        cfg.define("MAG_I2C_INSTANCE", f"I2CDEV_{(found or i2c_dev)[-1]}", width=29)
+        if len(devs) > 1 and not mag:
+            cfg.warnings.append(
+                f"this board has {len(devs)} I2C buses ({', '.join(devs)}) and no "
+                f"magnetometer on the sheet; MAG_I2C_INSTANCE is set to "
+                f"{i2c_dev} because an external compass has to go somewhere - "
+                "check which header it is wired to")
     cfg.add()
 
     cfg.define("GYRO_1_ALIGN", gyro_align, width=29)
@@ -2341,10 +2443,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         if len(have) == 1:
             cfg.warnings.append(
                 f"UART{n} has only {next(iter(have)).upper()} defined")
-    if (i2c.get("scl") is None) != (i2c.get("sda") is None):
-        cfg.warnings.append(
-            f"I2C has only {'SCL' if i2c.get('scl') else 'SDA'} defined; "
-            "the bus will not work until the other pin is resolved")
+    for declared, pins in sorted(i2c_named.items()):
+        if (pins.get("scl") is None) != (pins.get("sda") is None):
+            cfg.warnings.append(
+                f"I2C{declared or ''} has only "
+                f"{'SCL' if pins.get('scl') else 'SDA'} defined; the bus will "
+                "not work until the other pin is resolved")
 
     if unknown:
         cfg.notes.append("nets with no config.h role: "
