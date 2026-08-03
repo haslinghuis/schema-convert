@@ -157,10 +157,25 @@ def page_count(words: Sequence[Word]) -> int:
 @dataclass
 class PinRow:
     pin: str                 # PA0, or VCAP for a supply row
-    y: float                 # y0 of the pin-name text
-    side: str                # 'L' or 'R'
+    pos: float               # where along its own edge the name sits
+    side: str                # 'L', 'R', 'T' or 'B'
     afs: List[str] = field(default_factory=list)   # from the symbol, if present
     gpio: bool = True        # False for supply/system rows
+
+
+# Which coordinate runs *along* an edge. A left or right edge stacks its pin
+# names down the page, so a name's place on it is its y and its net label sits
+# out to the side; a top or bottom edge spreads them across, so the place is x
+# and the label sits above or below. Everything that pairs a label to a pin has
+# to ask which of the two it is dealing with - a four-sided QFP symbol has both
+# at once, and reading it with the vertical assumption baked in loses every pin
+# on two of its four sides.
+ALONG = {"L": "y", "R": "y", "T": "x", "B": "x"}
+
+
+def _along(side: str, w: "Word") -> float:
+    """Where this word sits along an edge of that orientation."""
+    return w.y0 if ALONG[side] == "y" else w.x0
 
 
 @dataclass
@@ -171,14 +186,25 @@ class SymbolPart:
     rows: List[PinRow]
     left_edge: float
     right_edge: float
+    top_edge: float = 0.0
+    bottom_edge: float = 0.0
+
+    @property
+    def sides(self) -> set[str]:
+        return {r.side for r in self.rows}
+
+    def band(self, side: str) -> Tuple[float, float]:
+        """How far this edge's names run along it, as (low, high)."""
+        on = [r.pos for r in self.rows if r.side == side] or [r.pos for r in self.rows]
+        return min(on), max(on)
 
     @property
     def y_min(self) -> float:
-        return min(r.y for r in self.rows)
+        return min(r.pos for r in self.rows if ALONG[r.side] == "y")
 
     @property
     def y_max(self) -> float:
-        return max(r.y for r in self.rows)
+        return max(r.pos for r in self.rows if ALONG[r.side] == "y")
 
     @property
     def pins(self) -> set[str]:
@@ -226,11 +252,13 @@ class Symbol:
 
     @property
     def y_min(self) -> float:
-        return min(r.y for r in self.rows)
+        return min(p.y_min for p in self.parts if any(
+            ALONG[r.side] == "y" for r in p.rows))
 
     @property
     def y_max(self) -> float:
-        return max(r.y for r in self.rows)
+        return max(p.y_max for p in self.parts if any(
+            ALONG[r.side] == "y" for r in p.rows))
 
     @property
     def has_af_lists(self) -> bool:
@@ -421,11 +449,30 @@ def _find_parts(words: Sequence[Word], page: int, min_pins: int,
 def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int
                       ) -> Optional[Tuple[SymbolPart, float, set]]:
     """
-    The strongest aligned column pair in `tagged`, plus the items it consumed
-    so a caller can look for the next box in what is left over.
+    The strongest edge in `tagged`, plus the items it consumed so a caller can
+    look for the next one in what is left over.
+
+    An edge is a set of pin names sharing an alignment. Which alignment says
+    which edge it is: names down a left edge share an x0 and names across a top
+    edge share a y0, so all four orientations are the same search on a different
+    coordinate. Only the vertical two were looked for, which on a four-sided QFP
+    symbol reads half the package and reports nothing missing.
+
+    Left and right are still returned together when they are the two columns of
+    one box, because that is what a two-column symbol is and splitting it would
+    lose the pairing between them.
     """
-    left = max(cluster([(t[0].x0, t) for t in tagged], tol=1.0), key=len, default=[])
-    right = max(cluster([(t[0].x1, t) for t in tagged], tol=1.0), key=len, default=[])
+    if not tagged:
+        return None
+    box = (min(t[0].x0 for t in tagged), min(t[0].y0 for t in tagged),
+           max(t[0].x1 for t in tagged), max(t[0].y1 for t in tagged))
+
+    def biggest(coord) -> List[Tagged]:
+        return max(cluster([(coord(t[0]), t) for t in tagged], tol=1.0),
+                   key=len, default=[])
+
+    left = biggest(lambda w: w.x0)
+    right = biggest(lambda w: w.x1)
     # A pin name belongs to whichever edge claimed it; drop the overlap so a
     # single-column symbol is not counted twice. Names of unequal length share
     # an x1 but not an x0, so such a symbol also throws up a partial second
@@ -440,25 +487,52 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int
     else:
         claimed = {id(t) for t in left}
         right = [t for t in right if id(t) not in claimed]
+
+    horizontal = biggest(lambda w: w.y0)
+    # A horizontal edge only wins when it is clearly the stronger reading: the
+    # two columns of an ordinary symbol also share a handful of y values where
+    # rows happen to line up, and mistaking that for a top edge would tear a
+    # working two-column symbol apart.
+    if len(horizontal) > len(left) + len(right):
+        mid_y = (box[1] + box[3]) / 2
+        side = "T" if sum(t[0].y0 for t in horizontal) / len(horizontal) < mid_y else "B"
+        rows = [PinRow(pin, w.x0, side, afs, gpio)
+                for w, pin, afs, gpio in horizontal]
+        if len(rows) < min_pins:
+            return None
+        rows.sort(key=lambda r: r.pos)
+        part = SymbolPart(
+            page, rows,
+            left_edge=min(w.x0 for w, *_ in horizontal),
+            right_edge=max(w.x1 for w, *_ in horizontal),
+            top_edge=min(w.y0 for w, *_ in horizontal),
+            bottom_edge=max(w.y1 for w, *_ in horizontal),
+        )
+        return part, _pitch(rows), {id(t) for t in horizontal}
+
     if len(left) + len(right) < min_pins:
         return None
 
-    rows: List[PinRow] = []
-    for w, pin, afs, gpio in left:
-        rows.append(PinRow(pin, w.y0, "L", afs, gpio))
-    for w, pin, afs, gpio in right:
-        rows.append(PinRow(pin, w.y0, "R", afs, gpio))
-    rows.sort(key=lambda r: r.y)
+    rows = [PinRow(pin, w.y0, "L", afs, gpio) for w, pin, afs, gpio in left]
+    rows += [PinRow(pin, w.y0, "R", afs, gpio) for w, pin, afs, gpio in right]
+    rows.sort(key=lambda r: r.pos)
 
-    left_edge = min(w.x0 for w, *_ in left) if left else min(w.x0 for w, *_ in right)
-    right_edge = max(w.x1 for w, *_ in right) if right else max(w.x1 for w, *_ in left)
+    both = left + right
+    part = SymbolPart(
+        page, rows,
+        left_edge=min(w.x0 for w, *_ in left) if left else min(w.x0 for w, *_ in right),
+        right_edge=max(w.x1 for w, *_ in right) if right else max(w.x1 for w, *_ in left),
+        top_edge=min(w.y0 for w, *_ in both),
+        bottom_edge=max(w.y1 for w, *_ in both),
+    )
+    return part, _pitch(rows), {id(t) for t in both}
 
-    # Row pitch = the most common gap between adjacent distinct rows.
-    ys = sorted({round(r.y, 2) for r in rows})
-    gaps = [round(b - a, 2) for a, b in zip(ys, ys[1:]) if 0.5 < b - a < 20]
-    pitch = min(gaps) if gaps else 3.66
-    used = {id(t) for t in left} | {id(t) for t in right}
-    return SymbolPart(page, rows, left_edge, right_edge), pitch, used
+
+def _pitch(rows: Sequence[PinRow]) -> float:
+    """The most common gap between adjacent names along the edge."""
+    at = sorted({round(r.pos, 2) for r in rows})
+    gaps = [round(b - a, 2) for a, b in zip(at, at[1:]) if 0.5 < b - a < 20]
+    return min(gaps) if gaps else 3.66
 
 
 def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
@@ -623,31 +697,42 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
 def _labels_for_part(words: Sequence[Word], part: SymbolPart,
                      pitch: float) -> List[Word]:
     pad = pitch * 2
-    lo, hi = part.y_min - pad, part.y_max + pad
 
     # Only a side this part actually has pin names on can have a net-label
     # gutter. A tall MCU is often drawn as two separate boxes on one sheet, and
     # each is found as a one-sided part; searching the empty side would reach
     # across the gap and collect the *other* box's labels, binding every net
     # twice and leaving one box's rows with nothing.
+    #
+    # Which way "out" is depends on the edge. A left edge's labels lie further
+    # left at a matching y; a top edge's lie further up at a matching x.
     sides: Dict[str, List[Word]] = {r.side: [] for r in part.rows}
     for w in words:
         if w.page != part.page:
             continue
-        if not (lo <= w.y0 <= hi) or PIN_RE.match(w.text):
+        if PIN_RE.match(w.text) or JUNK_RE.search(w.text) or POWER_RE.match(w.text):
             continue
-        if JUNK_RE.search(w.text) or POWER_RE.match(w.text):
-            continue
-        if w.x1 < part.left_edge and "L" in sides:
-            sides["L"].append(w)
-        elif w.x0 > part.right_edge and "R" in sides:
-            sides["R"].append(w)
+        for side in sides:
+            lo, hi = part.band(side)
+            if not (lo - pad <= _along(side, w) <= hi + pad):
+                continue
+            outside = (
+                (side == "L" and w.x1 < part.left_edge)
+                or (side == "R" and w.x0 > part.right_edge)
+                or (side == "T" and w.y1 < part.top_edge)
+                or (side == "B" and w.y0 > part.bottom_edge)
+            )
+            if outside:
+                sides[side].append(w)
+                break
 
     out: List[Word] = []
     for side, cands in sides.items():
         cols = []
         # Labels may be aligned on either edge of their own text, so try both.
-        for anchor in ("x0", "x1"):
+        # Across a left or right edge that is x; across a top or bottom one, y.
+        anchors = ("x0", "x1") if ALONG[side] == "y" else ("y0", "y1")
+        for anchor in anchors:
             groups = cluster([(getattr(w, anchor), w) for w in cands], tol=1.0)
             for col in (c for c in groups if len(c) >= 3):
                 # Score by whether the column reads like net names, not merely
@@ -655,8 +740,13 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
                 # H9, A3) exactly where a net label would sit, and proximity
                 # alone happily picks those.
                 hits = sum(1 for w in col if NET_VOCAB.search(w.text))
-                edge = (max(w.x1 for w in col) if side == "L"
-                        else -min(w.x0 for w in col))
+                # Nearness to the symbol, whichever way the gutter lies.
+                edge = {
+                    "L": lambda c: max(w.x1 for w in c),
+                    "R": lambda c: -min(w.x0 for w in c),
+                    "T": lambda c: max(w.y1 for w in c),
+                    "B": lambda c: -min(w.y0 for w in c),
+                }[side](col)
                 cols.append((hits, edge, col))
         if not cols:
             continue
@@ -853,13 +943,17 @@ def _owner(sym: Symbol, w: Word) -> Optional[Tuple[SymbolPart, str]]:
     for p in sym.parts:
         if p.page != w.page:
             continue
-        for side in ("L", "R"):
+        for side in ("L", "R", "T", "B"):
             if not any(r.side == side for r in p.rows):
                 continue
             if side == "L" and w.x1 < p.left_edge:
                 d = p.left_edge - w.x1
             elif side == "R" and w.x0 > p.right_edge:
                 d = w.x0 - p.right_edge
+            elif side == "T" and w.y1 < p.top_edge:
+                d = p.top_edge - w.y1
+            elif side == "B" and w.y0 > p.bottom_edge:
+                d = w.y0 - p.bottom_edge
             else:
                 continue
             if best is None or d < best[2]:
@@ -877,8 +971,9 @@ def _pair(sym: Symbol, labels: Sequence[Word], offset: float
             continue
         part, side = owner
         cands = [r for r in part.rows if r.side == side]
-        best = min(cands, key=lambda r: abs(r.y - (w.y0 + offset)))
-        if abs(best.y - (w.y0 + offset)) <= sym.pitch / 2:
+        at = _along(side, w) + offset
+        best = min(cands, key=lambda r: abs(r.pos - at))
+        if abs(best.pos - at) <= sym.pitch / 2:
             pairs.append((w, best))
         else:
             orphans.append(w)
@@ -896,13 +991,59 @@ def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
     with no clue why - and the usual cause is worth seeing: a net wired to a pin
     the symbol names as a supply, which is a schematic problem, not a parse one.
 
-    One offset is swept for the whole symbol, including a split one: halves of
-    the same symbol come off the same Altium template, so they share a font size
-    and a grid, and scoring them together is what keeps the winning offset from
-    being chosen on half the evidence.
+    One offset is swept per *axis*, not per symbol. Halves of one symbol come off
+    the same Altium template and share a font size and a grid, so scoring all of
+    a symbol's vertical edges together is what keeps the winning offset from
+    being chosen on half the evidence - but a four-sided symbol has two axes,
+    and they do not share a shift. A label sits above the horizontal wire of a
+    left or right pin, and beside the vertical wire of a top or bottom one;
+    those are different distances between different anchors. Sweeping one
+    offset for both put a bottom edge two positions out on one board, which
+    still read 100% because the pins it landed on could do the job.
     """
     step = sym.pitch / 12
     candidates = [i * step for i in range(-18, 19)]
+    axes = {ALONG[r.side] for r in sym.rows}
+    if len(axes) > 1:
+        # Solve each axis on its own evidence, then put the two halves back
+        # together. Each label belongs to exactly one axis, by the side of the
+        # part whose gutter it sits in, so the split is clean.
+        per_axis = {}
+        for axis in sorted(axes):
+            mine = [w for w in labels
+                    if (o := _owner(sym, w)) and ALONG[o[1]] == axis]
+            per_axis[axis] = _resolve_axis(sym, mine, caps, candidates)
+        # An axis has to earn its bindings. A four-sided symbol's second axis
+        # is read from rotated text - both the pin names and the labels along a
+        # top or bottom edge are drawn on their side - and where that alignment
+        # cannot be confirmed there is no reason to believe it. One board's
+        # bottom edge reaches 2 of its 3 checkable nets at *every* offset, which
+        # is not a fit, and binding it anyway put SPI1_SCK two pins out.
+        #
+        # So a contradicted axis keeps its rows, which is how those pins get
+        # reported as unconnected, and loses its links.
+        refused = [a for a, r in per_axis.items()
+                   if r.score[1] >= 2 and r.score[0] < r.score[1]]
+        for axis in refused:
+            per_axis[axis] = Result([], per_axis[axis].offset, (0, 0), sym, [],
+                                    per_axis[axis].orphans
+                                    + [l.net for l in per_axis[axis].links])
+        first = per_axis[sorted(axes)[0]]
+        links = [l for r in per_axis.values() for l in r.links]
+        sat = sum(r.score[0] for r in per_axis.values())
+        chk = sum(r.score[1] for r in per_axis.values())
+        mapped = {l.pin for l in links}
+        return Result(
+            links, first.offset, (sat, chk), sym,
+            sorted({r.pin for r in sym.rows if r.gpio and r.pin not in mapped}),
+            [o for r in per_axis.values() for o in r.orphans],
+        )
+    return _resolve_axis(sym, labels, caps, candidates)
+
+
+def _resolve_axis(sym: Symbol, labels: Sequence[Word], caps: dict,
+                  candidates: Sequence[float]) -> Result:
+    """One axis's worth of the sweep; see resolve() for what is being chosen."""
 
     best: Optional[Result] = None
     best_key: Optional[Tuple] = None

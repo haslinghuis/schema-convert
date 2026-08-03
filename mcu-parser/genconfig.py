@@ -1373,10 +1373,16 @@ def osc_anchors(words: Sequence[Word], sym: Symbol, caps: dict) -> List[Word]:
     for r in sym.rows:
         if r.pin not in OSC_PIN_CANDIDATES or r.pin in routed:
             continue
-        # A row carries no x of its own, only its side; the edge it is aligned
-        # to is what a crystal drawn outside the symbol is measured from.
-        edge = sym.left_edge if r.side == "L" else sym.right_edge
-        out.append(Word(r.pin, edge, r.y, edge, r.y))
+        # A row carries only its place along its own edge; the edge itself
+        # supplies the other coordinate, and which is which depends on whether
+        # that edge runs down the side of the symbol or across its top.
+        part = next((p for p in sym.parts if r in p.rows), sym.parts[0])
+        if netmap.ALONG[r.side] == "y":
+            x = part.left_edge if r.side == "L" else part.right_edge
+            out.append(Word(r.pin, x, r.pos, x, r.pos))
+        else:
+            y = part.top_edge if r.side == "T" else part.bottom_edge
+            out.append(Word(r.pin, r.pos, y, r.pos, y))
     return out
 
 

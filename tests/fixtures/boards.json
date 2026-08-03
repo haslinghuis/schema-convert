@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "852a86b41",
   "frozen_firmware_branch": "master",
-  "tool_rev": "00ba8da80"
+  "tool_rev": "201e55695"
  },
  "boards": [
   {
@@ -137,29 +137,30 @@
    "target": "STM32F405",
    "symbol_rows": 60,
    "pitch": 7.18,
-   "net_labels": 34,
+   "net_labels": 29,
    "offset": 0.5983,
    "agreement": [
     12,
     12
    ],
-   "orphan_labels": 3,
+   "orphan_labels": 0,
    "nets_on_power_pins": 0,
-   "unmapped_pins": 17,
+   "unmapped_pins": 19,
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
    "config_defines": 40,
    "timer_rows": 2,
-   "warnings": 8,
+   "warnings": 7,
    "notes": 15,
-   "netmap_digest": "b2f1ffb7326c8dd521a109a8d30b3b7d02c831a12955b93b73a9b0cf2baf58d4",
+   "netmap_digest": "5d8534ade7fb4c402ace54b7c598b363874ccd6467d1bfc5d9541bfb7d083e4b",
    "config_digest": "095580d1d2be18e8bd44fa7f03d9dc1f3aa249cba1ded26e85ba4c58d35c22cc",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
     "unaccounted_roles": [
+     "unclassified",
      "unclassified",
      "unclassified"
     ],

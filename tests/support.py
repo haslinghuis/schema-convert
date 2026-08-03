@@ -290,7 +290,7 @@ def netmap_json(run: BoardRun) -> str:
         "target": run.target,
         "offset": round(run.result.offset, 6),
         "pitch": round(run.symbol.pitch, 6),
-        "rows": sorted((r.pin, r.side, round(r.y, 3), tuple(r.afs), r.gpio)
+        "rows": sorted((r.pin, r.side, round(r.pos, 3), tuple(r.afs), r.gpio)
                        for r in run.symbol.rows),
         "links": sorted((l.net, l.pin, l.side, l.checked, l.ok, l.gpio, l.symbol_ok)
                         for l in run.result.links),
