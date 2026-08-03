@@ -411,6 +411,80 @@ class SpiSolverTests(unittest.TestCase):
         self.assertTrue(any("PC13" in n or "distinct role" in n for n in notes), notes)
 
 
+class McuCrystalTests(unittest.TestCase):
+    """
+    genconfig.find_mcu_crystal: which crystal on the sheet clocks the MCU.
+
+    Getting this wrong is not cosmetic. Omitting SYSTEM_HSE_MHZ is not "no
+    HSE" - the Makefile defaults HSE_VALUE to 8 MHz - and naming the wrong
+    crystal is worse: one board was emitting 27 MHz off the OSD's part, which
+    STM32H5's clock setup rejects outright with an #error.
+    """
+
+    def sym(self, page=1, pages=1, pitch=4.0, top=100.0, bottom=330.0):
+        rows = [netmap.PinRow("PA5", top, "L"), netmap.PinRow("PB3", bottom, "L")]
+        part = netmap.SymbolPart(page, rows, 600.0, 700.0)
+        return netmap.Symbol([part], pitch, pages)
+
+    def sheet(self, xtals, page=1):
+        """OSC pins at (600,150) and whatever crystals are asked for."""
+        words = [Word("PH0/OSC_IN", 600, 150, 640, 153, page),
+                 Word("PH1/OSC_OUT", 600, 160, 640, 163, page)]
+        for text, x, y, pg in xtals:
+            words.append(Word(text, x, y, x + 30, y + 3, pg))
+        return words
+
+    def find(self, words, sym=None):
+        return genconfig.find_mcu_crystal(words, sym or self.sym(), fake_caps())
+
+    def test_a_crystal_beside_the_osc_pins_is_taken(self):
+        c, why = self.find(self.sheet([("8MHz", 650, 155, 1)]))
+        self.assertEqual(c.mhz, 8)
+
+    def test_the_osd_crystal_is_not_taken_on_proximity(self):
+        # 27 MHz is the MAX7456's and is the HSE of no board in the config repo.
+        # Drawn right at the OSC pins it would otherwise win outright.
+        c, why = self.find(self.sheet([("27MHz", 650, 155, 1)]))
+        self.assertIsNone(c)
+        self.assertIn("27 MHz is the OSD's", " ".join(why))
+
+    def test_an_osc_net_label_still_wins_for_any_frequency(self):
+        # Direct evidence beats the prior: if the sheet ties that crystal to the
+        # MCU's OSC net by name, it is the HSE whatever its frequency.
+        words = self.sheet([("27MHz", 300, 400, 1)])
+        words += [Word("OSC_IN", 620, 152, 650, 155, 1),
+                  Word("OSCI", 300, 405, 330, 408, 1)]
+        c, _ = self.find(words)
+        self.assertIsNotNone(c)
+        self.assertEqual(c.mhz, 27)
+
+    def test_a_crystal_on_another_sheet_is_not_measured_by_distance(self):
+        # Sheets share a coordinate space, so a cross-page gap is meaningless.
+        # This is what put a 27 MHz part 145pt from an H5's OSC pins.
+        c, why = self.find(self.sheet([("25MHz", 650, 155, 2)]))
+        self.assertIsNone(c)
+        self.assertIn("another sheet", " ".join(why))
+
+    def test_the_window_follows_the_symbol_not_the_row_pitch(self):
+        # Row pitch runs from 1.4pt to 18pt across the corpus, so a pitch-based
+        # window was 43pt on one sheet and 540pt on another. This crystal is
+        # 200pt out on a fine-pitch sheet and is genuinely the MCU's.
+        sym = self.sym(pitch=1.43, top=100.0, bottom=330.0)
+        c, _ = self.find(self.sheet([("8MHz", 600, 355, 1)]), sym)
+        self.assertIsNotNone(c)
+        self.assertEqual(c.mhz, 8)
+
+    def test_two_equally_close_candidates_are_refused(self):
+        c, why = self.find(self.sheet([("8MHz", 650, 155, 1), ("25MHz", 655, 158, 1)]))
+        self.assertIsNone(c)
+        self.assertIn("equally close", " ".join(why))
+
+    def test_a_crystal_far_beyond_the_symbol_is_refused(self):
+        c, why = self.find(self.sheet([("8MHz", 600, 1400, 1)]))
+        self.assertIsNone(c)
+        self.assertIn("symbol's own size", " ".join(why))
+
+
 class BeeperDriverTests(unittest.TestCase):
     """
     genconfig.beeper_driver: the transistor on the beeper net, if drawn.

@@ -1165,6 +1165,15 @@ XTAL_MIN_MHZ, XTAL_MAX_MHZ = 4.0, 50.0
 # looks exactly like this.
 HSE_TYPICAL_MHZ = {8, 12, 16, 24, 25, 26, 27, 32, 48}
 
+# Frequencies that are on these boards for something other than the MCU. 27 MHz
+# is the MAX7456 OSD's crystal and appears on most of this corpus; across the
+# 619 hand-written configs it is the SYSTEM_HSE_MHZ of exactly none of them
+# (they are 8 MHz on 245 boards, then 16, 48, 25 and 24). 40 MHz belongs to an
+# RF module. Neither is banned outright - a shared OSC net label is direct
+# evidence and still wins - but neither may be claimed on proximity alone,
+# which is what put a 27 MHz OSD crystal in front of the MCU on several sheets.
+HSE_IMPLAUSIBLE_MHZ = {27, 40}
+
 FREQ_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?M(?:HZ|H)\b", re.I)
 
 # The MCU symbol's own OSC pin names: 'PH0/OSC-IN', 'PF0-OSC_OUT'. The port-pin
@@ -1226,6 +1235,7 @@ class Crystal:
     x0: float
     x1: float
     y: float
+    page: int = 1
 
 
 def _gap(a: Word, b: Word) -> float:
@@ -1253,9 +1263,10 @@ def find_crystals(words: Sequence[Word]) -> List[Crystal]:
         mhz = float(m.group(1))
         if not XTAL_MIN_MHZ <= mhz <= XTAL_MAX_MHZ:
             continue
-        near = [v for v in words if REFDES_RE.match(v.text) and _gap(w, v) < 20]
+        near = [v for v in words if v.page == w.page
+                and REFDES_RE.match(v.text) and _gap(w, v) < 20]
         ref = min(near, key=lambda v: _gap(w, v)).text if near else ""
-        out.append(Crystal(mhz, w.text, ref, w.x0, w.x1, w.y0))
+        out.append(Crystal(mhz, w.text, ref, w.x0, w.x1, w.y0, w.page))
     return out
 
 
@@ -1322,12 +1333,8 @@ def find_mcu_crystal(words: Sequence[Word], sym: Symbol, caps: dict
         return None, ["the MCU symbol has no OSC_IN/OSC_OUT row, so no crystal "
                       "can be tied to the MCU"]
 
-    # Sheet scale varies by an octave between vendors; the symbol's own row pitch
-    # is the natural unit for "next to the MCU" and travels across scales.
-    direct_max = 30 * sym.pitch
-
     at_mcu = _osc_nets_near(words, anchors, radius=100.0)
-    boxes = [Word(c.marking, c.x0, c.y, c.x1, c.y) for c in crystals]
+    boxes = [Word(c.marking, c.x0, c.y, c.x1, c.y, c.page) for c in crystals]
     linked = [c for c, b in zip(crystals, boxes)
               if at_mcu & _osc_nets_near(words, [b], radius=40.0)]
     if len(linked) == 1:
@@ -1338,14 +1345,50 @@ def find_mcu_crystal(words: Sequence[Word], sym: Symbol, caps: dict
         notes.append("more than one crystal carries an OSC net label: "
                      + ", ".join(f"{c.refdes or '?'} {c.marking}" for c in linked))
 
-    ranked = sorted(((min(_gap(b, a) for a in anchors), c)
-                     for c, b in zip(crystals, boxes)), key=lambda t: t[0])
+    # No net label, so proximity is the only evidence - and it is weak, which is
+    # why what the crystal *is* has to be weighed with it. A 27 MHz part is the
+    # OSD's and a 40 MHz one an RF module's; neither is the HSE of a single
+    # board in the 619-config corpus, so neither may be claimed this way. On
+    # four boards here the only crystal with a frequency was the OSD's, and
+    # calling that "too far" described the symptom rather than the cause.
+    page = sym.page
+    usable = [(c, b) for c, b in zip(crystals, boxes)
+              if c.page == page and round(c.mhz) not in HSE_IMPLAUSIBLE_MHZ]
+    if not usable:
+        on_page = [c for c in crystals if c.page == page]
+        if not on_page:
+            where = ", ".join(f"{c.refdes or '?'} {c.marking} on page {c.page}"
+                              for c in crystals[:3])
+            why = (f"every crystal with a frequency is on another sheet "
+                   f"({where}), and a distance measured across sheets means "
+                   "nothing - they share a coordinate space")
+        else:
+            why = ("the only crystal(s) on the MCU's own sheet are "
+                   + ", ".join(f"{c.refdes or '?'} {c.marking}" for c in on_page[:3])
+                   + " - 27 MHz is the OSD's and 40 MHz an RF module's, and "
+                     "neither is the HSE of any board in the config repo")
+        return None, notes + [
+            f"no crystal on this sheet can be the MCU's HSE: {why}. Pass "
+            "--hse-mhz if you know it"]
+
+    # The old cut-off was 30x the symbol's row pitch, which is not a sheet
+    # scale: pitch runs from 1.4pt to 18pt across this corpus, so the window
+    # ranged from 43pt to 540pt and rejected an 8 MHz crystal sitting 214pt from
+    # the OSC pins on one board while accepting anything at all on another. The
+    # symbol's own height tracks the drawing scale instead, and the window is
+    # generous because the frequency check above now carries the weight.
+    span = max(sym.y_max - sym.y_min, sym.right_edge - sym.left_edge, 40.0)
+    direct_max = 2.0 * span
+
+    ranked = sorted(((min(_gap(b, a) for a in anchors), c) for c, b in usable),
+                    key=lambda t: t[0])
     near = [(d, c) for d, c in ranked if d <= direct_max]
     if not near:
+        d, c = ranked[0]
         return None, notes + [
-            f"the nearest crystal ({ranked[0][1].refdes or '?'} "
-            f"{ranked[0][1].marking}) is {ranked[0][0]:.0f}pt from the MCU's OSC "
-            "pins, too far to attribute to them"]
+            f"the nearest crystal the MCU could run on ({c.refdes or '?'} "
+            f"{c.marking}) is {d:.0f}pt from its OSC pins, more than twice the "
+            f"symbol's own size ({span:.0f}pt), so it cannot be attributed to it"]
     if len(near) > 1 and near[1][0] < 3 * near[0][0]:
         return None, notes + [
             "two crystals sit equally close to the MCU's OSC pins: "
@@ -1420,6 +1463,18 @@ def _check_plausible(mhz: int, family: str, cfg: "Config") -> None:
             f"SYSTEM_HSE_MHZ {mhz} is not a value any board in the config repo "
             f"uses ({', '.join(str(v) for v in sorted(HSE_TYPICAL_MHZ))}) - "
             "verify it before shipping")
+    elif mhz in HSE_IMPLAUSIBLE_MHZ:
+        # Only reachable through a shared OSC net label, which is direct
+        # evidence and outranks the prior - but the prior is strong enough to
+        # say so: 27 MHz is the OSD's part and 40 MHz an RF module's, and
+        # neither is the HSE of any board in the 619-config repo. Either this
+        # board is genuinely unusual or the net label is shared for another
+        # reason, and only the vendor can say which.
+        cfg.warnings.append(
+            f"SYSTEM_HSE_MHZ {mhz} was taken from a crystal tied to the MCU's "
+            f"OSC net, but {mhz} MHz is the OSD/RF frequency on these boards and "
+            "is the HSE of no board in the config repo - confirm it with the "
+            "vendor before shipping")
 
 
 # --------------------------------------------------------------------------- #
