@@ -378,18 +378,36 @@ and it changes what the gap is:
 - **PPM and escserial** genuinely do not appear. Both are legacy; the corpus
   suggests they are no longer worth chasing.
 
-### 2.4 Only one I2C bus is emitted
+### 2.4 Only one I2C bus is emitted — OPEN, and larger than it first looked
 
 A board with I2C1 *and* I2C2 gets one of them, and any device on the other is
-attributed to the wrong bus — the reference comparison above lands the baro on
-`I2CDEV_1` where the hand-written config has `I2CDEV_2`. `netmap` resolves both
-buses correctly and firmware-validates every pin; the generator collapses them.
+attributed to the wrong bus — the shipping-config comparison in §2.2 lands the
+baro on `I2CDEV_1` where the hand-written config has `I2CDEV_2`. `netmap`
+resolves both buses correctly and firmware-validates every pin; `genconfig`
+collapses them, because it keeps a single `i2c` dict of `{scl, sda}` and the
+second bus simply overwrites the first.
 
-### 2.5 Only one PINIO is emitted
+Measured: **no board in the corpus emits more than one I2C bus** — it is not
+rare, it is structurally impossible. 69 emit exactly one and 35 none. The
+visible symptom is the note *"net names say I2C2 but the pins are I2C1"*, which
+fires on **29 boards**: that is the surviving pins of one bus wearing the
+surviving name of the other.
+
+This is now the second-largest coverage gap after the §3.3 tail, and unlike
+that one it is a small mechanical change — the same shape as the PINIO fix in
+§2.5, which is what it should be modelled on.
+
+### 2.5 Two PINIOs — DONE
 
 Boards routinely have two switched rails (a BEC/VTX switch and a camera
-switch); `PINIO2_PIN`/`PINIO2_BOX` are never emitted, and which of the two
-candidates becomes `PINIO1` is arbitrary rather than ordered.
+switch). Both are emitted now; 19 corpus boards carry a `PINIO2_PIN`, and on
+the one board with a hand-written config to compare, both pins match it.
+
+Two things had to change. A board writing `BEC-SWITCH` had that net dropped
+entirely — the rule matched a trailing `_SW`/`_EN` but not the word spelled out
+— so only its *camera* PINIO was emitted. And the polarity is not derivable at
+all; see §3.2, which records why 129 is emitted as a *default* rather than read
+from the sheet, and why `drivers/pinio.h`'s cap of 4 is now enforced.
 
 ---
 
@@ -819,9 +837,10 @@ seeder's firmware rev in the generated header.
    hand-editing up from 60 to 78 of 104. The bus is read at the device end,
    where the sheet already states it. The 32 that remain are the real §3.2
    cases.
-6. **The cheap multiplicities**: §2.4 second I2C bus, §2.5 second PINIO. Both
-   are visible in the one shipping-config comparison there is (§2.2), both are
-   small, and between them they account for two of its three differences.
+6. **§2.4 second I2C bus** — §2.5 is done; this is the half that is left, and
+   it is bigger than it looked: no board emits two I2C buses because the
+   generator cannot hold two, and 29 boards visibly show the collision. Small,
+   mechanical, and modelled on the PINIO fix.
 7. ~~**§3.5 / §3.6 say what actually went wrong.**~~ — done, and it uncovered a
    defect class nobody knew was there: 12 corpus schematics whose fonts carry no
    character mapping had been counted as geometry failures. §3.5 remains as a
