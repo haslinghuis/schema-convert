@@ -347,7 +347,14 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
             if not nxt:
                 break
             v = min(nxt, key=lambda v: v.x0)
-            if ANNOT_RE.match(v.text):
+            if ANNOT_RE.match(v.text) or PIN_RE.match(v.text):
+                # A pin name is never the continuation of another pin name.
+                # Some sheets set their pin names in a horizontal row about a
+                # point apart - closer than the gap that separates the pieces
+                # of one split name - and without this the whole row fuses into
+                # 'PA4PA5PA6PA7PC4PC5PB0PB1PB2', which is not a pin, so every
+                # one of them is lost. One F405 board came out with 29 pins of
+                # its 50 that way.
                 break
             text, x1 = text + v.text, v.x1
         out.append(Word(text, w.x0, w.y0, x1, w.y1, w.page))
