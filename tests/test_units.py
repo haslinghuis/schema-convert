@@ -250,6 +250,33 @@ class ClassifyTests(unittest.TestCase):
             with self.subTest(net=net):
                 self.assertEqual(genconfig.classify(net)[0], want)
 
+    def test_an_sd_card_on_the_sdmmc_controller_is_recognised(self):
+        # Every card-carrying board in the corpus wires it this way rather than
+        # over SPI, and none of these spellings was matched before. The digit is
+        # the controller - SDMMC2 means SDIO_DEVICE SDIODEV_2 - not a line
+        # number, which D0..D3 carry separately.
+        for net, want in (("SDMMC1-CK", ("1", "ck")), ("SDMMC1-CMD", ("1", "cmd")),
+                          ("SDMMC1-D0", ("1", "d0")), ("SDMMC2_D3", ("2", "d3")),
+                          ("SDIO_CK", (None, "ck")), ("SDIO-D2", (None, "d2")),
+                          ("SD_SDIO_CMD", (None, "cmd")), ("SD_CLK", (None, "ck")),
+                          ("SD_CMD", (None, "cmd")), ("SD_D0", (None, "d0"))):
+            with self.subTest(net=net):
+                role, idx, sub = genconfig.classify(net)
+                self.assertEqual((role, idx, sub), ("sdio", *want))
+
+    def test_the_spi_wired_card_still_classifies_as_spi(self):
+        # SD-MISO is a card on a SPI bus, not an SDMMC line.
+        self.assertEqual(genconfig.classify("SD-MISO")[0], "sdcard_spi")
+        self.assertEqual(genconfig.classify("SDCARD_SCK")[0], "sdcard_spi")
+        self.assertEqual(genconfig.classify("SDCARD-CS")[0], "sdcard_cs")
+
+    def test_a_card_detect_switch_is_its_own_role(self):
+        for net in ("SD_DETECT", "SD_DET", "SDCARD-DETECT", "SDDET"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], "sdcard_detect")
+        # and is not confused with the USB one
+        self.assertEqual(genconfig.classify("USB_DETECT")[0], "usb_detect")
+
     def test_a_switched_rail_is_a_pinio_however_it_is_spelled(self):
         # One board writes BEC-SWITCH, which the abbreviated rule missed - so
         # only one of its two PINIOs was emitted, and it was the other one.

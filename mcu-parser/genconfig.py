@@ -119,6 +119,14 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # Without the data nets the card is a CS with nowhere to go, so
     # SDCARD_SPI_INSTANCE - and with it USE_SDCARD_SPI - can never be resolved.
     (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),
+    # The other way a card is wired, and the one these boards actually use: the
+    # MCU's SDMMC peripheral rather than a SPI bus. Every spelling in the corpus
+    # - SDMMC1-CK, SDMMC2_D3, SDIO_CMD, SD_SDIO_CK, SD_CLK. The digit is the
+    # controller (SDMMC2 -> SDIO_DEVICE SDIODEV_2), not a line number.
+    (re.compile(r"^(?:SD[-_]?)?(?:SDIO|SDMMC)(\d)?[-_]?(CK|CLK|CMD|D[0-3])$", re.I),
+     "sdio"),
+    (re.compile(r"^SD[-_](CLK|CK|CMD|D[0-3])$", re.I), "sdio"),
+    (re.compile(r"^SD(?:CARD)?[-_]?DET(?:ECT)?$", re.I), "sdcard_detect"),
     # Both orders occur, on comparable numbers of boards: TX4 / UART-TX4 put the
     # index last, UART4_TX and USART3_RX put it first. Only the first form was
     # recognised, so on a fifth of the corpus the UART nets - the most common
@@ -182,6 +190,8 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         sub = next((g.lower() for g in groups if not g.isdigit()), None)
         if sub in ("sclk",):
             sub = "sck"
+        if sub == "clk":
+            sub = "ck"
         if sub in ("miso",):
             sub = "sdi"
         if sub in ("mosi",):
@@ -1774,6 +1784,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # A single {scl, sda} could only ever hold one bus, so a board with I2C1 and
     # I2C2 lost whichever came first and the survivor wore the wrong name.
     i2c_named: Dict[str, Dict[str, str]] = defaultdict(dict)
+    sdio: Dict[str, str] = {}
     spi_groups: Dict[str, Dict[str, str]] = defaultdict(dict)
     spi_named: Dict[str, Dict[str, str]] = defaultdict(dict)   # bus stated on the sheet
     simple: Dict[str, str] = {}
@@ -1819,6 +1830,9 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             spi_named[f"SPI{idx or '1'}"][sub or "sck"] = l.pin
         elif role.endswith("_spi"):
             spi_groups[role[:-4]][sub or "sck"] = l.pin
+        elif role == "sdio":
+            sdio[sub or "ck"] = l.pin
+            sdio.setdefault("device", idx or "1")
         elif role.endswith("_cs"):
             spi_groups[role[:-3]]["cs"] = l.pin
         elif role == "pinio":
@@ -1913,6 +1927,38 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             d = driver_for("flash", hit, "spi")
             if d:
                 feats.append(d)
+    # ---- SD card over SDMMC ----------------------------------------------
+    # The other way a card is wired, and the way every card-carrying board in
+    # this corpus does it. Only emitted where the build would read it:
+    # pg/sdio.c registers the pin config behind `#if ENABLE_SDIO_PIN_CONFIG`,
+    # which common_post.h defaults to 0. On a target that leaves it off - F4,
+    # F7, H730, H750 - these defines compile fine and are never read, which is
+    # the silent-wrong-config case §1 exists to prevent.
+    sdio_pins: Dict[str, str] = {}
+    if any(k in sdio for k in ("ck", "cmd", "d0")):
+        cap = caps.get("sdio") or {}
+        lines = [k for k in ("ck", "cmd", "d0", "d1", "d2", "d3") if k in sdio]
+        missing = [k for k in ("ck", "cmd", "d0") if k not in sdio]
+        if not cap.get("driver"):
+            cfg.warnings.append(
+                f"the sheet wires an SD card over SDMMC ({', '.join(lines)}) but "
+                f"{target} has no SDIO driver in Betaflight, so it cannot be "
+                "used - the card needs wiring to a SPI bus instead")
+        elif not cap.get("pin_config"):
+            cfg.warnings.append(
+                f"the sheet wires an SD card over SDMMC ({', '.join(lines)}) but "
+                f"{target} does not set ENABLE_SDIO_PIN_CONFIG, so SDIO_*_PIN "
+                "defines are compiled and never read. The pins are left out "
+                "rather than emitted inert; the platform's own fixed SDMMC pins "
+                "are what that target uses")
+        elif missing:
+            cfg.warnings.append(
+                f"the SD card's SDMMC {'/'.join(missing).upper()} net is not on "
+                "the sheet, so SDIO is not emitted - CK, CMD and D0 are the "
+                "minimum even in 1-bit mode")
+        else:
+            sdio_pins = {k: sdio[k] for k in lines}
+
     if "osd" in parts:
         feats.append("USE_MAX7456")
     if "sdcard" in spi_groups:
@@ -1923,6 +1969,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         # pg/sdcard.c read SDCARD_SPI_INSTANCE and SDCARD_SPI_CS_PIN at all;
         # common_post.h #undefs it if USE_SDCARD is missing, so both are needed.
         feats += ["USE_SDCARD", "USE_SDCARD_SPI"]
+    if sdio_pins:
+        # USE_SDCARD_SDIO is *not* emitted: every target.h that has an SDMMC
+        # controller already defines it inside `#ifdef USE_SDCARD`, and the
+        # hand-written SDIO configs set neither. USE_SDCARD is still needed,
+        # for the same reason as the SPI path above.
+        feats.append("USE_SDCARD")
     for f in dict.fromkeys(feats):
         cfg.define(f)
     cfg.add()
@@ -2012,6 +2064,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     i2c_buses = [(d, p) for d, p in i2c_buses if seen_dev.get(d) is p]
     i2c_dev = i2c_buses[0][0] if i2c_buses else None
     if i2c_buses:
+        cfg.add()
+
+    if sdio_pins:
+        for k in ("ck", "cmd", "d0", "d1", "d2", "d3"):
+            if k in sdio_pins:
+                cfg.define(f"SDIO_{k.upper()}_PIN", sdio_pins[k])
         cfg.add()
 
     # ---- SPI buses -------------------------------------------------------
@@ -2160,6 +2218,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         ("beeper", "BEEPER_PIN"), ("led_strip", "LED_STRIP_PIN"),
         ("camera_control", "CAMERA_CONTROL_PIN"),
         ("usb_detect", "USB_DETECT_PIN"),
+        ("sdcard_detect", "SDCARD_DETECT_PIN"),
     ]
     wrote = False
     for role, name in IO_DEFINE:
@@ -2407,7 +2466,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # almost evenly when they are (8 boards pick the card, 7 the flash), so the
     # card only wins when it is the only one. With just a card it is decisive:
     # 79 of the 85 card-only boards default to it.
-    sdcard = bool(resolved.get("sdcard", ("", {}))[0])
+    sdcard = bool(resolved.get("sdcard", ("", {}))[0]) or bool(sdio_pins)
     if "flash" in parts:
         cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH", width=29)
         if sdcard:
@@ -2417,6 +2476,26 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 "confirm the vendor's intent")
     elif sdcard:
         cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_SDCARD", width=29)
+    if "sdcard_detect" in simple:
+        # A card-detect switch grounds the pin when a card is seated, so the
+        # line reads low with a card in - which is what INVERTED means. 47 of
+        # the 58 configs that wire one set it. Which way round the switch is
+        # wired is not on the schematic any more than the beeper's driver is,
+        # so this is a default with a reason, not a reading.
+        cfg.define("SDCARD_DETECT_INVERTED", width=29)
+        cfg.warnings.append(
+            "SDCARD_DETECT_INVERTED is assumed: a detect switch normally "
+            "grounds the pin when a card is seated, and 47 of the 58 configs "
+            "that wire one set it. Remove it if this board's switch pulls high")
+    if sdio_pins:
+        # pg/sdio.c defaults SDIO_DEVICE to SDIOINVALID and SDIO_USE_4BIT to
+        # false, so both have to be stated or the controller is never selected
+        # and the card runs one-bit. The width comes from the sheet: four data
+        # lines drawn means four wired.
+        cfg.define("SDIO_DEVICE", f"SDIODEV_{sdio.get('device', '1')}", width=29)
+        cfg.define("SDIO_USE_4BIT",
+                   "1" if all(f"d{i}" in sdio_pins for i in range(4)) else "0",
+                   width=29)
     cfg.define("DEFAULT_DSHOT_BITBANG", "DSHOT_BITBANG_ON", width=29)
     _note_dshot_burst(cfg, caps, tplan, target)
     if "adc_curr" in simple:

@@ -556,6 +556,32 @@ LIMIT_SOURCES = (
 )
 
 
+def parse_sdio(fw: Path, name: str, info: dict) -> Dict[str, bool]:
+    """
+    Whether this target can take SDIO pins from a config, and has a driver.
+
+    Both are needed and neither is family-wide. `pg/sdio.c` registers the pin
+    config behind `#if ENABLE_SDIO_PIN_CONFIG`, which `common_post.h` defaults
+    to **0** - so on a target that does not turn it on, `SDIO_CK_PIN` and the
+    rest compile fine and are never read. Emitting them there would be exactly
+    the "config the build cannot honour" case: silent, and indistinguishable
+    from a working card.
+
+    Only the target's own `target.h` turns it on, so this is parsed per target
+    rather than per family: H743 and H750 are both STM32H7 and only one of them
+    enables it.
+    """
+    th = fw / "src/platform" / info.get("platform", "") / "target" / name / "target.h"
+    text = th.read_text(errors="replace") if th.exists() else ""
+    pin_config = bool(re.search(
+        r"^\s*#define\s+ENABLE_SDIO_PIN_CONFIG\s+1\s*$", text, re.M))
+    # sdio_h7xx.c, sdio_f4xx.c ... named after the family, not the target.
+    suffix = info.get("family", "")[5:].lower()          # STM32H7 -> h7
+    driver = (fw / "src/platform" / info.get("platform", "")
+              / f"sdio_{suffix}xx.c").exists()
+    return {"pin_config": pin_config, "driver": driver}
+
+
 def parse_limits(fw: Path, defs: set) -> Dict[str, Optional[int]]:
     """
     macro -> int, or None when this family's build does not define it.
@@ -711,7 +737,8 @@ def build(fw: Path, quiet: bool = False) -> dict:
                       f"timers={len(c['timers']):3}  uart={len(c['uart']):3}  "
                       f"spi={len(c['spi']):3}  i2c={len(c['i2c']):2}  adc={len(c['adc']):3}"
                       f"  {shown}")
-        per_target[name] = {**info, **cache[key]}
+        per_target[name] = {**info, **cache[key],
+                            "sdio": parse_sdio(fw, name, info)}
 
     return {
         "schema": 1,
