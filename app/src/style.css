@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/* Betaflight Configurator's own palette, so a vendor sees a familiar tool.
+   Values lifted from the Configurator's src/css/theme.css. */
+@theme {
+  --color-bf-50: #fffeea;
+  --color-bf-100: #fffac5;
+  --color-bf-200: #fff685;
+  --color-bf-300: #ffea46;
+  --color-bf-400: #ffc526;
+  --color-bf-500: #ffbb00;
+  --color-bf-600: #e29000;
+  --color-bf-700: #bb6502;
+  --color-bf-800: #984e08;
+  --color-bf-900: #7c400b;
+  --color-bf-950: #482100;
+  --color-ink-850: oklch(23.5% 0 0);
+}
+
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  @apply bg-neutral-950 text-neutral-200;
+}
+
+/* The generated file is read as code; give it a code surface. */
+.mono { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; }
