@@ -20,14 +20,22 @@
         "theme": "Dark"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"],
+    "icon": [
+      "icons/icon.png"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "Schematic PDF to Betaflight config.h",
-    "longDescription": "Reads a flight-controller schematic PDF and generates a Betaflight config.h target, validating every pin against Betaflight's own hardware tables."
+    "longDescription": "Reads a flight-controller schematic PDF and generates a Betaflight config.h target, validating every pin against Betaflight's own hardware tables.",
+    "resources": {
+      "resources/pipeline": "pipeline",
+      "resources/poppler": "poppler"
+    }
   }
 }

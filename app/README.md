@@ -31,18 +31,37 @@ not place a device on, a crystal it will not attribute, a polarity no schematic
 states — travels as a warning. Dropping any of them would turn a config that
 says what it does not know into one that looks finished.
 
-## What it needs
+## What a vendor needs installed
 
-- **Python 3.12+** and **poppler** (`pdftotext`) on `PATH`
-- The pipeline itself, either alongside the app in a checkout or bundled
+Nothing. An installed build ships the whole converter frozen into one
+executable and poppler's extractor with the libraries it needs, so it runs on a
+machine with no Python and no poppler at all — verified by running the
+installed pipeline under `env -i`, with no `PATH`.
 
-The window says which of these is missing rather than failing vaguely, and
-shows the firmware revision the capability data was harvested from — every pin
-in a generated config is validated against that snapshot, so it is part of the
-provenance.
+Build the payload before bundling:
 
-Packaging Python and poppler into the bundle so a vendor needs neither is not
-done yet; today the app expects both on the machine.
+```bash
+python3 packaging/build_sidecars.py   # ~36 MB: frozen pipeline + poppler
+npm run tauri:build
+```
+
+A **source checkout** has neither and falls back to the system Python and
+whatever poppler is on `PATH`, which is what development wants. The window says
+which of the two is missing rather than failing vaguely.
+
+### Per platform
+
+The Linux vendoring is implemented and tested. It copies `pdftotext` and every
+library it links except the glibc family — those must come from the host,
+because they have to match the dynamic loader that starts the process. That
+couples a Linux bundle to the glibc it was built against: it runs on that
+release and newer, not older, so CI should build in the oldest container you
+intend to support.
+
+macOS and Windows need the same two pieces and are not wired up here. macOS
+wants the `otool -L` walk and `DYLD_LIBRARY_PATH` in place of `ldd`; Windows
+wants a self-contained poppler build, of which there are prebuilt ones, and no
+library juggling at all.
 
 ## What it does not do
 

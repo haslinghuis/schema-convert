@@ -37,6 +37,9 @@ mod commands {
     /// What the UI needs to know before it lets anyone convert anything.
     #[derive(Serialize)]
     pub struct Environment {
+        /// True when the app is running from its own frozen pipeline rather
+        /// than a checkout, i.e. when nothing needs to be installed.
+        pub bundled: bool,
         pub python: Option<String>,
         pub pdftotext: Option<String>,
         pub pipeline: Option<String>,
@@ -102,13 +105,84 @@ mod commands {
         }
     }
 
+    /// What the app ships so a vendor installs nothing: the whole converter
+    /// frozen into one executable, and poppler's extractor with its libraries.
+    ///
+    /// Both are optional. A source checkout has neither and falls back to the
+    /// system Python and whatever poppler is on PATH, which is what development
+    /// wants; an installed bundle has both and touches neither.
+    pub struct Bundled {
+        pub pipeline: Option<PathBuf>,
+        pub pdftotext: Option<PathBuf>,
+        pub poppler_libs: Option<PathBuf>,
+    }
+
+    fn exe_name(stem: &str) -> String {
+        if cfg!(windows) { format!("{stem}.exe") } else { stem.to_string() }
+    }
+
+    fn bundled(app: &tauri::AppHandle) -> Bundled {
+        use tauri::Manager;
+        let root = app.path().resource_dir().ok();
+        let at = |rel: &str| -> Option<PathBuf> {
+            let p = root.as_ref()?.join(rel);
+            p.exists().then_some(p)
+        };
+        Bundled {
+            pipeline: at(&format!("pipeline/{}", exe_name("schema-convert"))),
+            pdftotext: at(&format!("poppler/{}", exe_name("pdftotext"))),
+            poppler_libs: at("poppler/lib"),
+        }
+    }
+
+    /// Point the converter at the poppler we shipped, and at the libraries it
+    /// needs. The libraries are found this way rather than by rewriting the
+    /// binary's rpath, which would put patchelf in the build for no gain.
+    fn use_bundled_poppler(cmd: &mut Command, b: &Bundled) {
+        if let Some(pdftotext) = &b.pdftotext {
+            cmd.env("SCHEMA_CONVERT_PDFTOTEXT", pdftotext);
+        }
+        if let Some(libs) = &b.poppler_libs {
+            let joined = match std::env::var_os(LIB_PATH_VAR) {
+                Some(existing) => {
+                    let mut v = vec![libs.clone()];
+                    v.extend(std::env::split_paths(&existing));
+                    std::env::join_paths(v).ok()
+                }
+                None => Some(libs.clone().into_os_string()),
+            };
+            if let Some(joined) = joined {
+                cmd.env(LIB_PATH_VAR, joined);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    const LIB_PATH_VAR: &str = "DYLD_LIBRARY_PATH";
+    #[cfg(not(target_os = "macos"))]
+    const LIB_PATH_VAR: &str = "LD_LIBRARY_PATH";
+
     #[tauri::command]
     pub fn environment(app: tauri::AppHandle) -> Environment {
+        let b = bundled(&app);
         let root = pipeline_root(&app);
+        // A bundled build needs nothing installed, so report what it will
+        // actually use rather than what happens to be on the machine.
         let mut env = Environment {
-            python: probe(python(), &["--version"]),
-            pdftotext: probe("pdftotext", &["-v"]),
-            pipeline: root.as_ref().map(|p| p.display().to_string()),
+            bundled: b.pipeline.is_some(),
+            python: match &b.pipeline {
+                Some(_) => Some("bundled".into()),
+                None => probe(python(), &["--version"]),
+            },
+            pdftotext: match &b.pdftotext {
+                Some(_) => Some("bundled".into()),
+                None => probe("pdftotext", &["-v"]),
+            },
+            pipeline: b
+                .pipeline
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .or_else(|| root.as_ref().map(|p| p.display().to_string())),
             firmware_rev: None,
             firmware_branch: None,
             ready: false,
@@ -123,10 +197,13 @@ mod commands {
                 }
             }
         }
+        // The frozen build carries its capability data inside the executable,
+        // so there is no firmware.json beside it to read - which is a fact
+        // about where the data lives, not a missing prerequisite.
         env.ready = env.python.is_some()
             && env.pdftotext.is_some()
             && env.pipeline.is_some()
-            && env.firmware_rev.is_some();
+            && (env.firmware_rev.is_some() || env.bundled);
         env
     }
 
@@ -147,16 +224,28 @@ mod commands {
         page: Option<u32>,
         hse_mhz: Option<u32>,
     ) -> Result<serde_json::Value, String> {
-        let root = pipeline_root(&app).ok_or_else(|| {
-            "Could not find the conversion pipeline (mcu-parser/genconfig.py)".to_string()
-        })?;
         if !Path::new(&pdf).is_file() {
             return Err(format!("No such file: {pdf}"));
         }
+        let b = bundled(&app);
 
-        let mut cmd = Command::new(python());
-        cmd.arg(root.join("genconfig.py"))
-            .arg(&pdf)
+        // The frozen pipeline is one executable and takes the arguments
+        // directly; a checkout needs an interpreter in front of the script.
+        let mut cmd = match &b.pipeline {
+            Some(exe) => Command::new(exe),
+            None => {
+                let root = pipeline_root(&app).ok_or_else(|| {
+                    "Could not find the conversion pipeline \
+                     (mcu-parser/genconfig.py)"
+                        .to_string()
+                })?;
+                let mut c = Command::new(python());
+                c.arg(root.join("genconfig.py"));
+                c
+            }
+        };
+        use_bundled_poppler(&mut cmd, &b);
+        cmd.arg(&pdf)
             .arg("--board")
             .arg(&board)
             .arg("--manufacturer")
@@ -174,7 +263,7 @@ mod commands {
 
         let out = cmd
             .output()
-            .map_err(|e| format!("Could not run {}: {e}", python()))?;
+            .map_err(|e| format!("Could not start the converter: {e}"))?;
         if !out.status.success() {
             // The pipeline's refusals are written for a person and say what to do
             // next - which sheet to pass, which target, what to ask the vendor. Pass

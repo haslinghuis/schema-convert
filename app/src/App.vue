@@ -8,6 +8,7 @@ import logo from "./assets/bf-logo.svg";
 import type { Report } from "./types";
 
 interface Environment {
+  bundled: boolean;
   python: string | null;
   pdftotext: string | null;
   pipeline: string | null;
@@ -101,8 +102,11 @@ async function copyConfig() {
       </div>
       <div v-if="env" class="text-right text-xs">
         <div v-if="env.ready" class="text-neutral-500">
-          validated against firmware
-          <span class="mono text-neutral-300">{{ env.firmware_rev }}</span>
+          <template v-if="env.firmware_rev">
+            validated against firmware
+            <span class="mono text-neutral-300">{{ env.firmware_rev }}</span>
+          </template>
+          <template v-else>self-contained build</template>
         </div>
         <div v-else class="text-red-400">environment incomplete</div>
       </div>
@@ -115,6 +119,10 @@ async function copyConfig() {
       class="border-b border-red-900/60 bg-red-950/30 px-5 py-3 text-sm text-red-200"
     >
       <div class="mb-1 font-medium">This machine is missing something:</div>
+      <p class="mb-1 text-xs text-red-300/70">
+        This is a source checkout, which uses the tools on your machine. An
+        installed build ships its own and needs none of this.
+      </p>
       <ul class="ml-4 list-disc text-red-300/90">
         <li v-if="!env.python">Python 3.12 or newer is not on PATH</li>
         <li v-if="!env.pdftotext">

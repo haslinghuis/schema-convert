@@ -42,6 +42,7 @@ Usage:  python netmap.py <schematic.pdf> [--target STM32F722]
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -102,6 +103,28 @@ def _words_in(xml: str, page: int) -> List[Word]:
     return words
 
 
+# Set by a caller that ships its own poppler rather than relying on one being
+# installed - the desktop app bundles it so a vendor needs nothing on PATH.
+# Kept as an environment variable rather than an argument because it has to
+# reach here through the CLI, and every caller in between would otherwise have
+# to know about a detail none of them care about.
+PDFTOTEXT_ENV = "SCHEMA_CONVERT_PDFTOTEXT"
+
+
+def pdftotext() -> str:
+    """The poppler binary to extract with: a bundled one if told, else PATH."""
+    override = os.environ.get(PDFTOTEXT_ENV)
+    if override:
+        if not Path(override).is_file():
+            raise SystemExit(f"{PDFTOTEXT_ENV} points at {override}, which is "
+                             "not a file")
+        return override
+    found = shutil.which("pdftotext")
+    if not found:
+        raise SystemExit("pdftotext not found - install poppler-utils")
+    return found
+
+
 def extract_words(pdf: Path) -> List[Word]:
     """
     Every word in the document, each tagged with the sheet it was drawn on.
@@ -111,10 +134,8 @@ def extract_words(pdf: Path) -> List[Word]:
     same rows. Anything downstream that reasons about geometry has to stay
     inside a page, or it will pair a net label with a pin drawn elsewhere.
     """
-    if not shutil.which("pdftotext"):
-        raise SystemExit("pdftotext not found - install poppler-utils")
     out = subprocess.run(
-        ["pdftotext", "-bbox-layout", str(pdf), "-"],
+        [pdftotext(), "-bbox-layout", str(pdf), "-"],
         capture_output=True, text=True, check=True,
     ).stdout
     pages = PAGE_RE.findall(out)

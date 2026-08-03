@@ -37,3 +37,4 @@ uv.lock
 
 # schematic-extractor is its own git repository (independently versioned)
 /schematic-extractor/
+build/
