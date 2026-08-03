@@ -147,6 +147,41 @@ warning; an unassociable crystal emits nothing and warns rather than guessing.
 Verified against hand-written references: G4 → 8 (matches `SDMODELG473`), F4 → 8
 (matches `JHEF405PRO`), H5 → 25 (matches `NUCLEOH563ZI`), F7 → unchanged.
 
+#### Round two: it was still picking the wrong crystal, not just missing one
+
+Running the corpus put 41 boards in the "no crystal found" column, and looking
+at them found two ways of being *wrong* rather than silent.
+
+**Distance was measured across sheets.** Pages share a coordinate space (§1.1),
+so a crystal on page 2 and OSC pins on page 1 produce a number that means
+nothing. One H562 was emitting `SYSTEM_HSE_MHZ 27` from an OSD crystal drawn on
+another sheet — and `system_stm32h5xx.c` accepts only 8 or 25, so that config
+would have stopped at its own `#error`. A G4 was emitting 26 from an RF module's
+crystal on page 4 where its hand-written config says 8.
+
+**Frequency was never weighed, only proximity.** 27 MHz is the MAX7456's part
+and 40 MHz an RF module's. Across the 619 hand-written configs neither is the
+`SYSTEM_HSE_MHZ` of a single board — they are 8 MHz on 245, then 16, 48, 25 and
+24. So neither may be claimed on proximity alone. A shared OSC net label is the
+sheet stating the connection outright and still wins for any frequency, but the
+result is flagged; two boards reach 27 MHz that way.
+
+**The window was 30 × the symbol's row pitch**, which is not a sheet scale.
+Pitch runs from 1.4pt to 18pt across this corpus, so the window ranged from 43pt
+to 540pt — rejecting an 8 MHz crystal 214pt from the OSC pins on a fine-pitch
+sheet while accepting almost anything on a coarse one. The symbol's own height
+and width track the drawing scale instead.
+
+44 → 46 boards emit it: four gained, two withdrawn because they were wrong. The
+58 that still omit are 19 F7 (deliberate — the PLL input is hardcoded), 21
+sheets that print no frequency anywhere, 9 carrying only OSD or RF crystals, 5
+whose symbol never names its OSC pins, and 4 with the crystal on another sheet.
+Each says which, and points at `--hse-mhz`.
+
+The lesson is the same one as §1.7: **a rule that only counts evidence *for* a
+candidate will pick a bad one when nothing better is near.** Proximity said
+"this is the closest crystal"; nothing asked whether it could be an HSE at all.
+
 ### 1.3 Fixed-mapping timer DMA options are never de-duplicated — ADDRESSED
 
 On DMAMUX parts every timer gets a distinct `dmaopt` (§ below). On **fixed-mapping**
