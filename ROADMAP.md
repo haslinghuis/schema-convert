@@ -45,7 +45,6 @@ is in each section; this is the index.
 | §3.3 | Chip-select-only devices whose CS is never drawn away from the MCU — the genuine wire-tracing cases | 27 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
-| §2.3 | SD card over **SDIO/SDMMC** — only the SPI form is implemented | 12 |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -387,19 +386,42 @@ IMU only a chip-select, and the tool declines to emit `GYRO_2_*` at all —
 correctly, since `GYRO_2_CS_PIN` alone would raise `GYRO_COUNT` to 2 with no bus
 behind it — and says exactly which three defines a human must add.
 
-### 2.3 Still unproven after 168 schematics
+### 2.3 Still unproven after 168 schematics — and SDIO is now DONE
 
-`USE_SDCARD`, `RX_PPM_PIN`, `ESCSERIAL_PIN` and burst DShot are implemented and
-unit-tested, and **not one board in the corpus emits any of them**. That is a
-much stronger statement than the old "no board in the corpus exercises them",
-and it changes what the gap is:
+`RX_PPM_PIN`, `ESCSERIAL_PIN` and burst DShot are implemented and unit-tested,
+and **not one board in the corpus emits any of them**. That is a stronger
+statement than "no board exercises them" and it retires them as priorities:
+both are legacy, and the corpus says they are gone.
 
-- **SD card.** 22 boards mention a card, but the ones that wire it do so over
-  **SDIO/SDMMC**, not SPI — nets like `SDMMC1-CK`, `SDMMC1-CMD`, `SDMMC1-D0..D3`.
-  Only the SPI form is implemented, so `SDIO_CK_PIN` and friends are never
-  emitted. This is a missing feature, not an unproven one.
-- **PPM and escserial** genuinely do not appear. Both are legacy; the corpus
-  suggests they are no longer worth chasing.
+**`USE_SDCARD` was the wrong shape, and is now fixed.** 22 boards mention a
+card and the ones that wire it use the MCU's **SDMMC controller**, not a SPI
+bus — so the SPI-only implementation gave none of them a card and the nets came
+out as "no config.h role". Six spellings occur and none was matched:
+`SDMMC1-CK`, `SDMMC2_D3`, `SDIO_CMD`, `SDIO-D2`, `SD_SDIO_CK`, `SD_CLK`. The
+digit is the *controller* (`SDMMC2` → `SDIO_DEVICE SDIODEV_2`), not a line
+number.
+
+The interesting part was deciding where it may be emitted at all. `pg/sdio.c`
+registers the pin config behind `#if ENABLE_SDIO_PIN_CONFIG`, which
+`common_post.h` defaults to **0** — and only a target's own `target.h` turns it
+on, so it is per *target*, not per family: H743 sets it, H750 does not, and both
+are STM32H7. On a target that leaves it off, `SDIO_CK_PIN` and the rest compile
+fine and are never read. That is the §1 case exactly, so the seeder now records
+`pin_config` and whether the family has an sdio driver, and the generator
+declines with the reason instead of emitting inert defines.
+
+`USE_SDCARD_SDIO` is deliberately *not* emitted — every `target.h` with an SDMMC
+controller defines it inside `#ifdef USE_SDCARD`, and the hand-written SDIO
+configs set neither. `SDIO_DEVICE` and `SDIO_USE_4BIT` are, because `pg/sdio.c`
+defaults them to `SDIOINVALID` and `false`: omitting them selects no controller
+and runs the card one-bit.
+
+Verified against a second board with a hand-written config, and every SDIO
+define matches it exactly — CK, CMD, D0–D3, DEVICE, 4BIT, the detect pin and its
+inversion. That board now agrees on **73 of 93** defines overall.
+
+Seven boards emit a complete SDIO block where none did; three more are refused
+because their CMD or D0 net is not drawn, and say so.
 
 ### 2.4 Second I2C bus — DONE
 
@@ -894,7 +916,8 @@ seeder's firmware rev in the generated header.
    *capability* gap — 32 sheets never name their MCU, and read at 100%
    agreement the moment you pass `--target`.
 8. **§3.4 AT32** — 14 boards, the whole of the non-STM32 gap.
-9. **§2.3 SDIO** for the SD card, which is how boards actually wire it.
+9. ~~**§2.3 SDIO**~~ — done; the seeder had to learn which targets honour
+   SDIO_*_PIN at all, because most do not.
 10. **§4.5 `config.c`** — still unsupported.
 11. ~~**§3.2 circuit analysis**~~ — the VBAT divider is done and checked on two
     boards whose ratio is *not* 100K/10K, which was the condition this entry
