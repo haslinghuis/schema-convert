@@ -42,7 +42,7 @@ is in each section; this is the index.
 
 | | | boards |
 |---|---|---|
-| §3.3 | Chip-select-only devices whose CS is never drawn away from the MCU — the genuine wire-tracing cases | 27 devices |
+| §3.3 | Chip-select-only devices — half are really unrecognised net spellings, the rest need wire tracing | 26 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
@@ -742,9 +742,47 @@ Against the three corpus boards with an exactly-matching hand-written config,
 **9 instances agree and none disagree**; the rest are declined with a reason
 rather than guessed.
 
-**What is left: 27 cases**, on boards where no bus is resolved for other reasons
-or whose chip-select never appears away from the MCU at all, so there is no
-second occurrence to read. Those genuinely need wire tracing.
+#### Round three, and the tail is mostly not a tracer problem
+
+Chasing the remainder found two more coverage gaps and one thing not to do.
+
+**A third index position.** `SPI2_SCK` and `SCK2` were matched; `SPI_SCK2` was
+not, and neither was `GYRO_MISO1` — the device index *after* the role, which the
+chip-select rule has accepted on both sides all along. Boards written that way
+resolved **no SPI bus at all**, so every device on them was unplaceable. This is
+the third time assuming one index position has cost coverage (§1.8 `TX4` vs
+`UART4_TX`, then `SCK3` vs `SPI3_SCK`). **Assume both, for any indexed net.**
+
+**The exporter's own net tokens.** Altium stamps one for every net it draws — NL
+for a net label, PO for a port, CO/PI for the component and pin it lands on —
+carrying the net's name with separators replaced by `0`, so `RX8_1` becomes
+`CORX801` and `TX3` on pin 01 becomes `PITX301`. They read like plausible net
+names and were being collected as labels; on one board four of them landed on a
+single pin row. They cannot be spotted by prefix, because `PINIO1` is a real net
+that starts with `PI` — what identifies one is that its remainder names a net
+drawn elsewhere *on the same sheet*. 119 across 21 boards, gone.
+
+**What not to do.** Twelve of the remaining cases are boards where exactly one
+bus is resolved, which looks like a sound inference: the device has nowhere else
+to go. It is not. On the one such board with a hand-written config to check
+against, that config has **three** buses with the gyro on SPI1, while the tool
+recognises only SPI2 — so the inference would have put it on the wrong bus. One
+bus is resolved because one was *recognised*, not because the board has one.
+The corpus falsified it before it was written, which is the whole point of
+having the corpus.
+
+**What is left: 26 cases.** Twelve of those are the single-bus shape above,
+which is really a recognition gap wearing a tracing gap's clothes — more net
+spellings, or the datasheet-style reading the tool does not do. The rest are
+boards whose chip-select never appears away from the MCU, and those genuinely
+need wire tracing.
+
+A related defect, measured and left: on **2 boards (10 pins)** a pin carries two
+classified nets, because widening the label gutter (§1.6) lets several columns
+compete for one row. The firmware check already discards the wrong half wherever
+the net is checkable, which is why this has not surfaced as a wrong pin. Fixing
+it properly means matching labels to rows as an assignment problem rather than
+independently, which is not worth it for two boards.
 
 ### 3.4 Only STM32 families are harvested — 14 boards blocked
 
