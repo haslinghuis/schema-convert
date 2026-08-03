@@ -107,14 +107,29 @@ generated from a local Betaflight checkout and records which one.
 
 - STM32 only so far; AT32, APM32 and PICO peripheral tables have a different
   shape and are not harvested yet
-- Gyro orientation and the current-meter scale cannot be derived from a schematic
-  and are always flagged for the vendor
-- A device whose only net is a chip-select cannot have its SPI instance inferred
+- Gyro orientation, the current-meter scale and PINIO polarity cannot be derived
+  from a schematic at all, and are always flagged for the vendor
+- A device whose only net is a chip-select is usually traced to its bus at the
+  device end, but not always — where the evidence is not decisive it says so and
+  leaves the instance to a reviewer
 - `TIMUPn_DMA_OPT` is never emitted, so a DMAMUX board wanting burst DShot
   (`DSHOT_DMAR_ON`) needs that added by hand
+- Some PDFs cannot be read by anything here: scans have no text layer, and some
+  CAD exporters write every glyph as a numbered drawing procedure with no
+  character mapping. Both are reported as such rather than as a parse failure
 - The generated file is a strong first draft, not a substitute for review: check
   the agreement score and every `WARN` before shipping a target
 
 [`ROADMAP.md`](ROADMAP.md) has the full gap analysis: known defects, which
 `config.h` defines are never emitted (with how many real boards use them), and
 what would need circuit-level analysis rather than net-label matching.
+
+## License
+
+GNU General Public License v3.0 or later — see [`LICENSE`](LICENSE). The same
+licence Betaflight uses, which matters here because this tool reads Betaflight's
+hardware tables and writes files that go back into its config repo.
+
+A generated `config.h` carries Betaflight's own GPL header, as the hand-written
+targets do. The schematic it was generated from is the vendor's and is not
+covered by this licence.

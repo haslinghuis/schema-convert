@@ -18,6 +18,9 @@ version = "0.2.0"
 description = "Convert flight-controller schematic PDFs into Betaflight config.h targets"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Mark Haslinghuis" }]
 dependencies = []
 
 [tool.uv]
