@@ -208,6 +208,42 @@ class ClassifyTests(unittest.TestCase):
                 role, idx, _ = genconfig.classify(net)
                 self.assertEqual((role, idx), want)
 
+    def test_betaflights_own_define_names_are_accepted_as_net_names(self):
+        # Vendors copy the config.h names onto their nets, which puts the index
+        # between separators. The older patterns allowed GYRO1-CS but not
+        # GYRO_1_CS, so boards written that way lost every device they named.
+        for net, want in (("GYRO_1_CS", "gyro_cs"), ("GYRO_2_CS", "gyro2_cs"),
+                          ("GYRO_1_EXTI", "gyro_exti"),
+                          ("GYRO_1_CLKIN", "gyro_clkin"),
+                          ("MAX7456_SPI_CS", "osd_cs"),
+                          ("FLASH_SPI_CS", "flash_cs"),
+                          ("BARO_SPI_CS", "baro_cs")):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], want)
+
+    def test_a_bus_net_with_no_separator_at_all(self):
+        # SPI1CLK / SPI1MISO. Three boards write it this way and resolved no
+        # SPI bus at all, which left every device on them unplaceable.
+        for net, want in (("SPI1CLK", ("1", "sck")), ("SPI1MISO", ("1", "sdi")),
+                          ("SPI2MOSI", ("2", "sdo"))):
+            with self.subTest(net=net):
+                role, idx, sub = genconfig.classify(net)
+                self.assertEqual((role, idx, sub), ("spi_bus", *want))
+
+    def test_the_bus_digit_can_stand_for_the_whole_name(self):
+        for net, want in (("1-SCK", ("1", "sck")), ("2-MISO", ("2", "sdi")),
+                          ("3-MOSI", ("3", "sdo"))):
+            with self.subTest(net=net):
+                role, idx, sub = genconfig.classify(net)
+                self.assertEqual((role, idx, sub), ("spi_bus", *want))
+
+    def test_clk_means_the_spi_clock_unless_it_is_the_card(self):
+        # The SDMMC clock line is CK; everywhere else CLK is SCK. One
+        # normalisation for both would have put an SD card's clock on a bus.
+        self.assertEqual(genconfig.classify("SPI1CLK")[2], "sck")
+        self.assertEqual(genconfig.classify("SD_CLK")[2], "ck")
+        self.assertEqual(genconfig.classify("SDIO_CK")[2], "ck")
+
     def test_a_net_naming_both_bus_and_device_keeps_the_device(self):
         # SPI3-FLASH_SCK is the most informative spelling a sheet can use, and
         # matched neither the bus rule nor the device rule. The bus number in it

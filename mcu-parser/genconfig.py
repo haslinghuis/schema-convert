@@ -99,6 +99,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # are one bus written three ways; the last was read as nothing, which left
     # boards with no SPI bus at all and every device on them unplaceable.
     (re.compile(r"^SPI[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)$"), "spi_bus"),
+    # ...and with no separator at all (SPI1CLK), or with the bus digit standing
+    # for the whole name (1-SCK). CLK means SCK here, not the SDIO clock.
+    (re.compile(r"^SPI(\d)(SCK|SCLK|CLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
+    (re.compile(r"^(\d)[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
     (re.compile(r"^SERVO(\d+)$"), "servo"),
     # A PPM receiver and the ESC 1-wire passthrough both drive a timer input
@@ -109,18 +113,21 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # second IMU as GYRO2-CS and as GYRO-CS2, and both mean GYRO_2_CS_PIN.
     # classify() folds it into the role, so a caller never has to remember which
     # group carried it.
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
-    (re.compile(r"^(?:GYRO|IMU)(\d)?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
+    # Vendors also copy Betaflight's own define names onto their nets, which put
+    # the index between separators: GYRO_1_CS, GYRO_1_CLKIN, MAX7456_SPI_CS.
+    # The separator before the index is what the older patterns did not allow.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
+    (re.compile(r"^(?:GYRO|IMU)[-_]?(\d)?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
     # The device index sits on either side here too, exactly as it does for the
     # chip select above: GYRO2-MISO and GYRO_MISO2 are the same second IMU.
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)(\d)?$"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)(\d)?$"),
      "gyro_spi"),
-    (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_]?CS$"), "osd_cs"),
+    (re.compile(r"^(?:OSD|MAX7456|AT7456)(?:[-_]SPI)?[-_]?CS$"), "osd_cs"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),
-    (re.compile(r"^FLASH[-_]?CS$"), "flash_cs"),
+    (re.compile(r"^FLASH(?:[-_]SPI)?[-_]?CS$"), "flash_cs"),
     (re.compile(r"^FLASH[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "flash_spi"),
-    (re.compile(r"^BARO[-_]?CS$"), "baro_cs"),
+    (re.compile(r"^BARO(?:[-_]SPI)?[-_]?CS$"), "baro_cs"),
     (re.compile(r"^BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
     (re.compile(r"^SD(?:CARD)?[-_]?CS$"), "sdcard_cs"),
     # Without the data nets the card is a CS with nowhere to go, so
@@ -198,7 +205,8 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         if sub in ("sclk",):
             sub = "sck"
         if sub == "clk":
-            sub = "ck"
+            # The SDMMC clock line is CK; everywhere else CLK is the SPI clock.
+            sub = "ck" if role == "sdio" else "sck"
         if sub in ("miso",):
             sub = "sdi"
         if sub in ("mosi",):
