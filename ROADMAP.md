@@ -20,12 +20,12 @@ be judged against:
 | | before the corpus | now |
 |---|---|---|
 | schematics that yield a pin map | 104 / 168 | 104 / 168 |
-| MCU pins read | 3090 | 3615 |
-| nets checked against firmware | 1637 | 1733 |
-| of those, agreeing | 1601 | 1691 |
+| MCU pins read | 3090 | 3865 |
+| nets checked against firmware | 1637 | 1904 |
+| of those, agreeing | 1601 | 1862 |
 | UART pins emitted | 299 | 576 |
 | boards with any UART pin | 34 | 70 |
-| boards at 100% agreement | 86 | 89 |
+| boards at 100% agreement | 86 | 91 |
 | SPI devices needing a hand-set instance | 77 | 27 |
 | boards whose SPI section is complete | 60 | 83 |
 | boards with a computed `DEFAULT_VOLTAGE_METER_SCALE` | 0 | 11 |
@@ -329,6 +329,63 @@ Smaller cases of the same shape: I2C nets that carry no bus number (`SCL`,
 `SDA1` — the bus comes from the pins, so the number was never needed), `LED2`
 having no rule at all, `LED-1`/`LED-2` spelled with a dash, and `BEEPER_PIN`
 losing its role to a suffix.
+
+### 1.9 Only two of a symbol's four edges were read — FIXED
+
+A submitted F405 came back with 29 of its 50 pins. Symbol detection looked for
+pin names sharing an *x* — the columns down the left and right of a box — and
+nothing else. A four-sided QFP symbol also runs names across its top and bottom,
+and those were invisible. **20 of the 125 corpus boards draw one**, and on the
+largest 41 of its 82 pins are on horizontal edges; several were already filed
+under §3.3 as "no SPI bus resolved", because the bus nets were on the two sides
+nobody read.
+
+An edge is the same search on a different coordinate, so the fix was to stop
+assuming which. A row carries where it sits *along its own edge*; `ALONG` says
+which axis that is; the gutter, the ownership test and the pairing all ask
+before measuring.
+
+Three things this turned up, each of which had been latent:
+
+- **A pin name is never the continuation of another pin name.** That sheet sets
+  its names 1.15pt apart horizontally — closer than the gap that rejoins one
+  split name — so the assembler fused `PA4+PA5+…+PB2` into a single token and
+  dropped nine pins. Supply names end a name too: `PB8`+`BOOT0` became
+  `PB8BOOT0` and took the board's I2C SCL with it.
+- **The offset must be swept per axis.** A label sits above the horizontal wire
+  of a left-hand pin and beside the vertical wire of a top one - different
+  distances between different anchors. One offset for both put a bottom edge two
+  pins out, and it still read 100%, because the pins it landed on could do the
+  job.
+- **An axis has to earn its bindings.** Names and labels on horizontal edges are
+  drawn rotated, and on one board that alignment cannot be confirmed at all —
+  the best any offset reaches is 2 of its 3 checkable nets. A contradicted axis
+  now keeps its rows, so those pins are still reported as unconnected, and loses
+  its links.
+
+Also: ST writes more than one dash qualifier (`PC13-TAMPER-RTC`,
+`PC14-OSC32-IN`) where the pattern allowed one, and a trailing `_PIN` is
+Betaflight's own define name copied onto the sheet — 91 nets across the corpus
+end that way and 87 classify once it is stripped.
+
+### 1.10 The row pitch was measured across both columns — FIXED
+
+Pitch is the smallest gap between adjacent names, and it was taken over *all*
+rows. The two columns of a symbol are interleaved along the same axis: a left
+row and the right row opposite it sit a fraction apart while the real step is to
+the next pair. One board's columns are each a clean 7.2pt apart and their union
+alternates 0.72 and 6.48, so its pitch came out **ten times too small**.
+
+It survived for as long as it did because nothing had ever shifted the minimum.
+Recognising two more pin names did, and the board went from 100% agreement to
+binding nothing at all — every tolerance downstream is scaled by pitch.
+
+Two lessons worth more than the fix. **A constant tuned against a broken value
+is broken too**: the merge test's adjacency reach of six pitches was harmless
+while the pitch was under-measured and far too generous once it was right, and
+correcting one without the other ballooned a symbol to 198 rows. And **a number
+that has never moved is not the same as a number that is right** — this one had
+been wrong on that board since the day it was written.
 
 ---
 
