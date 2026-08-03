@@ -771,11 +771,35 @@ bus is resolved because one was *recognised*, not because the board has one.
 The corpus falsified it before it was written, which is the whole point of
 having the corpus.
 
-**What is left: 26 cases.** Twelve of those are the single-bus shape above,
-which is really a recognition gap wearing a tracing gap's clothes — more net
-spellings, or the datasheet-style reading the tool does not do. The rest are
-boards whose chip-select never appears away from the MCU, and those genuinely
-need wire tracing.
+#### The recognition half, closed
+
+The single-bus shape was indeed a recognition gap, and naming the spellings it
+was missing closed most of it.
+
+Vendors copy **Betaflight's own define names** onto their nets, which puts the
+index between separators: `GYRO_1_CS`, `GYRO_1_CLKIN`, `GYRO_1_EXTI`,
+`MAX7456_SPI_CS`, `FLASH_SPI_CS`. The patterns allowed `GYRO1-CS` but not
+`GYRO_1_CS`, so a board written that way lost every device it named.
+
+Two more bus spellings, both of which left a board with **no SPI bus at all**
+and therefore nothing placeable on one: `SPI1CLK`, with no separator between
+bus and role, and `1-SCK`, where the bus digit stands for the whole name. `CLK`
+there is the *SPI* clock, not the SDMMC one, so the normalisation is now
+role-aware — one rule for both would have put a card's clock on a bus.
+
+One board went from zero buses to all three, with all nine bus pins and all
+three chip-select pins matching its hand-written config exactly. Another
+resolved its gyro to SPI1 and its OSD to SPI2 where neither was placed before.
+
+Buses resolved 188 → 196, `*_CS_PIN` 150 → 160, `*_SPI_INSTANCE` 134 → 144,
+`GYRO_2_*` 58 → 66, over ten boards with none losing anything.
+
+**What is left: 26 cases**, and the number staying still is worth reading
+correctly — the newly recognised boards gain their device chip-selects as well
+as their buses, so resolving some and discovering others cancels out on that one
+count while the configs get substantially more complete. What remains is boards
+whose chip-select is never drawn away from the MCU, which genuinely needs wire
+tracing, and a handful whose bus nets are on sheets the symbol is not on.
 
 A related defect, measured and left: on **2 boards (10 pins)** a pin carries two
 classified nets, because widening the label gutter (§1.6) lets several columns
