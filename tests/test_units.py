@@ -1144,6 +1144,51 @@ class PinNameFormTests(unittest.TestCase):
         self.assertEqual((m.group(1), m.group(2)), ("PC6", "TIM3_CH1/USART6_TX"))
 
 
+class AnnotationTokenTests(unittest.TestCase):
+    """
+    netmap.drop_annotations: the exporter's copy of a net, not the net.
+
+    Altium stamps a token for every net it draws - NL for a net label, PO for a
+    port, CO/PI for the component and pin it lands on - carrying the net's own
+    name with the separators replaced by 0, so RX8_1 becomes CORX801. They read
+    like plausible net names and were being collected as labels; on one board
+    that put four of them on a single pin row.
+
+    They cannot be spotted by prefix alone: PINIO1 is a real net starting with
+    PI. What identifies one is that its remainder names a net drawn elsewhere
+    on the same sheet.
+    """
+
+    def run_(self, texts, page=1):
+        ws = [Word(t, 10.0 + 8 * i, 100.0, 30.0 + 8 * i, 103.0, page)
+              for i, t in enumerate(texts)]
+        kept = {w.text for w in netmap.drop_annotations(ws, ws)}
+        return kept, {t for t in texts if t not in kept}
+
+    def test_the_annotation_copy_is_dropped(self):
+        _, gone = self.run_(["TX3", "COTX3", "NLTX3", "GYRO1-CS", "POGYRO10CS"])
+        self.assertEqual(gone, {"COTX3", "NLTX3", "POGYRO10CS"})
+
+    def test_the_separator_is_encoded_as_a_zero(self):
+        # RX8_1 -> RX801, and the underscore is not recoverable any other way.
+        _, gone = self.run_(["RX8_1", "CORX801"])
+        self.assertEqual(gone, {"CORX801"})
+
+    def test_the_pin_form_carries_a_pin_number_too(self):
+        # PITX301 is TX3 on pin 01, so the trailing digits are tried both ways.
+        _, gone = self.run_(["TX3", "PITX301", "BEEPER+", "PIBEEPER001"])
+        self.assertEqual(gone, {"PITX301", "PIBEEPER001"})
+
+    def test_a_real_net_that_starts_with_a_prefix_survives(self):
+        kept, gone = self.run_(["PINIO1", "PINIO2", "POWER", "COMP1_OUT", "LED0"])
+        self.assertEqual(gone, set())
+
+    def test_a_net_is_not_its_own_annotation_across_sheets(self):
+        # The remainder has to name a net on the *same* sheet.
+        ws = [Word("TX3", 10, 100, 30, 103, 1), Word("COTX3", 10, 200, 30, 203, 2)]
+        self.assertEqual(len(netmap.drop_annotations(ws, ws)), 2)
+
+
 class UnreadableDocumentTests(unittest.TestCase):
     """
     netmap.describe_unreadable: why nothing came out, when it is not geometry.

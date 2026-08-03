@@ -95,6 +95,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # are the same bus.
     (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
     (re.compile(r"^(SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)$"), "spi_bus"),
+    # ...and a third position for the same index. SPI2_SCK, SCK2 and SPI_SCK2
+    # are one bus written three ways; the last was read as nothing, which left
+    # boards with no SPI bus at all and every device on them unplaceable.
+    (re.compile(r"^SPI[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)$"), "spi_bus"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
     (re.compile(r"^SERVO(\d+)$"), "servo"),
     # A PPM receiver and the ESC 1-wire passthrough both drive a timer input
@@ -108,7 +112,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
     (re.compile(r"^(?:GYRO|IMU)(\d)?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "gyro_spi"),
+    # The device index sits on either side here too, exactly as it does for the
+    # chip select above: GYRO2-MISO and GYRO_MISO2 are the same second IMU.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)(\d)?$"),
+     "gyro_spi"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_]?CS$"), "osd_cs"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),
     (re.compile(r"^FLASH[-_]?CS$"), "flash_cs"),

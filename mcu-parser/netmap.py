@@ -252,6 +252,54 @@ ANNOT_RE = re.compile(
 )
 
 
+# The same exporter also stamps a token for every *net*: NL for a net label, PO
+# for a port, CO/PI for the component and pin it lands on. Unlike the designator
+# form above these carry the net's own name, with the separators replaced by 0 -
+# RX8_1 becomes RX801, GYRO1-CS becomes GYRO10CS - so they read like plausible
+# net names and were being collected as labels. On one board that put four
+# labels on a single pin row and pushed GYRO_CS onto the wrong one.
+#
+# They cannot be recognised by prefix alone: PINIO1 is a real net that starts
+# with PI. What identifies them is that the remainder names a net drawn
+# elsewhere on the same sheet, which is exactly what an annotation is.
+ANNOT_PREFIXES = ("NL", "PO", "CO", "PI")
+
+
+def _annot_norm(text: str) -> str:
+    """A name as its annotation token would spell it: no separators at all."""
+    return re.sub(r"[^A-Z0-9]", "", text.upper()).replace("0", "")
+
+
+def drop_annotations(labels: Sequence[Word], words: Sequence[Word]) -> List[Word]:
+    """Discard the annotation copy of a net that is also drawn as itself."""
+    by_page: Dict[int, set] = defaultdict(set)
+    for w in words:
+        by_page[w.page].add(_annot_norm(w.text))
+    out: List[Word] = []
+    for w in labels:
+        t = w.text.upper()
+        if any(len(t) > len(p) and t.startswith(p)
+               and _annot_keys(t[len(p):]) & by_page[w.page]
+               for p in ANNOT_PREFIXES):
+            continue
+        out.append(w)
+    return out
+
+
+def _annot_keys(rest: str) -> set:
+    """
+    What net this annotation could be naming.
+
+    The pin form carries the pin number as well as the net - PITX301 is TX3 on
+    pin 01 - so the trailing digits are tried both ways rather than assumed to
+    be part of the name.
+    """
+    # Trim before normalising, not after: the separator-as-0 encoding would
+    # otherwise fold TX301 (TX3 on pin 01) to TX31 and lose the boundary.
+    cands = {rest} | {rest[:-n] for n in (1, 2, 3) if len(rest) > n}
+    return {_annot_norm(c) for c in cands} - {""}
+
+
 def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
     """
     Rejoin pin-name strings that the extractor split into several words.
@@ -541,7 +589,7 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
             if id(w) not in seen:
                 seen.add(id(w))
                 out.append(w)
-    return out
+    return drop_annotations(out, words)
 
 
 def _labels_for_part(words: Sequence[Word], part: SymbolPart,
