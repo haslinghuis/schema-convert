@@ -53,10 +53,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # A pin name, optionally carrying ST's own dash qualifier and then an AF list:
-#   PB2   PA0-WKUP   PC14-OSC32_IN   PC6/TIM3_CH1/TIM8_CH1/USART6_TX
-# The qualifier names a second *fixed* function of the pin (wakeup, oscillator),
-# not an alternate function, so it is dropped rather than parsed as one.
-PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:-[A-Z0-9_]+)?(?:/(.*))?$")
+#   PB2   PA0-WKUP   PC14-OSC32_IN   PC13-TAMPER-RTC
+#   PC6/TIM3_CH1/TIM8_CH1/USART6_TX
+# The qualifier names a second *fixed* function of the pin (wakeup, oscillator,
+# tamper), not an alternate function, so it is dropped rather than parsed as
+# one. There can be more than one of them - PC13-TAMPER-RTC is ST's own name -
+# and allowing only a single segment lost that pin, and with it the net beside
+# it, on a board whose symbol spells its pins out in full.
+PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:-[A-Z0-9_]+)*(?:/(.*))?$")
 
 # Supply and system pins. They are not routable, but they occupy rows in the
 # symbol, so knowing where they are is what lets the tool say "this net landed on
@@ -375,8 +379,13 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
             if not nxt:
                 break
             v = min(nxt, key=lambda v: v.x0)
-            if ANNOT_RE.match(v.text) or PIN_RE.match(v.text):
-                # A pin name is never the continuation of another pin name.
+            if (ANNOT_RE.match(v.text) or PIN_RE.match(v.text)
+                    or POWER_PIN_RE.match(v.text)):
+                # A pin name is never the continuation of another pin name -
+                # and a supply or system name is a name in the row too, so
+                # BOOT0 and NRST end one exactly as PB5 does. Missing that
+                # fused 'PB8' and 'BOOT0' into PB8BOOT0 on one sheet, which
+                # took PB8 with it and left the board's I2C SCL unbindable.
                 # Some sheets set their pin names in a horizontal row about a
                 # point apart - closer than the gap that separates the pieces
                 # of one split name - and without this the whole row fuses into
@@ -545,9 +554,20 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
 
 
 def _pitch(rows: Sequence[PinRow]) -> float:
-    """The most common gap between adjacent names along the edge."""
-    at = sorted({round(r.pos, 2) for r in rows})
-    gaps = [round(b - a, 2) for a, b in zip(at, at[1:]) if 0.5 < b - a < 20]
+    """
+    The row pitch: the smallest gap between adjacent names *on one side*.
+
+    Per side, because the two columns of a symbol are interleaved along the
+    same axis - a left row and the right row opposite it sit a fraction apart
+    while the real step is to the next pair. One board's columns are each a
+    clean 7.2pt apart and their union is 0.72 and 6.48 alternating, so measured
+    together its pitch came out ten times too small. Everything downstream is
+    scaled by it, and that board bound nothing at all.
+    """
+    gaps: List[float] = []
+    for side in {r.side for r in rows}:
+        at = sorted({round(r.pos, 2) for r in rows if r.side == side})
+        gaps += [round(b - a, 2) for a, b in zip(at, at[1:]) if 0.5 < b - a < 20]
     return min(gaps) if gaps else 3.66
 
 
@@ -583,7 +603,10 @@ def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
     # replacement - two columns of one symbol are routinely drawn far enough
     # apart to fail an adjacency test, and requiring it lost 20 pins on a board
     # that had been read correctly for weeks.
-    reach = pitch * 6
+    # The edges of one symbol meet at its corners, so this is a small number of
+    # rows, not a large one. It was six, which is harmless while the pitch is
+    # under-measured and far too generous once it is right.
+    reach = pitch * 2
     return any(
         part.left_edge <= p.right_edge + reach
         and p.left_edge <= part.right_edge + reach

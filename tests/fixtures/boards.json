@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "852a86b41",
   "frozen_firmware_branch": "master",
-  "tool_rev": "ee8cf5dcf"
+  "tool_rev": "b8255d3bd"
  },
  "boards": [
   {
@@ -172,26 +172,26 @@
    "sha256": "96af1f70ca6662a36c647c00c1f706ea9b37cf46bc0d90611fea7a284eae5971",
    "note": "G4, five sheets in one plot with the MCU on page 4 - the board that exercises per-page symbol detection; eight gutter labels on that page still pair with no row",
    "target": "STM32G474",
-   "symbol_rows": 46,
+   "symbol_rows": 32,
    "pitch": 7.18,
-   "net_labels": 46,
+   "net_labels": 32,
    "offset": 0.5983,
    "agreement": [
-    24,
-    24
+    18,
+    18
    ],
-   "orphan_labels": 4,
-   "nets_on_power_pins": 2,
-   "unmapped_pins": 3,
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 0,
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 53,
-   "timer_rows": 6,
-   "warnings": 9,
-   "notes": 9,
-   "netmap_digest": "13a54508da963948523793c21c399cbbddc9b0a561cde9fb1c12b6d157c4e52f",
-   "config_digest": "57bbb711bac23f528ba5bca15216264e02e41e7d24468899d4d900c0da601f27",
+   "config_defines": 50,
+   "timer_rows": 5,
+   "warnings": 7,
+   "notes": 6,
+   "netmap_digest": "6028cfd5ac6c9bfafc424e269e2970013637cad25c9657d362c13ca75780b96d",
+   "config_digest": "c77efee67aaeed052e9130d127a37bae130ba107ce29c58b3c9687eaec695c2a",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

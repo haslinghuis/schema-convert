@@ -195,6 +195,21 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     re-derivation of the SPI groups - then keys off the role alone.
     """
     n = net.upper().strip()
+
+    # Two spellings that mean nothing to the rules and everything to a reader,
+    # normalised here rather than doubled into forty patterns.
+    #
+    # IIC is I2C. It is the older name for the same bus and vendors still use
+    # it, and no rule matched it.
+    #
+    # A trailing _PIN is Betaflight's own define name copied onto the net -
+    # LED0_PIN, UART1_TX_PIN, I2C1_SCL_PIN, SPI1_SDO_PIN. Across the corpus 91
+    # unclassified nets end that way and 87 of them classify once it is gone,
+    # which is the whole gap: the sheets were naming the target's defines and
+    # the tool was not listening.
+    n = re.sub(r"^IIC", "I2C", n)
+    n = re.sub(r"[-_]PIN$", "", n) or n
+
     for rx, role in ROLE_RULES:
         m = rx.match(n)
         if not m:
