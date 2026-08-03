@@ -2624,6 +2624,9 @@ def main() -> int:
                          "the layout the config repo uses - so <outdir> can be "
                          "passed straight to make as CONFIG_DIR")
     ap.add_argument("--print", dest="to_stdout", action="store_true")
+    ap.add_argument("--json", dest="as_json", action="store_true",
+                    help="write the config and the whole report to stdout as "
+                         "JSON, for a caller that is not a terminal")
     args = ap.parse_args()
 
     if not (DATA_DIR / "firmware.json").exists():
@@ -2634,6 +2637,19 @@ def main() -> int:
                       args.reference, args.fw_version, args.hse_mhz,
                       args.page)
     text = "\n".join(cfg.lines).rstrip() + "\n"
+
+    if args.as_json:
+        # One structured document instead of a file plus a human report split
+        # across two streams. A GUI needs the warnings as data - which pin, which
+        # net - not as lines to scrape back out of stderr.
+        json.dump({
+            "config": text,
+            "warnings": cfg.warnings,
+            "notes": cfg.notes,
+            "meta": meta,
+        }, sys.stdout, indent=1, default=str)
+        sys.stdout.write("\n")
+        return 0
 
     if args.to_stdout or not args.outdir:
         print(text)
