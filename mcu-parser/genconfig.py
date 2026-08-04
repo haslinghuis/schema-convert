@@ -758,14 +758,18 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
         if "motor" in classes:
             f4 = str(caps.get("family", "")).startswith(("STM32F4", "APM32F4"))
             line += (
-                ". With DShot bitbang the motors drive GPIO from DMA and never "
-                "touch the timer, which makes this harmless" +
+                ". With DShot bitbang the motors drive GPIO from DMA and do not "
+                "use this timer, which makes the clash harmless" +
                 (" - but on this family DSHOT_BITBANG_AUTO only turns bitbang on "
                  "when DShot telemetry is enabled, so it bites without it"
                  if f4 else
                  ", and AUTO means bitbang on this family unless the protocol is "
                  "PROSHOT1000") +
-                ". It bites either way if bitbang is turned off")
+                ". It bites either way if bitbang is turned off - and bitbang "
+                "is not a blanket excuse: bbFindPacerTimer() still needs TIM1 or "
+                "TIM8 with no non-motor owner on any channel, so parking one of "
+                "these functions on both leaves it no pacer at all "
+                "(betaflight/config#646)")
         out.append(line)
     return out
 
