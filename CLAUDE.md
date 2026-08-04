@@ -125,10 +125,32 @@ pass. The remaining families without a datasheet are AT32 and APM32, and those
 are not harvested at all yet (ROADMAP §3.4), so nothing can be audited against
 them.
 
-Two informational `MISSING PIN` entries remain on F4 — `TIM13_CH1` on `PF8` and
-`TIM14_CH1` on `PF9`, which the datasheet lists and the firmware does not. Same
-pins #15513 corrected for H5/H7, so worth a look rather than assuming it is
-noise.
+A full pass after the reseed comes back **0 defects on every family**:
+
+| family | defects | informational `MISSING PIN` |
+|---|---|---|
+| F4 `stm32f405-407` | 0 | 2 |
+| F7 `stm32f722ic` | 0 | 2 |
+| G4 `stm32g474cb` | 0 | 0, plus 1 waived in `af-waivers.json` |
+| H5 `stm32h563ri` | 0 | 7 |
+| H7 `stm32h743vi` | 0 | 9 |
+| C5 `stm32c562ce` | 0 | 38 |
+| N6 `stm32n657a0` | 0 | 11 |
+
+**Do not file the `MISSING PIN` entries without checking reachability first.**
+They are datasheet options the firmware lacks, which is only worth a PR if a
+board can use them, and the ones checked cannot be:
+
+- F4/F7 `TIM13_CH1`/`TIM14_CH1` on `PF8`/`PF9` — `PF` pins exist only on
+  144-pin-and-up packages. Of 619 shipped targets exactly two use any `PF` pin,
+  and both are H-series where the table is already right.
+- H7's nine (`I2C2/3/4` on `PH*`, `SPI2_SCK` on `PI1`, …) — **0** shipped
+  targets want those pin/function pairs and **0** corpus boards are blocked by
+  them.
+
+So the audit's job here is done: it found three real defects, they merged, and
+what is left is coverage nobody can reach. Re-run it after the tables move, not
+on a schedule.
 
 **Seeding needs the right tree.** `seed_firmware.py` picks the newest clone on
 `master`, and the one under `../betaflight/master/` tracks a *fork* whose master
