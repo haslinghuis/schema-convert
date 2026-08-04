@@ -50,6 +50,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import median
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # A pin name, optionally carrying ST's own dash qualifier and then an AF list:
@@ -60,7 +61,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # one. There can be more than one of them - PC13-TAMPER-RTC is ST's own name -
 # and allowing only a single segment lost that pin, and with it the net beside
 # it, on a board whose symbol spells its pins out in full.
-PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:-[A-Z0-9_]+)*(?:/(.*))?$")
+#   ...and PC2_C, ST's name for the second pad of a dual-pad pin on the H7
+# parts that carry an analog switch (PA0_C, PA1_C, PC2_C, PC3_C). It is the
+# same GPIO and Betaflight names it PC2, so the suffix is dropped like any
+# other qualifier - but it is spelled with an underscore, which the dash form
+# above does not cover. Written out rather than allowing any underscore tail,
+# because PIN_RE also decides what is *not* a net label and a net called
+# PC13_LED should stay one.
+PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:_C)?(?:-[A-Z0-9_]+)*(?:/(.*))?$")
 
 # The same name written the other way round: function first, pin last. One
 # vendor's symbol does this down its right-hand column while the left column
@@ -483,6 +491,54 @@ def _find_parts(words: Sequence[Word], page: int, min_pins: int,
     return out
 
 
+def _fill_edge_holes(edge: List[Tagged], pool: Sequence[Tagged],
+                     across, along) -> List[Tagged]:
+    """
+    Adopt names the edge's coordinate cluster missed but its pitch demands.
+
+    The cluster tolerance is 1pt, and pdftotext's bounding boxes are not that
+    exact: one board reports a name 1.5pt right of the column it is plainly in,
+    which dropped the pin, and with it the SPI bus that pin carried and the
+    device sitting on that bus - reported only as one net label that matched no
+    row.
+
+    Widening the tolerance is the wrong fix, because real columns come that
+    close: one sheet here draws two of them 3.5pt apart. What separates the two
+    cases is the run. An edge is names at a regular pitch, so a gap of two
+    pitches is a row that must exist and does not - and only such a gap is
+    filled, from names less than a character's width off the edge. A genuine
+    neighbouring column is never absorbed: it has no hole to fall into.
+    """
+    if len(edge) < 3:
+        return edge
+    at = sorted(along(t[0]) for t in edge)
+    gaps = [b - a for a, b in zip(at, at[1:]) if b - a > 0.5]
+    if not gaps:
+        return edge
+    pitch = min(gaps)
+    edge_at = median([across(t[0]) for t in edge])
+    # A character's width, from the names themselves rather than a constant -
+    # these plots are drawn at whatever scale the vendor chose.
+    tol = 0.6 * median([(t[0].x1 - t[0].x0) / max(len(t[0].text), 1) for t in edge])
+    taken = {id(t) for t in edge}
+    spare = [t for t in pool
+             if id(t) not in taken and abs(across(t[0]) - edge_at) <= tol]
+    if not spare:
+        return edge
+    out = list(edge)
+    for a, b in zip(at, at[1:]):
+        for k in range(1, round((b - a) / pitch)):
+            slot = a + k * pitch
+            fits = [t for t in spare if abs(along(t[0]) - slot) <= pitch / 3
+                    and id(t) not in taken]
+            if not fits:
+                continue
+            best = min(fits, key=lambda t: abs(along(t[0]) - slot))
+            taken.add(id(best))
+            out.append(best)
+    return out
+
+
 def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
                       frame: Optional[Tuple[float, float, float, float]] = None
                       ) -> Optional[Tuple[SymbolPart, float, set]]:
@@ -531,12 +587,25 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
         claimed = {id(t) for t in left}
         right = [t for t in right if id(t) not in claimed]
 
+    # Only after the two columns have divided the overlap between them, so a
+    # hole in one is never filled with a name the other already owns.
+    spare = [t for t in tagged
+             if id(t) not in {id(x) for x in left} | {id(x) for x in right}]
+    left = _fill_edge_holes(left, spare, lambda w: w.x0, lambda w: w.y0)
+    spare = [t for t in spare if id(t) not in {id(x) for x in left}]
+    right = _fill_edge_holes(right, spare, lambda w: w.x1, lambda w: w.y0)
+
     horizontal = biggest(lambda w: w.y0)
     # A horizontal edge only wins when it is clearly the stronger reading: the
     # two columns of an ordinary symbol also share a handful of y values where
     # rows happen to line up, and mistaking that for a top edge would tear a
     # working two-column symbol apart.
     if len(horizontal) > len(left) + len(right):
+        # Filled only once this edge has won, so that adopting into it cannot
+        # be what tips the comparison above.
+        horizontal = _fill_edge_holes(
+            horizontal, [t for t in tagged if id(t) not in {id(x) for x in horizontal}],
+            lambda w: w.y0, lambda w: w.x0)
         mid_y = (box[1] + box[3]) / 2
         side = "T" if sum(t[0].y0 for t in horizontal) / len(horizontal) < mid_y else "B"
         rows = [PinRow(pin, w.x0, side, afs, gpio)

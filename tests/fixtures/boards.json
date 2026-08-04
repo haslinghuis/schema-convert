@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "d8756e6a8"
+  "tool_rev": "4b622fb2e"
  },
  "boards": [
   {
@@ -192,6 +192,72 @@
    "notes": 6,
    "netmap_digest": "6028cfd5ac6c9bfafc424e269e2970013637cad25c9657d362c13ca75780b96d",
    "config_digest": "cba7390622e5a4eba6aa75c4b1ffffca8e9b09ea7118240e47635b210892a700",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "h7-dual-pad",
+   "sha256": "3ac38ed02e987ffbfb4c2713fc11998809964b85d45266a04f988171d4fcb3ad",
+   "note": "H7 with the dual-pad pin names ST gives the analog-switch pads (PC2_C, PC3_C). SPI2's SDI and SDO and the ADC3 inputs are all on them, so a parser that only accepts the plain form drops half the bus and the ADC instance with it",
+   "target": "STM32H743",
+   "symbol_rows": 98,
+   "pitch": 7.2,
+   "net_labels": 82,
+   "offset": 0.6,
+   "agreement": [
+    24,
+    24
+   ],
+   "orphan_labels": 1,
+   "nets_on_power_pins": 2,
+   "unmapped_pins": 4,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 84,
+   "timer_rows": 2,
+   "warnings": 13,
+   "notes": 9,
+   "netmap_digest": "2833f0f8a9a09d346f96126de30f080f048fbfd0b49e2f67ee7e54c0d61dcb0a",
+   "config_digest": "c98ecb0763730fe57024dae8fac0b6a4686d308018467f304099fb7f97a35904",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "f4-column-drift",
+   "sha256": "71a0e246d4907e27770c12e6bdd16c84466b831c9ad9e7bfa3d5d0f4c3048c34",
+   "note": "F4 whose left column of pin names is not perfectly aligned - one name's bounding box sits 1.5pt right of the rest, outside the edge cluster. It is the SPI1 SDI pin, so losing it costs the bus, the gyro on it, and the gyro's instance define, and the only symptom is one net label that matched no row",
+   "target": "STM32F405",
+   "symbol_rows": 64,
+   "pitch": 8.38,
+   "net_labels": 35,
+   "offset": 0.0,
+   "agreement": [
+    14,
+    14
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 16,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 33,
+   "timer_rows": 0,
+   "warnings": 5,
+   "notes": 7,
+   "netmap_digest": "b099cdbf9870c3e6920a7b7c3bb0e9142714e5c37ea0b42e02b43d9598230675",
+   "config_digest": "392d63ae9b821634da7b87da0efc0abd7370e5798264cda818fa5c4342aff847",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

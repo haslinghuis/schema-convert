@@ -45,6 +45,8 @@ is in each section; this is the index.
 | §3.3 | Chip-select-only devices — half are really unrecognised net spellings, the rest need wire tracing | 26 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
+| §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
+| §3.7 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -405,6 +407,56 @@ being sidestepped.
 Over the corpus these two took total defines **4586 → 5109**, buses resolved
 196 → 237, chip-select pins 160 → 182 and SPI instances 144 → 160, over 29
 boards with none losing anything.
+
+### 1.12 A pin name can carry ST's dual-pad suffix — FIXED
+
+An H7 board came in "missing SPI 2 defines". It was missing one *row*: the
+left edge had a two-pitch gap where a name should be, and the name in it was
+`PC2_C/SPI2_MISO`.
+
+`PC2_C` is ST's own spelling. On the H7 parts that carry an analog switch,
+`PA0`/`PA1`/`PC2`/`PC3` each have a second pad, named with an underscore and a
+`C`. `PIN_RE` allowed ST's *dash* qualifiers (`PC13-TAMPER-RTC`, §1.11) but not
+this one, so the row was not a row, the label bound to nothing, and SPI2 came
+out with SCK and SDO and no SDI — which is refused, because a partial bus does
+not compile. One character of spelling cost the bus, the OSD on it, and the ADC
+instance, since those same pads are ADC3's inputs.
+
+Written out as `(?:_C)?` rather than allowing any underscore tail, because
+`PIN_RE` also decides what is *not* a net label and a net called `PC13_LED`
+must stay one.
+
+Corpus: 21 boards, all H7 as expected. Unbound labels **179 → 140**, nets
+checked 1920 → 1950 with agreement holding, defines 5109 → 5158. Ten boards
+gained a complete SPI2; four more gained `ADC_INSTANCE`/`ADC3_DMA_OPT`, because
+VBAT and current sit on those pads and ADC3 is the only ADC that reaches them.
+Verified against a hand-written config for one of them: `SPI2` `PB13`/`PC2`/`PC3`
+and the ADC pins match exactly.
+
+### 1.13 A name can sit just outside its own column — FIXED
+
+Same board class, different cause, found by asking why §1.12's sibling boards
+still refused a bus. On one F4 the name `PA6/SPI1_MISO` is reported by
+`pdftotext` at x0 169.1 while the rest of its column is at 167.6. The edge
+cluster is 1pt wide, so it was not on the edge, and its pin did not exist:
+SPI1 lost its SDI, the gyro lost its bus, and `GYRO_1_SPI_INSTANCE` went with
+it. The only symptom was one net label that matched no row.
+
+Widening the tolerance is not available — this corpus draws real, distinct
+columns 3.5pt apart, and merging them would be far worse than the bug. What
+separates the two cases is the *run*: an edge is names at a regular pitch, so a
+gap of two pitches is a row that must exist and does not. Only such a gap is
+filled, and only from a name less than one character's width off the edge, with
+the character width taken from the names themselves rather than a constant.
+A genuine neighbouring column has no hole to fall into.
+
+Two boards, three pins, and with them two complete SPI1 buses, a restored
+`GYRO_1_SPI_INSTANCE` and a UART pin; nothing else in the corpus moved.
+
+Both are now golden fixtures — `h7-dual-pad` and `f4-column-drift` — because
+the check that should have caught the second one already existed
+(`instances_without_pins`) and passed on all five boards under test while six
+instances dangled in the corpus. See §3.7.
 
 #### The pattern behind §1.8 through §1.11
 
@@ -977,6 +1029,36 @@ shape as §1.5 and §1.8 — the tool knew, and did not say.
 A handful of corpus files are also not schematics at all — wiring diagrams, a
 datasheet, calibration notes, one PID paper. They fall into the "never names
 its MCU" bucket, which is harmless but not precise.
+
+### 3.7 The golden boards did not cover the families the corpus does — PART DONE
+
+A device was emitted pointing at an SPI bus the generator had, in the same run,
+refused to emit and said so. The invariant was not missed: `analysis.instances_
+without_pins` has been checked on every fixture board since the suite was
+written. It passed — because none of the five boards under test had a refused
+bus, while six instances dangled across five corpus boards.
+
+This is CLAUDE.md §3 again, one level up. §3 says to build every board in the
+corpus rather than the one being delivered; the same applies to the fixtures.
+Five boards covering F4, F7, G4 and H5 is a thin sample of 104 readable ones,
+and it was thinnest exactly where the corpus is thickest — there was no H7
+fixture at all, so §1.12, a defect affecting 21 H7 boards, could not have been
+caught by the suite either.
+
+Done: an H7 and a second F4 added (`h7-dual-pad`, `f4-column-drift`), each
+verified to fail six tests when its fix is reverted and to leave every other
+board untouched. `FROZEN_TARGETS` grew an H743, and the test asserting which
+families the frozen firmware carries now derives the list from the boards
+instead of repeating it by hand.
+
+Still open: no fixture exercises a *refused* bus, so the guard added with §1.12
+is covered only by the corpus. Adding a board that legitimately cannot resolve
+one would pin it. Beyond that the sample is still five families out of the
+eight the corpus contains — C5, N6 and AT32 have no golden board.
+
+The general point, which is cheap and worth repeating: **an invariant that has
+never been observed to fail on the fixtures is not being tested by them.** Both
+of these were found by running the corpus, not the suite.
 
 ---
 

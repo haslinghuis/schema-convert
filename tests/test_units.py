@@ -1131,6 +1131,59 @@ class ClusterTests(unittest.TestCase):
         self.assertEqual(netmap.cluster([], tol=1.0), [])
 
 
+class EdgeHoleTests(unittest.TestCase):
+    """
+    netmap._fill_edge_holes. The edge cluster is 1pt wide and pdftotext's boxes
+    are not that exact, so a name can sit just outside the column it belongs to
+    and take its pin - and the SPI bus on that pin - with it. Widening the
+    tolerance is not available: real columns come within 3.5pt of each other on
+    these sheets. The run is what tells them apart, so only a hole is filled.
+    """
+
+    # 3.4pt per character, which is what these plots measure at; the tolerance
+    # is derived from the names' own width, so it has to be proportional.
+    @staticmethod
+    def tagged(name, x0, y0):
+        return (Word(name, x0, y0, x0 + len(name) * 3.4, y0 + 3), name, [], True)
+
+    def column(self, x0=100.0, skip=()):
+        return [self.tagged(f"PA{i}", x0, 100.0 + 8 * i)
+                for i in range(6) if i not in skip]
+
+    def test_a_name_nudged_off_the_column_is_taken_back(self):
+        edge = self.column(skip=(3,))
+        stray = self.tagged("PA3", 101.5, 124.0)
+        out = netmap._fill_edge_holes(edge, [stray],
+                                      lambda w: w.x0, lambda w: w.y0)
+        self.assertIn(stray, out)
+
+    def test_a_neighbouring_column_is_not_absorbed(self):
+        # 3.5pt away, which is closer than some sheets put two real columns,
+        # and it lines up with the hole. It is still a different column.
+        edge = self.column(skip=(3,))
+        other = self.tagged("PB3", 103.5, 124.0)
+        out = netmap._fill_edge_holes(edge, [other],
+                                      lambda w: w.x0, lambda w: w.y0)
+        self.assertNotIn(other, out)
+
+    def test_nothing_is_adopted_where_the_run_has_no_hole(self):
+        # The safety property that makes this cheap: a complete edge cannot
+        # gain rows, however close something sits to it.
+        edge = self.column()
+        stray = self.tagged("PA9", 100.4, 104.0)
+        out = netmap._fill_edge_holes(edge, [stray],
+                                      lambda w: w.x0, lambda w: w.y0)
+        self.assertEqual(len(out), len(edge))
+
+    def test_one_name_fills_one_slot(self):
+        edge = self.column(skip=(2, 3))
+        strays = [self.tagged("PA2", 101.2, 116.0), self.tagged("PA3", 101.2, 124.0)]
+        out = netmap._fill_edge_holes(edge, strays,
+                                      lambda w: w.x0, lambda w: w.y0)
+        self.assertEqual(len(out), len(edge) + 2)
+        self.assertEqual(len({id(t) for t in out}), len(out))
+
+
 class AssemblePinNameTests(unittest.TestCase):
     """
     netmap.assemble_pin_names. A long AF list comes back from the extractor in
@@ -1201,6 +1254,24 @@ class PinNameFormTests(unittest.TestCase):
     def test_an_af_list_still_parses(self):
         m = netmap.PIN_RE.match("PC6/TIM3_CH1/USART6_TX")
         self.assertEqual((m.group(1), m.group(2)), ("PC6", "TIM3_CH1/USART6_TX"))
+
+    def test_sts_dual_pad_suffix_is_the_same_gpio(self):
+        # H7 parts with the analog switch give the second pad its own name.
+        # Betaflight knows one PC2, so the suffix comes off - and it has to be
+        # recognised at all, because SPI2's SDI is on it on ten boards here.
+        for text, pin in (("PA0_C", "PA0"), ("PA1_C", "PA1"), ("PC2_C", "PC2"),
+                          ("PC3_C/ADC12_INP1", "PC3")):
+            with self.subTest(text=text):
+                m = netmap.PIN_RE.match(text)
+                self.assertIsNotNone(m)
+                self.assertEqual(m.group(1), pin)
+
+    def test_an_underscore_tail_that_is_not_that_suffix_is_a_net_name(self):
+        # PIN_RE also decides what is *not* a net label, so accepting any
+        # underscore tail would swallow nets named after the pin they run to.
+        for text in ("PC13_LED", "PB5_BEEPER", "PA4_CS"):
+            with self.subTest(text=text):
+                self.assertIsNone(netmap.PIN_RE.match(text))
 
 
 class AnnotationTokenTests(unittest.TestCase):

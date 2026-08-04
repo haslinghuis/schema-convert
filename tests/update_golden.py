@@ -44,7 +44,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analysis  # noqa: E402
 import support  # noqa: E402
 
-FROZEN_TARGETS = ("STM32F405", "STM32F722", "STM32G474", "STM32H562")
+# One target per family the fixture boards use. A board whose family is absent
+# from the frozen map fails MCU detection outright rather than skipping, so this
+# has to grow alongside tests/fixtures/boards.json.
+FROZEN_TARGETS = ("STM32F405", "STM32F722", "STM32G474", "STM32H562",
+                  "STM32H743")
 
 
 def refresh(board: dict) -> dict:
@@ -108,6 +112,7 @@ def main() -> int:
         if any(b["sha256"] == digest for b in boards):
             raise SystemExit("that schematic is already recorded")
         boards.append({"id": args.id, "sha256": digest, "note": args.note})
+        support._pending.add(digest)
         support._pdfs = None
 
     changed = 0

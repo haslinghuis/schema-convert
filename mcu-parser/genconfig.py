@@ -2489,10 +2489,26 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         # Same placeholder, same reason: a second IMU is usually rotated
         # differently from the first, and neither orientation is on the sheet.
         cfg.define("GYRO_2_ALIGN", gyro_align, width=29)
+    # Only buses that were actually emitted. A device may resolve onto a bus
+    # that the loop above then refused for being incomplete, and naming it here
+    # anyway would contradict the warning that said it was not emitted: the
+    # define compiles, but spiDeviceByInstance() hands back a bus whose pins
+    # were never configured, so the device is wired to a dead peripheral.
+    # Leaving it out is the outcome firmware already has a path for - pg/max7456.c
+    # and pg/flash.c both default the instance to NULL - so the driver stays
+    # compiled in and the CS pin stays emitted, ready for the bus to be filled
+    # in by hand.
     for owner, define in INSTANCE_DEFINE.items():
         dev = resolved.get(owner, ("", {}))[0]
-        if dev:
-            cfg.define(define, dev, width=29)
+        if not dev:
+            continue
+        if dev not in emitted_buses:
+            cfg.warnings.append(
+                f"{define} is left out: {owner} is on {dev}, which was not "
+                f"emitted; add {dev}'s three pins by hand and this define with "
+                "them")
+            continue
+        cfg.define(define, dev, width=29)
     cfg.add()
 
     # ---- PINIO boxes -----------------------------------------------------

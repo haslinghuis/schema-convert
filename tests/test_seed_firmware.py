@@ -282,8 +282,18 @@ class FrozenDataTests(CapabilityDataMixin, unittest.TestCase):
                 self.check_target(name, caps)
 
     def test_the_families_the_boards_need_are_present(self):
-        self.assertEqual(sorted(self.data["targets"]),
-                         ["STM32F405", "STM32F722", "STM32G474", "STM32H562"])
+        """
+        Derived from the boards rather than listed here. A board whose target is
+        missing from the frozen map does not skip - detect_target finds nothing
+        and run_board raises - so the two files have to be kept in step, and a
+        second hand-written copy of the list is one more thing to forget.
+        """
+        need = sorted({b["target"] for b in support.board_fixtures() if b.get("target")})
+        have = sorted(self.data["targets"])
+        self.assertEqual([t for t in need if t not in have], [],
+                         f"frozen firmware has {have}; the golden boards need {need}. "
+                         "Add the target to FROZEN_TARGETS in tests/update_golden.py "
+                         "and re-run it with --reseed")
 
     def test_both_dma_styles_are_represented(self):
         styles = {c["dma"]["style"] for c in self.data["targets"].values()}

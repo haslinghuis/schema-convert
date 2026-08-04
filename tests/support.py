@@ -160,13 +160,19 @@ def search_dirs() -> List[Path]:
 
 _pdfs: Optional[Dict[str, Path]] = None
 
+# A board being registered by update_golden.py --add. It is not in boards.json
+# yet - that file is written at the end of the run, so that a crash halfway
+# leaves no half-recorded fixture behind - and without this the very board being
+# added is the one reported as "schematic not available".
+_pending: set = set()
+
 
 def available_pdfs() -> Dict[str, Path]:
     """sha256 -> path, for every schematic the fixtures know about."""
     global _pdfs
     if _pdfs is not None:
         return _pdfs
-    wanted = {b["sha256"] for b in board_fixtures()}
+    wanted = {b["sha256"] for b in board_fixtures()} | _pending
     found: Dict[str, Path] = {}
     for d in search_dirs():
         for pdf in sorted(d.iterdir()):
