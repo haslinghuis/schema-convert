@@ -21,8 +21,8 @@ be judged against:
 |---|---|---|
 | schematics that yield a pin map | 104 / 168 | 104 / 168 |
 | MCU pins read | 3090 | 3865 |
-| nets checked against firmware | 1637 | 1904 |
-| of those, agreeing | 1601 | 1862 |
+| nets checked against firmware | 1637 | 1920 |
+| of those, agreeing | 1601 | 1878 |
 | UART pins emitted | 299 | 576 |
 | boards with any UART pin | 34 | 70 |
 | boards at 100% agreement | 86 | 91 |
@@ -367,6 +367,58 @@ Also: ST writes more than one dash qualifier (`PC13-TAMPER-RTC`,
 `PC14-OSC32-IN`) where the pattern allowed one, and a trailing `_PIN` is
 Betaflight's own define name copied onto the sheet — 91 nets across the corpus
 end that way and 87 classify once it is stripped.
+
+### 1.11 A pin name can be written last, and a net can be named after its part — FIXED
+
+Two more submissions, two more spellings, and between them the clearest
+statement of what this class of bug costs.
+
+**The pin name at the end.** One H743's symbol names its left column pin-first
+(`PC14/OSC32_IN`, as everything else does) and its right column the other way
+round — `USART3_RX/PD9`, `SPI2_SCK/PB13`, `TIM3_CH3(M7)/PB0`, and
+`TIM4_CH3(M11)PD14` with no separator at all. `PIN_RE` anchors at the start, so
+half the package was invisible: 62 pins of ~97, with 20 net labels binding to
+nothing. Matching a pin name at the *tail* as well takes it to 97 pins at 27/27
+agreement with one label unbound. It also reads through `SPI1_MISO/IPA6`, which
+is a typo for PA6.
+
+Deliberately used only where a pin name is being *recognised*, never where
+`PIN_RE` excludes a word from being a net label — a label that merely ends in
+something pin-shaped is still a label.
+
+**The net named after the part.** The same sheet names every device net after
+the part on the other end of it, with a dot: `ICM42688.CS`, `AT7456.MOSI`,
+`W25Q128.CS`, `BMP280.SCK`. The dot was not a separator and the part numbers
+are not the family words the rules match on, so none of it classified. Both are
+normalised now — the dot to an underscore, and a leading part number back to
+the family the rules already know — and only where a separator follows, so a
+bare `ICM42688` stays a part marking for `detect_parts` to read.
+
+That settled something the tests had given up on. `MPU6000-CS` and
+`ICM42688-CS` were asserted to classify as *nothing*, with a comment explaining
+why: a part number is not a device index, and reading the digits would invent a
+sixth or fourth IMU. Folding the part number to its family recognises the
+device and yields no index at all — the right answer rather than the safe one.
+The invariant those cases were protecting is now checked directly instead of
+being sidestepped.
+
+Over the corpus these two took total defines **4586 → 5109**, buses resolved
+196 → 237, chip-select pins 160 → 182 and SPI instances 144 → 160, over 29
+boards with none losing anything.
+
+#### The pattern behind §1.8 through §1.11
+
+Four entries now, and they are all the same defect: **a rule that describes one
+spelling of a thing, written from the boards that happened to be on hand.**
+`TX4` but not `UART4_TX`. `SPI3_SCK` but not `SCK3` or `SPI_SCK2` or `SPI1CLK`.
+`GYRO1-CS` but not `GYRO_1_CS`. Pin names at the head but not the tail. `I2C`
+but not `IIC`. A separator that is a dash or an underscore but never a dot.
+
+None of it was findable by reading the code, and each one was silent: the nets
+went out as "no config.h role" while every diagnostic the tool prints stayed
+clean. What finds them is counting what came out the far end unclassified,
+across every board available — which is a five-minute check and should be run
+whenever a new submission arrives, before anything else is investigated.
 
 ### 1.10 The row pitch was measured across both columns — FIXED
 
