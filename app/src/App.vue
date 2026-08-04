@@ -91,7 +91,10 @@ async function copyConfig() {
     <header
       class="flex items-center gap-3 border-b border-neutral-800 bg-neutral-900/60 px-5 py-3"
     >
-      <img :src="logo" alt="Betaflight" class="h-7 w-7" />
+      <!-- The wordmark is 141.7x18.2. Boxing it square fits it *inside* the
+           box, so h-7 w-7 drew it 28pt wide and 3.6pt tall - height only, and
+           let the width follow. -->
+      <img :src="logo" alt="Betaflight" class="h-6 w-auto shrink-0" />
       <div class="flex-1">
         <h1 class="text-sm font-semibold tracking-wide text-neutral-100">
           Target Generator
