@@ -42,10 +42,11 @@ is in each section; this is the index.
 
 | | | boards |
 |---|---|---|
-| §3.3 | Chip-select-only devices — half are really unrecognised net spellings; the rest need the peripheral end read, not wire tracing (§3.7). `SPIn_NSS` on 9 boards (25 nets) is the biggest block | 26 devices |
+| §3.3 | Chip-select-only devices — the device is known, the bus is not | 33 on 19 |
+| §3.3b | The inverse: 41 selects named after the bus, device unknown. Investigated; needs the peripheral's pin names, not marking proximity | 41 on 15 |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
-| §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
+| §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 19 buses on 14 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
@@ -1189,6 +1190,64 @@ compete for one row. The firmware check already discards the wrong half wherever
 the net is checkable, which is why this has not surfaced as a wrong pin. Fixing
 it properly means matching labels to rows as an assignment problem rather than
 independently, which is not worth it for two boards.
+
+### 3.3b Chip selects named after the bus, not the device — INVESTIGATED, NOT SHIPPED
+
+The largest single block left in §3.3, and the measurements are worth keeping
+because the obvious implementation does not survive them.
+
+Fifteen boards name every chip select after its **bus**: `SPI1_NSS`, `SPI2_CS`,
+`SPI4_SS`. 41 such nets. The bus is stated outright; what is missing is *which
+device* the select belongs to. This is the exact inverse of the CS-only case
+above, where the device is known and the bus has to be traced - and the two are
+complementary, so the same boards often have both.
+
+The cost is high and concentrated. `the four-bus H7` is the clean example: four SPI
+buses fully emitted, four devices detected (ICM42688P, DPS310, W25N01G,
+MAX7456), and **not one `_CS_PIN` or `_SPI_INSTANCE`** - the config declares
+drivers it has no way to reach. Roughly eight defines per board.
+
+**The evidence is there.** Each of these nets appears twice, once at the MCU and
+once at the peripheral, and the far end is unmistakable to a reader:
+
+| net | what is drawn beside its far end |
+|---|---|
+| `SPI1_NSS` | `IMU1_INT` 14pt, `IMU1` 32pt |
+| `SPI2_NSS` | `IMU2_INT` 14pt, `IMU2` 32pt |
+| `SPI3_NSS` | `SDIN`, `SCLK`, `CLKOUT`, `DGND` - a MAX7456's pin names |
+| `SPI4_NSS` | `W25N01GVZEIG` 56pt, `DO(DQ1)`, `WP#(DQ2)`, `HOLD#(DQ3)` |
+
+**What was tried, and what it scored.** Nearest *part marking* to the far end,
+using the `PartHit` positions `i2c_bus_for()` already records:
+
+| approach | decisive |
+|---|---|
+| nearest part, `runner < near * 3` as elsewhere | 13 of 41 |
+| ...with acc/gyro collapsed and I2C-only parts excluded | 14 of 41 |
+| global assignment - one chip has one select - within 300pt | **30 of 41** |
+
+The global framing is clearly right: these are not 41 independent
+nearest-neighbour queries, they are an assignment between the selects and the
+chips, which is what stops two parts 20pt apart from reading as a tie.
+
+**It is still not shippable, and that is the point.** "Within 300pt" is not
+"correct", and there is no ground truth for these boards to check attribution
+against. The prototype already misfires visibly - on one board it assigned a
+select to a baro 350pt away while a gyro sat at 328pt, because the candidate
+list keeps the first hit per category rather than the nearest. A wrong
+attribution here is worse than none: it emits `GYRO_1_SPI_INSTANCE SPI3` with
+full confidence when SPI3 is the flash, and nothing downstream can tell.
+
+**What it actually needs** is the signal the table above shows and the prototype
+ignored: the *peripheral's own pin names*. `SDIN`/`SCLK`/`CLKOUT`/`VSYNC`/`LOS`
+is a MAX7456 and nothing else; `DI(DQ0)`/`DO(DQ1)`/`WP#`/`HOLD#` is a SPI flash;
+`INT1`/`INT2`/`FSYNC` is an IMU. That is a real, small, learnable vocabulary -
+the same shape as `NET_VOCAB` - and it identifies the chip directly instead of
+inferring it from how close a marking happens to be drawn. It also degrades
+honestly: a far end with none of those names beside it is simply undecided.
+
+Do that before touching this again, and validate on `the four-bus H7`, where all four
+answers are independently obvious from the sheet.
 
 ### 3.4 Only STM32 families are harvested — 14 boards blocked
 
