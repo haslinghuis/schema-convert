@@ -1,9 +1,9 @@
 {
  "schema": 1,
- "generated": "2026-08-03T21:07:58Z",
+ "generated": "2026-08-04T18:10:07Z",
  "firmware": {
-  "rev": "2d0f789d1",
-  "date": "2026-08-03",
+  "rev": "c18421eb5",
+  "date": "2026-08-04",
   "branch": "master"
  },
  "drivers": {
@@ -52,6 +52,9 @@
    },
    "ICM45686": {
     "any": "USE_ACCGYRO_ICM45686"
+   },
+   "ICM56686": {
+    "any": "USE_ACCGYRO_ICM56686"
    },
    "IIM42652": {
     "any": "USE_ACCGYRO_IIM42652"
@@ -130,6 +133,9 @@
    },
    "ICM45686": {
     "any": "USE_ACCGYRO_ICM45686"
+   },
+   "ICM56686": {
+    "any": "USE_ACCGYRO_ICM56686"
    },
    "IIM42652": {
     "any": "USE_ACCGYRO_IIM42652"
@@ -2289,7 +2295,7 @@
      "TIM1_CH3"
     ],
     "PA11": [
-     "TIM1_CH1N"
+     "TIM1_CH4"
     ],
     "PA15": [
      "TIM2_CH1"
@@ -2996,7 +3002,7 @@
      "TIM1_CH3"
     ],
     "PA11": [
-     "TIM1_CH1N"
+     "TIM1_CH4"
     ],
     "PA15": [
      "TIM2_CH1"
@@ -3741,7 +3747,7 @@
      "TIM1_CH3"
     ],
     "PA11": [
-     "TIM1_CH1N"
+     "TIM1_CH4"
     ],
     "PA15": [
      "TIM2_CH1"
@@ -4451,7 +4457,7 @@
      "TIM1_CH3"
     ],
     "PA11": [
-     "TIM1_CH1N"
+     "TIM1_CH4"
     ],
     "PA15": [
      "TIM2_CH1"
@@ -5301,7 +5307,7 @@
      "TIM1_CH3"
     ],
     "PA11": [
-     "TIM1_CH1N"
+     "TIM1_CH4"
     ],
     "PA15": [
      "TIM2_CH1"
@@ -9147,11 +9153,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -10163,11 +10169,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -11179,11 +11185,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -12195,11 +12201,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -13211,11 +13217,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -14227,11 +14233,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -15243,11 +15249,11 @@
     ],
     "PF8": [
      "TIM16_CH1N",
-     "TIM13_CH1N"
+     "TIM13_CH1"
     ],
     "PF9": [
      "TIM17_CH1N",
-     "TIM14_CH1N"
+     "TIM14_CH1"
     ],
     "PH10": [
      "TIM5_CH1"
@@ -16107,9 +16113,6 @@
      "TIM15_CH1"
     ],
     "PA3": [
-     "TIM2_CH4",
-     "TIM5_CH4",
-     "TIM15_CH2",
      "TIM16_CH1"
     ],
     "PA5": [
@@ -16144,7 +16147,6 @@
     ],
     "PB0": [
      "TIM1_CH4",
-     "TIM3_CH3",
      "TIM15_CH1N"
     ],
     "PB1": [
@@ -16231,17 +16233,12 @@
     "PE2": [
      "TIM1_CH2N"
     ],
-    "PE4": [
-     "TIM15_CH1N"
-    ],
     "PE5": [
      "TIM4_CH1",
-     "TIM15_CH1",
      "TIM16_CH1N"
     ],
     "PE6": [
      "TIM4_CH2",
-     "TIM15_CH2",
      "TIM17_CH1N"
     ],
     "PE8": [

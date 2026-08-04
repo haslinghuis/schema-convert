@@ -117,11 +117,25 @@ revert or switch branches in a tree you did not create.
 Datasheets are in `../manufacturers/datasheets/`. Every STM32 family the seeder
 harvests now has one: F4 (`stm32f405-407.pdf`, DS8626), F7, G4, H5, H7, C5, N6.
 
-F4 was the blocking gap and is closed. Its audit comes back clean apart from
-`TIM1_CH1N` on `PA11`, which the silicon has as `TIM1_CH4` — raised as #15510
-and still open, so expect that one finding until it merges. The remaining
-families without a datasheet are AT32 and APM32, and those are not harvested at
-all yet (ROADMAP §3.4), so nothing can be audited against them.
+F4 was the blocking gap and is closed. Its audit now comes back **0 defects**:
+`TIM1_CH1N` on `PA11` was the one finding, it merged as #15510, and the loop
+closed the way it was meant to — datasheet → audit → firmware PR → reseed.
+#15512 (N657 timer options) and #15513 (H5/H7 `PF8`/`PF9`) came from the same
+pass. The remaining families without a datasheet are AT32 and APM32, and those
+are not harvested at all yet (ROADMAP §3.4), so nothing can be audited against
+them.
+
+Two informational `MISSING PIN` entries remain on F4 — `TIM13_CH1` on `PF8` and
+`TIM14_CH1` on `PF9`, which the datasheet lists and the firmware does not. Same
+pins #15513 corrected for H5/H7, so worth a look rather than assuming it is
+noise.
+
+**Seeding needs the right tree.** `seed_firmware.py` picks the newest clone on
+`master`, and the one under `../betaflight/master/` tracks a *fork* whose master
+lags `betaflight/betaflight`. `git pull` there says "already up to date" while
+being eight commits behind upstream, which is how a reseed can silently produce
+nothing. Check `git log betaflight/betaflight master` against the tree before
+seeding, or clone upstream fresh and pass `--firmware`.
 
 ---
 
