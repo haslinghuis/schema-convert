@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "4b622fb2e"
+  "tool_rev": "16c705a20"
  },
  "boards": [
   {
@@ -263,6 +263,41 @@
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
     "unaccounted_roles": [],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "h7-inline-labels",
+   "sha256": "78a01fd98154dd07157d41d790bbe7190525c76719d00c530647ae37f7ec7337",
+   "note": "H7 whose net labels are in no column at all: each is drawn against its own wire, so a pull-up on one row and a series resistor on the next put them at different distances. The supply feeding a pull-up is level with the pin too, so the row must take the nearer of the two",
+   "target": "STM32H743",
+   "symbol_rows": 98,
+   "pitch": 2.88,
+   "net_labels": 53,
+   "offset": 0.48,
+   "agreement": [
+    37,
+    37
+   ],
+   "orphan_labels": 2,
+   "nets_on_power_pins": 2,
+   "unmapped_pins": 33,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 62,
+   "timer_rows": 10,
+   "warnings": 9,
+   "notes": 18,
+   "netmap_digest": "2de0726731ff7cc4e6ee1a441ad30488ff85c17069c84c68996f6c165e753574",
+   "config_digest": "fbc2289991069e7df3bf11508c08623babe91bdeadeb37c0b351aec8555a2636",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "unaccounted_roles": [
+     "unclassified"
+    ],
     "unvalidated_pin_defines": []
    }
   }

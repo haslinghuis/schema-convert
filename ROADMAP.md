@@ -46,6 +46,8 @@ is in each section; this is the index.
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
+| §1.14 | A label naming the pin's own capability outranks the net behind it | 1 |
+| §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.7 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
@@ -457,6 +459,88 @@ Both are now golden fixtures — `h7-dual-pad` and `f4-column-drift` — because
 the check that should have caught the second one already existed
 (`instances_without_pins`) and passed on all five boards under test while six
 instances dangled in the corpus. See §3.7.
+
+### 1.14 A net label need not be in a column — FIXED, with one case still wrong
+
+The first board to arrive with a **vendor-written config beside it**, which is
+the only ground truth this project has had. 81 defines to compare against.
+
+The generator agreed on 54 and missed 25. Almost all of the 25 came from one
+cause: this sheet draws each net name against its own wire, so how far it sits
+from the symbol is set by whatever components share that row. A row reads
+
+```
+3V3_MCU   R36   10k   GYRO_1_EXTI   D8   PD0
+```
+
+— a 10k pull-up, with the real net between the resistor and the pin. The next
+row has a series resistor instead and its net sits where `3V3_MCU` is here. No
+three labels line up, so the `len(col) >= 3` column test discarded every one of
+them, and the *supply* feeding the pull-up — which is in a column, because every
+pull-up on the sheet shares it — bound to the pin instead. `GYRO_1_EXTI` and
+`MAX7456_SPI_CS` became `3V3_MCU`; `LED0`, `ADC_VBAT` and `MOTOR6` vanished into
+"unconnected pins", which reads like a board that does not use those pins.
+
+Two changes, both bounded:
+
+- **Labels outside any column are collected**, but only between the symbol and
+  the strongest column — which is what establishes where this sheet's labels
+  live — and only if they match `NET_VOCAB`. That filter is what keeps out ball
+  coordinates (`D8`, `H8`, `F3`), designators (`R36`, `C55`) and values (`10k`,
+  `100R`, `1%`); it is the same one the neighbouring-column pass already trusts.
+- **One row carries one net.** Where two labels are level with a pin, the nearer
+  wins, because the other is on the far side of a component. Distance is rounded
+  to the point and alignment breaks the tie: below a point this is extraction
+  noise, and comparing raw floats let a stray `N` take a row from the `I2C1_SCL`
+  beside it by one thousandth of a point.
+
+Corpus: **+57 defines**, 63 gained against 6 lost, warnings down 6. Four boards
+gained a complete SPI bus, four the ADC3 current sense. Four of the six losses
+are corrections — before this, three boards emitted a pin under two different
+roles (`FLASH_CS_PIN` *and* `SPI3_SDO_PIN` on one pin; `GYRO_1_CS_PIN` *and*
+`ADC_VBAT_PIN` on another), which cannot be built. That count is now zero.
+
+On the board itself, exact agreement with the vendor went **54 → 66 of 81**.
+
+**The case still wrong.** One sheet prints a pin's own ADC channel (`ADC1_8`)
+between the symbol and the wire, nearer than the net; `RSSI` is behind it and
+now loses the row. Ranking by alignment first fixes that board — the annotation
+is 2.5pt off the row and `RSSI` is 0.3pt off it — but costs three F7 boards a
+whole SPI3 bus, 16 defines against 6. So distance-first stays, and one board
+loses `ADC_RSSI_PIN` and `ADC1_DMA_OPT`. The real discriminator is that a label
+naming the pin's own capability is not a net name at all, which is a different
+fix from ranking.
+
+### 1.15 Two more spellings, from the same board
+
+`SDCARD_SPI_CS` and `CLKIN`, both read correctly and both classified as nothing.
+The first wanted the `_SPI` infix that the `FLASH`, `OSD` and `BARO` patterns
+already allow; the second is a bare `CLKIN` where the pattern demanded a
+`GYRO`/`IMU` prefix. The MCU's own clock input is not a rival for that spelling —
+it arrives on `OSC_IN`, which the symbol names as a system pin and which never
+reaches classification.
+
+§1.8–§1.11 again, and worth noting how it was found: not by reading code, but by
+having a config to compare against.
+
+#### What the vendor config settled, and what it did not
+
+Two differences turned out to be neither side's defect, and both took tracing to
+firmware rather than reasoning about it:
+
+- **`ADC_INSTANCE ADC3`**, which the vendor omits. Firmware's `adcTagMap` has
+  `PC2`/`PC3` as `ADC_DEVICES_3` on H743, and `ADC_INSTANCE` defaults to `ADC1`,
+  so the vendor's config looks broken. It is not: `adc_stm32h7xx.c` falls back to
+  any *activated* device that can reach the pin, and their `ADC3_DMA_OPT` is what
+  activates it. Both work; ours reaches ADC3 directly instead of via the fallback.
+- **`ADC3_DMA_OPT` 9 against their 10.** On a DMAMUX part the option is an index
+  into one shared channel table, so any free channel is as good as another.
+
+Still genuinely missing, and derivable in principle: `DEFAULT_VOLTAGE_METER_SCALE`.
+The divider *is* on the sheet — `R33 150k` to `BAT`, `R34 10k` to `GND`, giving
+exactly the vendor's 160 — but it is drawn with the top resistor horizontal and
+the bottom one vertical, where §3.2's reader looks for two resistors on one
+vertical leg either side of the node. A layout it does not know, not a bug.
 
 #### The pattern behind §1.8 through §1.11
 

@@ -118,7 +118,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # The separator before the index is what the older patterns did not allow.
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
-    (re.compile(r"^(?:GYRO|IMU)[-_]?(\d)?[-_]?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
+    # The prefix is optional because one sheet names this net just CLKIN. The
+    # MCU's own clock input is not a rival for it: that arrives on OSC_IN, which
+    # the symbol names as a system pin and which never reaches classification.
+    (re.compile(r"^(?:(?:GYRO|IMU)[-_]?(\d)?[-_]?)?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
     # The device index sits on either side here too, exactly as it does for the
     # chip select above: GYRO2-MISO and GYRO_MISO2 are the same second IMU.
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)(\d)?$"),
@@ -129,7 +132,9 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^FLASH[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "flash_spi"),
     (re.compile(r"^BARO(?:[-_]SPI)?[-_]?CS$"), "baro_cs"),
     (re.compile(r"^BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
-    (re.compile(r"^SD(?:CARD)?[-_]?CS$"), "sdcard_cs"),
+    # The _SPI infix that FLASH, OSD and BARO above already allow - vendors copy
+    # Betaflight's own SDCARD_SPI_CS_PIN onto the net.
+    (re.compile(r"^SD(?:CARD)?(?:[-_]SPI)?[-_]?CS$"), "sdcard_cs"),
     # Without the data nets the card is a CS with nowhere to go, so
     # SDCARD_SPI_INSTANCE - and with it USE_SDCARD_SPI - can never be resolved.
     (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),

@@ -875,6 +875,14 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
     out: List[Word] = []
     for side, cands in sides.items():
         cols = []
+        # Nearness to the symbol, whichever way the gutter lies. Signed so that
+        # larger is always closer, on all four sides.
+        near = {
+            "L": lambda c: max(w.x1 for w in c),
+            "R": lambda c: -min(w.x0 for w in c),
+            "T": lambda c: max(w.y1 for w in c),
+            "B": lambda c: -min(w.y0 for w in c),
+        }[side]
         # Labels may be aligned on either edge of their own text, so try both.
         # Across a left or right edge that is x; across a top or bottom one, y.
         anchors = ("x0", "x1") if ALONG[side] == "y" else ("y0", "y1")
@@ -886,14 +894,7 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
                 # H9, A3) exactly where a net label would sit, and proximity
                 # alone happily picks those.
                 hits = sum(1 for w in col if NET_VOCAB.search(w.text))
-                # Nearness to the symbol, whichever way the gutter lies.
-                edge = {
-                    "L": lambda c: max(w.x1 for w in c),
-                    "R": lambda c: -min(w.x0 for w in c),
-                    "T": lambda c: max(w.y1 for w in c),
-                    "B": lambda c: -min(w.y0 for w in c),
-                }[side](col)
-                cols.append((hits, edge, col))
+                cols.append((hits, near(col), col))
         if not cols:
             continue
         cols.sort(key=lambda c: (c[0], c[1]), reverse=True)
@@ -920,6 +921,26 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
             for w in col:
                 if i == 0 or NET_VOCAB.search(w.text):
                     keep[id(w)] = w
+
+        # Labels that are in no column at all. Some sheets draw each net name
+        # against its own wire, so how far it sits from the symbol is decided by
+        # whatever components share that row - a pull-up on one, a series
+        # resistor on the next - and no three of them line up. Every one is then
+        # discarded by the column test, and silently: the rows come back
+        # unconnected, which reads like a sheet that simply does not use those
+        # pins. One board lost its OSD chip select, its gyro interrupt, LED0,
+        # ADC_VBAT and a motor that way, and still reported 100% agreement on
+        # what was left.
+        #
+        # Bounded by the strongest column, which is what establishes where this
+        # sheet's labels live: between it and the symbol is the label zone by
+        # construction, and nothing further out is taken on its own. NET_VOCAB
+        # is what keeps ball coordinates and component values out - the same
+        # filter the neighbouring-column pass above already relies on.
+        for w in cands:
+            if id(w) not in keep and NET_VOCAB.search(w.text) \
+                    and near([w]) > best_edge:
+                keep[id(w)] = w
         out.extend(keep.values())
     return out
 
@@ -1110,6 +1131,7 @@ def _owner(sym: Symbol, w: Word) -> Optional[Tuple[SymbolPart, str]]:
 def _pair(sym: Symbol, labels: Sequence[Word], offset: float
           ) -> Tuple[List[Tuple[Word, PinRow]], List[Word]]:
     pairs, orphans = [], []
+    claimed: Dict[int, Tuple[float, Tuple[Word, PinRow]]] = {}
     for w in labels:
         owner = _owner(sym, w)
         if owner is None:
@@ -1119,10 +1141,39 @@ def _pair(sym: Symbol, labels: Sequence[Word], offset: float
         cands = [r for r in part.rows if r.side == side]
         at = _along(side, w) + offset
         best = min(cands, key=lambda r: abs(r.pos - at))
-        if abs(best.pos - at) <= sym.pitch / 2:
-            pairs.append((w, best))
-        else:
+        if abs(best.pos - at) > sym.pitch / 2:
             orphans.append(w)
+            continue
+        # One row carries one net. Where a line has a pull-up on it, the supply
+        # name and the net name are both drawn in that row and both are level
+        # with the pin; the nearer one is what the wire into the pin carries,
+        # because the other is on the far side of a component. Taking whichever
+        # came first put 3V3_MCU on a gyro interrupt and on an OSD chip select.
+        gap = {"L": part.left_edge - w.x1, "R": w.x0 - part.right_edge,
+               "T": part.top_edge - w.y1, "B": w.y0 - part.bottom_edge}[side]
+        # Distance decides, alignment breaks the tie. Distance to the whole
+        # point, because below that it is extraction noise rather than
+        # draughtsmanship: raw floats let a stray "N" take a row from the
+        # I2C1_SCL beside it by a thousandth of a point, on a row it was not
+        # even level with.
+        #
+        # Alignment first was tried, and is better on the one sheet that prints
+        # a pin's own ADC channel nearer than the net - but it costs three F7
+        # boards a whole SPI3 bus, so it loses on the corpus 16 defines to 6.
+        # See ROADMAP 1.14 for the case this ordering gets wrong.
+        rank = (round(gap), abs(best.pos - at))
+        prev = claimed.get(id(best))
+        loser = w if prev is not None and rank >= prev[0] else \
+            (prev[1][0] if prev is not None else None)
+        if prev is None or rank < prev[0]:
+            claimed[id(best)] = (rank, (w, best))
+        # A label drawn twice is one net, not a net that failed to bind. Some
+        # sheets carry the name and its net annotation a point apart, and every
+        # such row used to pair twice - counting one net as two agreements, and
+        # reporting the copy as unmatched once it stopped.
+        if loser is not None and loser.text != claimed[id(best)][1][0].text:
+            orphans.append(loser)
+    pairs = [p for _, p in claimed.values()]
     return pairs, orphans
 
 
