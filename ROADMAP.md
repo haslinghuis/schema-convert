@@ -42,13 +42,14 @@ is in each section; this is the index.
 
 | | | boards |
 |---|---|---|
-| §3.3 | Chip-select-only devices — half are really unrecognised net spellings, the rest need wire tracing | 26 devices |
+| §3.3 | Chip-select-only devices — half are really unrecognised net spellings; the rest need the peripheral end read, not wire tracing (§3.7) | 26 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
 | §1.14 | A label naming the pin's own capability outranks the net behind it | 1 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
-| §3.7 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
+| §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
+| §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -458,7 +459,7 @@ Two boards, three pins, and with them two complete SPI1 buses, a restored
 Both are now golden fixtures — `h7-dual-pad` and `f4-column-drift` — because
 the check that should have caught the second one already existed
 (`instances_without_pins`) and passed on all five boards under test while six
-instances dangled in the corpus. See §3.7.
+instances dangled in the corpus. See §3.8.
 
 ### 1.14 A net label need not be in a column — FIXED, with one case still wrong
 
@@ -1114,7 +1115,46 @@ A handful of corpus files are also not schematics at all — wiring diagrams, a
 datasheet, calibration notes, one PID paper. They fall into the "never names
 its MCU" bucket, which is harmless but not precise.
 
-### 3.7 The golden boards did not cover the families the corpus does — PART DONE
+### 3.7 Reading the drawn wires — PROTOTYPED, and it does not do what I claimed
+
+The standing weakness is that connectivity is inferred from proximity: "GYRO_1_CS
+is drawn among SPI1's lines, 3pt to the nearest, so the device shares that bus."
+The wires themselves are in the PDF. `pdftocairo -svg` — same poppler package,
+no new dependency — returns them as stroked paths, and a prototype
+(`wires.py`/`trace.py`, kept out of the repo) turns them into a net graph.
+
+It works. On one H7 sheet: 2459 stroked straight segments; dropping the 15
+longest removes the page frame and title-block dividers, which otherwise touch
+everything and fuse 263 nodes into one net. What is left is 528 nets, largest 89.
+Of 46 label-to-pin bindings that could be checked, 20 sit on the pin's own net
+and 20 are separated by a component drawn in that row — a 100R series resistor,
+which is a real electrical fact, not a parse failure. Six are unexplained.
+
+It settles §1.14's pull-up case structurally rather than by distance:
+`GYRO_1_EXTI` and `MAX7456_SPI_CS` are on the *same* net as their pins while
+`3V3_MCU` is on a different one, across the 10k. That is the discrimination the
+nearest-label rule has to approximate, and it is exactly the evidence the
+`ADC1_8`-versus-`RSSI` case needs.
+
+**But it does not close §3.3, which is why the prototype was worth running.**
+Every signal net name on that sheet appears exactly twice — once at the MCU, once
+at the peripheral. `SDCARD_SPI_CS` at (240,154) and again at (516,216), beside
+`SPI3_SCK` at (516,219). The vendor connects blocks by *net name*, not by a drawn
+wire, so there is no wire from the MCU to the SD socket to trace. Tracing the
+SPI3 pins reaches `SPI3_SCK` and `SPI3_SDO` and stops. What actually answers
+"which bus" on this board is the peripheral-end labels being drawn together —
+which is what `trace_cs_bus()` already reads.
+
+So: a corroborating signal for *local* structure, not a replacement for the
+label pipeline, and not a route to a netlist on sheets drawn this way. The
+bounded use worth landing is deciding which of two labels level with a pin is
+on its net. Two prototype details to carry over: the text-to-net probe radius
+must be smaller than the row pitch (2.88pt on this board, and a 6pt probe put
+`SWCLK` on `PA15`), and junction dots are not yet told from plain crossings —
+the endpoint-on-segment rule does not merge crossings, but it will also miss a
+dotted one.
+
+### 3.8 The golden boards did not cover the families the corpus does — PART DONE
 
 A device was emitted pointing at an SPI bus the generator had, in the same run,
 refused to emit and said so. The invariant was not missed: `analysis.instances_
