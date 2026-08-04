@@ -382,6 +382,71 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
+class TimerRateClashTests(unittest.TestCase):
+    """
+    genconfig.timer_rate_clashes. A timer's period belongs to the whole TIM
+    unit - timerConfigure() and pwmOutputConfig() both set it per unit - so two
+    functions on one unit have to want the same rate, and LED strip (800kHz),
+    servo (50Hz), gyro CLKIN (32kHz) and a motor's protocol rate do not.
+
+    Firmware does not catch it: timerAllocate() refuses only when that pin's
+    entry is owned, and ownership is per pin. See ROADMAP 4.8.
+    """
+
+    def pick(self, label, channel):
+        return genconfig.TimerPick("PA0", label, 1, channel, 0, "inferred")
+
+    def clashes(self, picks, family="STM32H7"):
+        return genconfig.timer_rate_clashes(picks, {"family": family})
+
+    def test_motors_sharing_one_timer_are_fine(self):
+        # Same class, same rate - this is how a four-motor board is meant to be.
+        out = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                            self.pick("MOTOR2_PIN", "TIM3_CH2")])
+        self.assertEqual(out, [])
+
+    def test_led_strip_with_a_motor_is_reported(self):
+        out = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                            self.pick("LED_STRIP_PIN", "TIM3_CH3")])
+        self.assertEqual(len(out), 1)
+        self.assertIn("TIM3", out[0])
+        self.assertIn("800kHz", out[0])
+        self.assertIn("bitbang", out[0])
+
+    def test_the_motor_caveat_names_the_family_rule(self):
+        # AUTO means bitbang everywhere except F4, where it also needs DShot
+        # telemetry - so the same clash is latent on one and live on the other.
+        h7 = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                           self.pick("LED_STRIP_PIN", "TIM3_CH3")], "STM32H7")
+        f4 = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                           self.pick("LED_STRIP_PIN", "TIM3_CH3")], "STM32F4")
+        self.assertIn("PROSHOT1000", h7[0])
+        self.assertIn("telemetry", f4[0])
+
+    def test_a_clash_with_no_motor_carries_no_bitbang_excuse(self):
+        # 800kHz against 32kHz, and nothing turns either of them off.
+        out = self.clashes([self.pick("LED_STRIP_PIN", "TIM3_CH1"),
+                            self.pick("GYRO_1_CLKIN_PIN", "TIM3_CH2")])
+        self.assertEqual(len(out), 1)
+        self.assertNotIn("bitbang", out[0])
+
+    def test_servo_and_motor_clash(self):
+        out = self.clashes([self.pick("MOTOR1_PIN", "TIM4_CH1"),
+                            self.pick("SERVO1_PIN", "TIM4_CH2")])
+        self.assertEqual(len(out), 1)
+        self.assertIn("50Hz", out[0])
+
+    def test_different_units_never_clash(self):
+        out = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                            self.pick("LED_STRIP_PIN", "TIM4_CH1")])
+        self.assertEqual(out, [])
+
+    def test_a_label_with_no_rate_class_is_ignored(self):
+        out = self.clashes([self.pick("MOTOR1_PIN", "TIM3_CH1"),
+                            self.pick("SOMETHING_ELSE_PIN", "TIM3_CH2")])
+        self.assertEqual(out, [])
+
+
 class TargetMissTests(unittest.TestCase):
     """
     netmap.describe_target_miss: the sheet names a part, and it is not one.

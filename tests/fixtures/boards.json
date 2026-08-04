@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "20f1d4847"
+  "tool_rev": "1d5531eef"
  },
  "boards": [
   {
@@ -60,6 +60,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -93,6 +94,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -118,7 +120,7 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 63,
    "timer_rows": 7,
-   "warnings": 6,
+   "warnings": 7,
    "notes": 10,
    "netmap_digest": "36b20591e52e3f5e8f7b89536af30407eb517a171fd636fda67fb4e5211c0589",
    "config_digest": "8d65a52a4c16955c499831f97b6ffb322f0da400ef01bc1a09b23f4dd29ee1aa",
@@ -126,6 +128,9 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [
+     "TIM3: LED strip+gyro CLKIN"
+    ],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -159,6 +164,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [
      "unclassified",
      "unclassified",
@@ -196,6 +202,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -229,6 +236,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -262,6 +270,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -295,6 +304,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [
      "unclassified"
     ],

@@ -50,7 +50,7 @@ is in each section; this is the index.
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
-| §4.8 | Timer allocation is not checked against what each function needs of the whole TIM unit | 12 |
+| §4.8 | Timer rate clashes are now reported (part 1 done); the picker does not yet avoid them | 12 |
 | §4.9 | The pin editor offers no suggestions, though the sheet usually contains the answer | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
@@ -1391,7 +1391,7 @@ seeder's firmware rev in the generated header.
 
 ---
 
-### 4.8 Timer allocation is not verified against what each function needs
+### 4.8 Timer allocation is not verified against what each function needs — PART 1 DONE
 
 `timerConfigure(timHw, period, hz)` sets the period and prescaler of a **whole
 TIM unit**, not of one channel. So two functions on one unit must want the same

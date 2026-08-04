@@ -696,6 +696,80 @@ class TimerPick:
     source: str         # 'schematic' | 'inferred'
 
 
+# What each function needs of the timer, and where firmware says so. The period
+# and prescaler belong to the whole TIM unit - timerConfigure(timHw, period, hz)
+# and pwmOutputConfig() both set them per unit, not per channel - so two
+# functions sharing a unit have to want the same rate.
+RATE_CLASS = (
+    ("MOTOR", "motor", "its DShot or PWM protocol rate"),
+    ("SERVO", "servo", "50Hz by default (servo_pwm_rate)"),
+    ("LED_STRIP", "LED strip", "an 800kHz carrier (WS2811_CARRIER_HZ)"),
+    ("CAMERA_CONTROL", "camera control", "CAMERA_CONTROL_PWM_RESOLUTION"),
+    ("CLKIN", "gyro CLKIN", "clock/32000, a 32kHz square wave"),
+    ("PPM", "RX capture", "a 1MHz timebase (PWM_TIMER_1MHZ)"),
+    ("ESCSERIAL", "escserial", "a 1MHz timebase"),
+)
+
+
+def _rate_class(label: str) -> Optional[Tuple[str, str, str]]:
+    for token, name, needs in RATE_CLASS:
+        if token in label:
+            return token, name, needs
+    return None
+
+
+def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
+    """
+    Two functions wanting different rates from one TIM unit.
+
+    Firmware does not catch this. timerAllocate() refuses only when *that pin's*
+    entry already has an owner, and ownership is per pin rather than per unit -
+    so two pins on one timer both allocate and whichever configures last wins
+    the period. It builds and does not work, which is the shape CLAUDE.md 2 is
+    about.
+
+    Reported rather than rearranged. Where a pin carries several timer channels
+    the picker could dodge this, but a board whose only LED-strip pin shares a
+    unit with its only motor pin has no fix at all, and silently shuffling the
+    ones that do would hide which is which. See ROADMAP 4.8.
+    """
+    units: Dict[str, Dict[str, List[str]]] = defaultdict(lambda: defaultdict(list))
+    needs: Dict[str, str] = {}
+    for p in picks:
+        got = _rate_class(p.label)
+        if not got:
+            continue
+        token, name, why = got
+        units[p.channel.split("_")[0]][name].append(p.label)
+        needs[name] = why
+
+    out: List[str] = []
+    for unit, classes in sorted(units.items()):
+        if len(classes) < 2:
+            continue
+        who = "; ".join(f"{n} ({', '.join(sorted(labels))}) wants {needs[n]}"
+                        for n, labels in sorted(classes.items()))
+        line = (f"{unit} is shared by functions that need different rates of it: "
+                f"{who}. A timer's period is set for the whole unit, so only one "
+                f"of them gets the rate it asked for")
+        # The motor case is the common one and it is usually latent, so say so
+        # rather than leaving a reader to discover it is a false alarm on their
+        # board and stop believing the next one.
+        if "motor" in classes:
+            f4 = str(caps.get("family", "")).startswith(("STM32F4", "APM32F4"))
+            line += (
+                ". With DShot bitbang the motors drive GPIO from DMA and never "
+                "touch the timer, which makes this harmless" +
+                (" - but on this family DSHOT_BITBANG_AUTO only turns bitbang on "
+                 "when DShot telemetry is enabled, so it bites without it"
+                 if f4 else
+                 ", and AUTO means bitbang on this family unless the protocol is "
+                 "PROSHOT1000") +
+                ". It bites either way if bitbang is turned off")
+        out.append(line)
+    return out
+
+
 def read_timer_hints(words: Sequence[Word]) -> Dict[str, str]:
     """
     Pick up annotations the schematic author wrote, e.g. the words
@@ -2524,6 +2598,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         for p in picks:
             if p.source == "inferred":
                 cfg.notes.append(f"{p.label} -> {p.channel} inferred (no annotation)")
+        for line in timer_rate_clashes(picks, caps):
+            cfg.warnings.append(line)
 
     # ---- DMA and instances ----------------------------------------------
     adc_dev, adc_opt, notes = choose_adc(caps, adc_pins, claimed, mux_next)

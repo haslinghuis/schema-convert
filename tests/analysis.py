@@ -227,6 +227,35 @@ def timer_occurrence_errors(run: BoardRun) -> List[str]:
     return out
 
 
+def timer_rate_class_clashes(run: BoardRun) -> List[str]:
+    """
+    TIM units carrying two functions that want different rates of them.
+
+    Derived from the emitted file and the capability map, not from genconfig's
+    own bookkeeping, so a bug in the latter cannot hide here: the occurrence in
+    each TIMER_PIN_MAP row is resolved back to a channel through the firmware
+    table, exactly as timer_occurrence_errors does.
+
+    Recorded per board rather than asserted empty. It is a real hazard - the
+    period belongs to the whole unit - but usually a latent one, since DShot
+    bitbang leaves the motor timers alone, and some boards have no other pin to
+    move to. See ROADMAP 4.8.
+    """
+    d = defines(run.text)
+    units: Dict[str, set] = {}
+    for _, label, occurrence, _ in timer_rows(run.text):
+        pin = d.get(label)
+        channels = run.caps["timers"].get(pin) or [] if pin else []
+        if not 1 <= occurrence <= len(channels):
+            continue
+        got = genconfig._rate_class(label)
+        if not got:
+            continue
+        units.setdefault(channels[occurrence - 1].split("_")[0], set()).add(got[1])
+    return sorted(f"{unit}: {'+'.join(sorted(classes))}"
+                  for unit, classes in units.items() if len(classes) > 1)
+
+
 # --------------------------------------------------------------------------- #
 # 4. SPI bus assignment is conflict-free
 # --------------------------------------------------------------------------- #
@@ -350,6 +379,10 @@ DEFECT_CHECKS = {
     "unvalidated_pin_defines": unvalidated_pin_defines,
     "incomplete_spi_buses": incomplete_spi_buses,
     "instances_without_pins": instances_without_pins,
+    # Recorded, not asserted empty: on some boards there is no other pin to move
+    # the function to, and the hazard is latent under DShot bitbang. What must
+    # not happen is a new one appearing unnoticed. ROADMAP 4.8.
+    "timer_rate_class_clashes": timer_rate_class_clashes,
 }
 
 # Invariants that hold on every board today. These are asserted empty outright -
