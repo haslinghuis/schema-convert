@@ -505,6 +505,37 @@ class BusNamedChipSelectTests(unittest.TestCase):
         self.assertIsNone(self.find(words)[0])
 
 
+class FusedAnnotationTests(unittest.TestCase):
+    """
+    netmap._unfuse_annotation. Altium writes a hidden designator-and-ball token
+    beside every pin, and poppler returns it inside the word when there is no
+    gap: `PH1-OSC_OUTPIU10D1`. The name still parses, but the word's box runs to
+    where the *annotation* ends - and an edge is found by clustering on a shared
+    coordinate, so on a right-hand column the fused names land 10pt out and form
+    a rival cluster.
+    """
+
+    def test_a_fused_token_is_trimmed_off(self):
+        w = netmap._unfuse_annotation(Word("PH1-OSC_OUTPIU10D1", 600.0, 100, 637.0, 103))
+        self.assertEqual(w.text, "PH1-OSC_OUT")
+
+    def test_the_box_shrinks_with_the_text(self):
+        w = netmap._unfuse_annotation(Word("PC15PIU10B1", 600.0, 100, 622.0, 103))
+        # 4 of 11 characters kept, so 4/11 of the width.
+        self.assertAlmostEqual(w.x1, 600.0 + 22.0 * 4 / 11, places=6)
+        self.assertEqual((w.x0, w.y0, w.y1), (600.0, 100, 103))
+
+    def test_a_plain_pin_name_is_untouched(self):
+        w = Word("PC15-OSC32_OUT", 600.0, 100, 626.0, 103)
+        self.assertIs(netmap._unfuse_annotation(w), w)
+
+    def test_a_standalone_annotation_is_not_mangled(self):
+        # Nothing before the token: drop_annotations already handles these, and
+        # trimming to an empty name would invent a zero-width word.
+        w = Word("PIU10D1", 628.0, 100, 637.0, 103)
+        self.assertIs(netmap._unfuse_annotation(w), w)
+
+
 class TimerChannelCollisionTests(unittest.TestCase):
     """
     genconfig.timer_channel_collisions. A channel has one compare register, so

@@ -47,7 +47,7 @@ is in each section; this is the index.
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line | 17 buses on 13 |
-| §1.20 | 396 unbound net labels, 61% of them on 8 boards — geometry, not spelling: 42% already classify to a real role | 396 on 54 |
+| §1.20 | Unbound net labels that classify to a real role, after the fused-annotation fix | 145 on 30 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
@@ -701,6 +701,43 @@ because recognising the chip select is what says the part is on SPI.
 Small, but the way it was found is the point: not from a board, from re-reading
 a rule this file already contained and checking the code against it. Worth doing
 whenever a rule gets written down here.
+
+### 1.20 An annotation fused onto a pin name splits the symbol's edge — FIXED
+
+Chasing the 396 unbound net labels. Ranking boards by raw orphan count is the
+wrong question - what matters is orphans that *classify to a real role*, since
+those are nets that were understood and then lost. That is 164 over 31 boards,
+and the top two were one sheet at **100% agreement while 19 real nets bound to
+nothing**.
+
+The cause is one word shape. Altium writes a hidden designator-and-ball token
+beside every pin, and poppler returns it *inside* the word when the two are
+drawn without a gap:
+
+```
+PH1-OSC_OUTPIU10D1     PC15-OSC32_OUTPIU10B1     PH0-OSC_INPIU10C1
+```
+
+`drop_annotations()` removes these where they stand alone, and the name still
+parses when fused - so nothing looked wrong. But an edge is found by clustering
+on a shared coordinate, and on a right-hand column the shared coordinate is x1.
+The fused names end 10pt further right than the clean ones, so they form a rival
+cluster and the edge is read as two. That board kept 16 of its right column's
+rows, and the 19 labels wanting the missing ones had nowhere to bind.
+
+`_unfuse_annotation()` trims the token and narrows the box in proportion to how
+much of the text the name is. Proportional is an approximation on a
+proportional font, but the error is a fraction of a character against a 10pt
+displacement.
+
+That board: **66 rows → 100, 20 nets checked → 34, all agreeing, no orphans.**
+Corpus **+87 defines on 5 boards**, orphaned labels 54 → 51.
+
+One board is smaller afterwards and it is worth saying why. It went 63 rows →
+100 and 19 nets checked → 39, so its old 100% was agreement on half of what it
+had; six of the newly-visible nets put SPI1 and SPI3 on pins the firmware tables
+do not support, and those are refused. It emits less and asserts nothing false,
+which is the trade this project keeps choosing.
 
 #### The pattern behind §1.8 through §1.11
 

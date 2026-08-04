@@ -422,10 +422,42 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
 Tagged = Tuple[Word, str, List[str], bool]
 
 
+FUSED_ANNOT_RE = re.compile(
+    r"^(?P<name>.*?)(?P<annot>(?:PI|CO)U\d{1,4}[A-Z]\d{1,3})$")
+
+
+def _unfuse_annotation(w: Word) -> Word:
+    """
+    Trim an annotation token that was drawn hard against a pin name.
+
+    Altium writes a hidden designator-and-ball token beside every pin, and
+    poppler returns it as part of the word when there is no gap:
+    `PH1-OSC_OUTPIU10D1`, `PC15-OSC32_OUTPIU10B1`. drop_annotations() removes
+    these where they stand alone; fused, the name still parses but the word's
+    box runs to where the *annotation* ends.
+
+    That is what breaks the symbol. An edge is found by clustering on a shared
+    coordinate, and on a right-hand column the shared coordinate is x1 - so the
+    fused names land 10pt out and form a rival cluster. One H7 read 16 of its
+    right column's rows for this reason and orphaned 19 net labels that had
+    nowhere to bind, while reporting 100% agreement on what was left.
+
+    The box is narrowed in proportion to how much of the text the name is. That
+    is an approximation - these are proportional fonts - but the error is a
+    fraction of a character against a 10pt displacement.
+    """
+    m = FUSED_ANNOT_RE.match(w.text)
+    if not m or not m.group("name"):
+        return w
+    name = m.group("name")
+    share = len(name) / len(w.text)
+    return Word(name, w.x0, w.y0, w.x0 + (w.x1 - w.x0) * share, w.y1, w.page)
+
+
 def _tag_pins(words: Sequence[Word]) -> List[Tagged]:
     """Every word that reads as a pin name or a supply pin, with its AF list."""
     tagged: List[Tagged] = []
-    for w in assemble_pin_names(words):
+    for w in map(_unfuse_annotation, assemble_pin_names(words)):
         m = PIN_RE.match(w.text)
         if m:
             pin, rest = m.group(1), m.group(2)
