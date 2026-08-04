@@ -103,8 +103,12 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # for the whole name (1-SCK). CLK means SCK here, not the SDIO clock.
     (re.compile(r"^SPI(\d)(SCK|SCLK|CLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
     (re.compile(r"^(\d)[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
-    (re.compile(r"^MOTOR(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
-    (re.compile(r"^SERVO(\d+)$"), "servo"),
+    # The separator before the index, which GYRO_1_CS and friends already
+    # allow. One board draws MOTOR_1..MOTOR_8 and SERVO_1..SERVO_3 and every
+    # one of them came out as a net with no config.h role - eleven pins, on a
+    # board that reported 100% agreement on what was left.
+    (re.compile(r"^MOTOR[-_]?(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
+    (re.compile(r"^SERVO[-_]?(\d+)$"), "servo"),
     # A PPM receiver and the ESC 1-wire passthrough both drive a timer input
     # capture, so the pin has to have a timer channel - checked in build().
     (re.compile(r"^(?:RX[-_]?)?PPM(?:[-_]?(?:IN|SIG|SIGNAL))?$"), "rx_ppm"),
@@ -1676,11 +1680,15 @@ class Config:
     lines: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    # Which defines were written, so a caller can ask what is *not* here
+    # without re-parsing the text it just produced.
+    emitted: set = field(default_factory=set)
 
     def add(self, text: str = "") -> None:
         self.lines.append(text)
 
     def define(self, name: str, value: str = "", width: int = 20) -> None:
+        self.emitted.add(name)
         self.add(f"#define {name:<{width}}{value}".rstrip())
 
 
@@ -1750,12 +1758,70 @@ def firmware_provenance(fw: dict, trusted: Sequence[str]) -> List[str]:
     return out
 
 
+# The defines worth listing as "not found" when they are absent. Deliberately
+# not every define Betaflight knows: a list that cries about SDCARD_DETECT_PIN
+# on a board with no card slot teaches the reader to skim past it. These are the
+# ones whose absence is nearly always a sheet the tool could not follow rather
+# than a board that lacks the feature.
+EXPECTED_DEFINES = (
+    "MOTOR1_PIN", "MOTOR2_PIN", "MOTOR3_PIN", "MOTOR4_PIN",
+    "LED0_PIN", "BEEPER_PIN", "LED_STRIP_PIN",
+    "UART1_TX_PIN", "UART1_RX_PIN",
+    "GYRO_1_CS_PIN", "GYRO_1_EXTI_PIN",
+    "ADC_VBAT_PIN", "ADC_CURR_PIN",
+)
+
+
+def _hand_placed(overrides: Dict[str, str], caps: dict) -> Tuple[List[Link], set]:
+    """
+    Turn `--set NAME=PIN` into the same thing the sheet would have given.
+
+    A define name is the net name the classifier already understands with _PIN
+    on the end - MOTOR6_PIN is MOTOR6, UART3_TX_PIN is UART3_TX, GYRO_1_EXTI_PIN
+    is GYRO_1_EXTI. So an override is routed through `classify` rather than
+    through a second table of its own, which means it supports every spelling
+    the reader does and cannot drift away from it.
+
+    Validated against the firmware map exactly as a read net is. Being told a
+    pin by hand is not a reason to emit one the build cannot honour - if the
+    tables disagree, the answer is a firmware PR, not a config that will not
+    work for months (see CLAUDE.md 1).
+    """
+    out: List[Link] = []
+    keys = set()
+    for raw_name, raw_pin in overrides.items():
+        name = raw_name.strip().upper()
+        pin = raw_pin.strip().upper()
+        if not netmap.PIN_RE.match(pin):
+            raise SystemExit(f"--set {raw_name}: '{raw_pin}' is not a pin name "
+                             "like PA5")
+        net = re.sub(r"_PIN$", "", name)
+        role, idx, sub = classify(net)
+        if role is None or role == "ignore":
+            raise SystemExit(
+                f"--set {raw_name}: not a define this tool knows how to place. "
+                "Use the config.h name, e.g. MOTOR6_PIN, UART3_TX_PIN, "
+                "GYRO_1_EXTI_PIN, SPI2_SCK_PIN")
+        req = netmap.net_requirement(net)
+        if req and not netmap.pin_supports(caps, pin, req[0], req[1]):
+            raise SystemExit(
+                f"--set {raw_name}={raw_pin}: the firmware tables say {pin} "
+                f"cannot do {req[0]}{req[1] or ''} on this MCU, so the build "
+                "would not honour it. Check the pin, or - if the silicon does "
+                "support it - fix the firmware table first; afaudit.py finds "
+                "exactly this class of error")
+        out.append(Link(net, pin, "", bool(req), True, [], True, None))
+        keys.add((role, idx, sub))
+    return out, keys
+
+
 def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
           gyro_align: str, args_trust: bool = False,
           reference: Optional[str] = None,
           version: Optional[str] = None,
           hse_mhz: Optional[int] = None,
-          page: Optional[int] = None) -> Tuple[Config, dict]:
+          page: Optional[int] = None,
+          overrides: Optional[Dict[str, str]] = None) -> Tuple[Config, dict]:
     fw = json.loads((DATA_DIR / "firmware.json").read_text())
     aliases = json.loads(ALIAS_FILE.read_text())
 
@@ -1860,11 +1926,23 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # either an emitted define or an explanation.
     net_of: Dict[str, str] = {}
 
-    for l in res.links:
+    hand, hand_keys = _hand_placed(overrides or {}, caps)
+    for l in hand:
+        cfg.notes.append(f"{l.net}_PIN = {l.pin} supplied by hand, not read "
+                         "from the sheet")
+    for l in list(res.links) + hand:
         # Anything the firmware map rejected, or that landed on a supply pin, is
         # left out rather than emitted as a define that cannot work. Each one is
         # already recorded as a warning above.
         if not l.gpio:
+            continue
+        # A hand-placed value replaces whatever was read for the same role -
+        # that is the point of supplying one - but say so, because a config that
+        # silently drops what the sheet showed is worse than one that never read
+        # it.
+        if l not in hand and classify(l.net)[:3] in hand_keys:
+            cfg.notes.append(f"{l.net} on {l.pin} was read from the sheet but "
+                             "is replaced by the value supplied for it")
             continue
         if l.checked and not l.ok and not (args_trust and l.symbol_ok):
             continue
@@ -2613,6 +2691,20 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                          + ", ".join(f"{l.net}({l.pin})" for l in unknown))
     if res.unmapped:
         cfg.notes.append("unconnected pins: " + " ".join(res.unmapped))
+
+    # Name what is not there. The other two lines say what was seen and not
+    # understood; this one says what a target normally has and this one does
+    # not, which is the question a reader actually arrives with. Some sheets
+    # genuinely do not carry these nets - they are on a page that was not
+    # supplied, or drawn in a way nothing here follows - and then the only way
+    # forward is to be told, so the line that reports the gap also says how.
+    absent = [d for d in EXPECTED_DEFINES if d not in cfg.emitted]
+    if absent:
+        cfg.warnings.append(
+            f"not produced from this sheet: {', '.join(absent)}. If the board "
+            "has them, supply each with --set NAME=PIN (e.g. --set "
+            f"{absent[0]}=PA5); every value is checked against the firmware "
+            "tables before it is emitted")
     aligns = "GYRO_1_ALIGN and GYRO_2_ALIGN are" if gyro2 else "GYRO_1_ALIGN is a"
     cfg.warnings.append(f"{aligns} placeholder{'s' if gyro2 else ''} "
                         f"({gyro_align}); orientation cannot be read from a "
@@ -2672,6 +2764,15 @@ def main() -> int:
                          "it and the sheet does not let it be read. Overrides "
                          "detection; ignored on families whose clock tree does "
                          "not derive from SYSTEM_HSE_MHZ.")
+    ap.add_argument("--set", dest="overrides", action="append", default=[],
+                    metavar="NAME=PIN",
+                    help="place a define the sheet did not give, e.g. --set "
+                         "MOTOR6_PIN=PE11. Repeatable. NAME is the config.h "
+                         "name; the value is checked against the firmware "
+                         "tables and refused if the pin cannot do the job, and "
+                         "it replaces anything read for the same role. The "
+                         "report lists what a target normally has and this "
+                         "sheet did not produce.")
     ap.add_argument("--reference",
                     help="the sha256_... REFERENCE token issued by the Betaflight "
                          "team for a reviewed target. Cannot be computed locally; "
@@ -2696,10 +2797,20 @@ def main() -> int:
     if not (DATA_DIR / "firmware.json").exists():
         raise SystemExit("data/firmware.json missing - run seed_firmware.py first")
 
+    overrides = {}
+    for item in args.overrides:
+        if "=" not in item:
+            raise SystemExit(f"--set {item}: expected NAME=PIN, e.g. "
+                             "MOTOR6_PIN=PE11")
+        k, v = item.split("=", 1)
+        if k.strip().upper() in overrides:
+            raise SystemExit(f"--set {k.strip()}: given twice")
+        overrides[k.strip().upper()] = v
+
     cfg, meta = build(args.pdf, args.board, args.manufacturer,
                       args.target, args.gyro_align, args.trust_symbol,
                       args.reference, args.fw_version, args.hse_mhz,
-                      args.page)
+                      args.page, overrides)
     text = "\n".join(cfg.lines).rstrip() + "\n"
 
     if args.as_json:

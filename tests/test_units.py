@@ -382,6 +382,57 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
+class HandPlacedDefineTests(unittest.TestCase):
+    """
+    genconfig._hand_placed: --set NAME=PIN, for what a sheet does not give.
+
+    Routed through `classify` rather than a table of its own, so the accepted
+    vocabulary is exactly the one the reader already understands and cannot
+    drift from it. Validated against the firmware map exactly as a read net is:
+    being told a pin by hand is not a reason to emit one the build will not
+    honour.
+    """
+
+    def setUp(self):
+        self.caps = fake_caps()
+
+    def place(self, **kw):
+        return genconfig._hand_placed(kw, self.caps)
+
+    def test_a_define_name_is_its_net_name_plus_pin(self):
+        links, keys = self.place(MOTOR6_PIN="PC6")
+        self.assertEqual([(l.net, l.pin) for l in links], [("MOTOR6", "PC6")])
+        self.assertIn(("motor", "6", None), keys)
+
+    def test_the_name_is_case_and_space_insensitive(self):
+        links, _ = self.place(**{" uart1_tx_pin ": " pa9 "})
+        self.assertEqual([(l.net, l.pin) for l in links], [("UART1_TX", "PA9")])
+
+    def test_a_pin_the_firmware_rejects_is_refused(self):
+        # PA9 is UART1 TX; it is not UART5's.
+        with self.assertRaises(SystemExit) as e:
+            self.place(UART5_TX_PIN="PA9")
+        self.assertIn("cannot do", str(e.exception))
+
+    def test_an_any_gpio_role_needs_no_capability(self):
+        # LEDs and chip selects have no requirement to check, so any pin goes.
+        links, _ = self.place(LED0_PIN="PB0")
+        self.assertEqual(links[0].pin, "PB0")
+
+    def test_a_name_with_no_role_is_refused(self):
+        with self.assertRaises(SystemExit) as e:
+            self.place(WIBBLE_PIN="PA9")
+        self.assertIn("not a define this tool knows", str(e.exception))
+
+    def test_a_value_that_is_not_a_pin_is_refused(self):
+        with self.assertRaises(SystemExit) as e:
+            self.place(MOTOR1_PIN="17")
+        self.assertIn("is not a pin name", str(e.exception))
+
+    def test_nothing_supplied_places_nothing(self):
+        self.assertEqual(self.place(), ([], set()))
+
+
 class OwnCapabilityLabelTests(unittest.TestCase):
     """
     netmap._restates_the_pin. Sheets print a pin's own ADC channel beside it,

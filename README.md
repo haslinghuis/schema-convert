@@ -120,6 +120,23 @@ generated from a local Betaflight checkout and records which one.
 - The generated file is a strong first draft, not a substitute for review: check
   the agreement score and every `WARN` before shipping a target
 
+Where a net cannot be followed at all — a page that was not supplied, a drawing
+convention nothing here reads — the report names what a target normally has and
+this sheet did not produce, and you can supply it:
+
+```bash
+python3 mcu-parser/genconfig.py board.pdf --board NAME --manufacturer ID \
+        --set MOTOR6_PIN=PE11 --set ADC_RSSI_PIN=PC5
+```
+
+`NAME` is the `config.h` name, and it goes through the same reader the sheet's
+own nets do, so every spelling it understands works here. A supplied value is
+still checked against the firmware tables and **refused** if the pin cannot do
+the job — being told a pin by hand is not a reason to emit one the build will
+not honour. It replaces anything read for the same role, and both facts are
+recorded in the report, because a config that mixes what was read with what was
+asserted and does not say which is the one failure mode worth avoiding.
+
 [`ROADMAP.md`](ROADMAP.md) has the full gap analysis: known defects, which
 `config.h` defines are never emitted (with how many real boards use them), and
 what would need circuit-level analysis rather than net-label matching.

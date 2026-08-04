@@ -554,6 +554,57 @@ exactly the vendor's 160 — but it is drawn with the top resistor horizontal an
 the bottom one vertical, where §3.2's reader looks for two resistors on one
 vertical leg either side of the node. A layout it does not know, not a bug.
 
+### 1.16 MOTOR_1 is not MOTOR1 — FIXED
+
+Found while building §4.7's manual placement, on a board that seemed to need it:
+`MOTOR_1(PC9)`, `MOTOR_2(PC8)` … `MOTOR_8(PB9)`, `SERVO_1(PA9)`, `SERVO_2(PA10)`,
+`SERVO_3(PA8)` all came out as "nets with no config.h role". Eleven pins, on a
+board reporting 100% agreement on what was left.
+
+The motor and servo patterns did not allow a separator before the index, which
+every other rule has allowed since §1.11 put it into `GYRO_1_CS`. Corpus: **+40
+defines on 7 boards, none lost** — four servos on three H7 boards, four more
+motors on two others, eight motors and three servos and a whole timer map on the
+F4.
+
+It is the fifth time this exact defect has appeared, so it is worth stating as a
+rule rather than a story: **when a pattern matches an indexed name, the index may
+be preceded by a separator.** That is now true of every rule in the table.
+
+### 4.7 Nothing could be placed by hand — FIXED
+
+Some nets cannot be followed however good the reader gets: the page holding them
+was not supplied, or they are drawn in a way nothing here reads. Until now the
+only options were to edit the generated file, which loses everything derived from
+that pin — the timer map, the DMA allocation, the bitbang decision — or to wait
+for the reader to improve.
+
+`--set NAME=PIN` places one, and the report names what is absent so there is
+something to answer:
+
+```
+WARN: not produced from this sheet: MOTOR1_PIN, ..., ADC_VBAT_PIN.
+      If the board has them, supply each with --set NAME=PIN
+```
+
+Three decisions worth recording:
+
+- **It goes through `classify`, not a table of its own.** A define name is the
+  net name the reader already knows with `_PIN` on the end, so `--set` supports
+  every spelling the sheet does and cannot drift away from it.
+- **It is checked against the firmware map exactly as a read net is,** and
+  refused if the pin cannot do the job. Being told a pin by hand is not a reason
+  to emit one the build will not honour; if the silicon really does support it,
+  the answer is a firmware PR (§1, and `afaudit.py` finds that class of error).
+- **It is a placement, not a text edit.** The value enters as though the sheet
+  had carried it, so everything downstream follows: supplying four motors on a
+  board with none produced the timer mapping, resolved a DMA collision between
+  two of them and explained it, and decided `DEFAULT_DSHOT_BITBANG`.
+
+Both the hand-placed value and anything it displaced are reported. A config that
+mixes what was read with what was asserted, and does not say which is which, is
+the "looks finished" failure the README warns about.
+
 #### The pattern behind §1.8 through §1.11
 
 Four entries now, and they are all the same defect: **a rule that describes one
