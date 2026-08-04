@@ -563,7 +563,7 @@ Worth doing in that order: §4.8's grouping is what §4.9 needs to rank safely.
 
 ---
 
-### 4.10 There is no statement of what a complete target contains
+### 4.10 There is no statement of what a complete target contains — DONE
 
 A generated target is judged by what it *has*. Nothing states what a normal one
 carries, so a define that is simply absent reads the same as a define that does
@@ -587,18 +587,22 @@ false, so the meter reads zero rather than reporting nothing. Asserting the
 source without the pin would be the "looks finished" failure. The gap is not the
 rule, it is the 31 boards where the pin was not found.
 
-**What is wanted is the template as a checklist.** §4.7 already lists the
-functions a target normally has and this sheet did not produce; it does not say
-what each absence *costs*. `ADC_VBAT` missing should read as "no battery voltage
-and no low-voltage warning", not as one more name on a list. Three things:
+**Done, as a checklist rather than a template of values.** Three parts:
 
-- Extend `EXPECTED_FUNCTIONS` into a table of function → the defines it enables
-  → what is lost without it, and say so in the report.
-- Emit the whole expected set as commented-out lines in the generated file, so a
-  reviewer diffing against a hand-written target sees the shape rather than
-  having to remember it.
-- Check the reverse too: a `DEFAULT_*` emitted with nothing behind it is a
-  defect, and there is no invariant for that today.
+- `CONSEQUENCE` gives the cost of each absence, printed under the list of what
+  the sheet did not produce - *"without ADC_VBAT: no battery voltage and no
+  low-voltage warning"*. Grouped by consequence, because four missing motors is
+  one fact and four near-identical lines is how a warning stops being read: 278
+  lines became 156, about two a board.
+- The absent set is emitted as a **commented block at the end of the file**, so
+  the gap travels with the config rather than only in a report. Commented,
+  because every one is a value the sheet did not yield and filling it in would
+  be the invention this tool exists to avoid. Defines are unchanged at 5704 -
+  checked, since a comment block that alters output would be a bug.
+- `analysis.defaults_without_backing` asserts the reverse on every fixture: a
+  `DEFAULT_*` naming a peripheral that was never configured. **Zero across the
+  corpus**, which is the evidence that the conditional emission was already
+  right - and now it cannot quietly stop being.
 
 The vendor config that prompted this had `DEFAULT_BLACKBOX_DEVICE
 BLACKBOX_DEVICE_SDCARD` where the tool produced nothing, because the card's chip

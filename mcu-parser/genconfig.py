@@ -1881,15 +1881,21 @@ class Config:
     lines: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
-    # Which defines were written, so a caller can ask what is *not* here
-    # without re-parsing the text it just produced.
+    # Which defines were written, and with what, so a caller can ask what is
+    # *not* here - and whether what is here has anything behind it - without
+    # re-parsing the text it just produced.
     emitted: set = field(default_factory=set)
+    values: Dict[str, str] = field(default_factory=dict)
+
+    def value_of(self, name: str) -> str:
+        return self.values.get(name, "")
 
     def add(self, text: str = "") -> None:
         self.lines.append(text)
 
     def define(self, name: str, value: str = "", width: int = 20) -> None:
         self.emitted.add(name)
+        self.values[name] = value
         self.add(f"#define {name:<{width}}{value}".rstrip())
 
 
@@ -1975,6 +1981,37 @@ EXPECTED_FUNCTIONS = (
     "GYRO_1_CS", "GYRO_1_EXTI",
     "ADC_VBAT", "ADC_CURR",
 )
+
+# What an absence actually costs, where firmware falls back to *nothing* rather
+# than to something sensible. battery.c defaults the voltage source to
+# VOLTAGE_METER_NONE and blackbox.c the device to BLACKBOX_DEVICE_NONE, so a
+# board whose divider could not be read does not get a slightly worse config -
+# it gets one with no battery voltage, no low-voltage warning and no logging,
+# and nothing about it looks wrong. Naming the consequence is the difference
+# between a list of missing pins and a reader knowing which ones matter.
+CONSEQUENCE = {
+    "ADC_VBAT": "no battery voltage and no low-voltage warning - "
+                "DEFAULT_VOLTAGE_METER_SOURCE falls back to VOLTAGE_METER_NONE",
+    "ADC_CURR": "no current or consumption reading - "
+                "DEFAULT_CURRENT_METER_SOURCE falls back to virtual, MSP or none "
+                "depending on build options",
+    "GYRO_1_CS": "no gyro, so the target does not fly",
+    "MOTOR1": "those motor outputs do not exist",
+    "MOTOR2": "those motor outputs do not exist",
+    "MOTOR3": "those motor outputs do not exist",
+    "MOTOR4": "those motor outputs do not exist",
+}
+
+# A DEFAULT_* that only means anything if something else was emitted. Checked
+# both ways: the absence is reported above, and asserting one of these with
+# nothing behind it is a defect in its own right - the meter would read zero
+# rather than report nothing.
+DEFAULT_NEEDS = {
+    ("DEFAULT_VOLTAGE_METER_SOURCE", "VOLTAGE_METER_ADC"): ("ADC_VBAT_PIN",),
+    ("DEFAULT_CURRENT_METER_SOURCE", "CURRENT_METER_ADC"): ("ADC_CURR_PIN",),
+    ("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH"): ("USE_FLASH",),
+    ("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_SDCARD"): ("USE_SDCARD",),
+}
 
 
 def _hand_placed(overrides: Dict[str, str], caps: dict) -> Tuple[List[Link], set]:
@@ -2946,6 +2983,28 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             f"has them, supply each with --set NAME=PIN (e.g. --set "
             f"{absent[0]}=PA5); every value is checked against the firmware "
             "tables before it is emitted")
+        # Spelled out only where firmware falls back to nothing. A list of names
+        # says what is missing; this says which of them stop the board working.
+        # Grouped by consequence: four motors missing is one fact, and four
+        # near-identical lines is how a warning stops being read.
+        grouped: Dict[str, List[str]] = defaultdict(list)
+        for f in absent:
+            if f in CONSEQUENCE:
+                grouped[CONSEQUENCE[f]].append(f)
+        for why, names in sorted(grouped.items(), key=lambda kv: kv[1]):
+            cfg.warnings.append(f"  ...without {', '.join(names)}: {why}")
+
+    # And the reverse. A source naming a peripheral that was never configured
+    # reads zero rather than reporting nothing, which is worse than omitting it.
+    for (name, value), needs in sorted(DEFAULT_NEEDS.items()):
+        if name not in cfg.emitted or cfg.value_of(name) != value:
+            continue
+        lacking = [n for n in needs if n not in cfg.emitted]
+        if lacking:
+            cfg.warnings.append(
+                f"{name} is {value} but {', '.join(lacking)} was not emitted; "
+                "the meter or device has nothing behind it and will read zero "
+                "rather than report nothing")
     aligns = "GYRO_1_ALIGN and GYRO_2_ALIGN are" if gyro2 else "GYRO_1_ALIGN is a"
     cfg.warnings.append(f"{aligns} placeholder{'s' if gyro2 else ''} "
                         f"({gyro_align}); orientation cannot be read from a "
@@ -2962,6 +3021,26 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             cfg.notes.append(why)
         else:
             cfg.warnings.append(why)
+
+    # The shape of a complete target, as a trailing comment block. A generated
+    # file is judged by what it has, and nothing else in it says what a normal
+    # one carries - so a reviewer diffing against a hand-written target has to
+    # remember the list. Commented, because every one of these is a value the
+    # sheet did not yield and inventing it is the failure this tool exists to
+    # avoid; the point is that the gap is visible in the file, not only in a
+    # report that may not travel with it.
+    if absent:
+        cfg.add()
+        cfg.add("/*")
+        cfg.add(" * Not produced from this sheet. If the board has them, fill in")
+        cfg.add(" * and uncomment - or re-run with --set NAME=PIN, which checks")
+        cfg.add(" * each value against the firmware tables first.")
+        cfg.add(" *")
+        for f in absent:
+            note = CONSEQUENCE.get(f)
+            cfg.add(f" * #define {f + '_PIN':<22}"
+                    + ("P??" if not note else f"P??   // else {note.split(' - ')[0]}"))
+        cfg.add(" */")
 
     meta = {
         "target": target,

@@ -505,6 +505,38 @@ class BusNamedChipSelectTests(unittest.TestCase):
         self.assertIsNone(self.find(words)[0])
 
 
+class ExpectedTargetShapeTests(unittest.TestCase):
+    """
+    ROADMAP 4.10. Firmware falls back to *nothing* when these are absent -
+    battery.c to VOLTAGE_METER_NONE, blackbox.c to BLACKBOX_DEVICE_NONE - so an
+    absence is a functional loss, not a neutral gap, and the report has to say
+    which absences cost what.
+    """
+
+    def test_every_consequence_names_a_function_that_is_expected(self):
+        # A consequence for something never listed as expected would never be
+        # printed, and would rot unnoticed.
+        for f in genconfig.CONSEQUENCE:
+            self.assertIn(f, genconfig.EXPECTED_FUNCTIONS, f"{f} is not expected")
+
+    def test_the_backed_defines_name_real_config_h_symbols(self):
+        for (name, value), needs in genconfig.DEFAULT_NEEDS.items():
+            with self.subTest(define=name):
+                self.assertTrue(name.startswith("DEFAULT_"))
+                self.assertTrue(all(n.isupper() for n in needs))
+
+    def test_a_source_with_nothing_behind_it_is_a_defect(self):
+        # The pairing the emitter relies on: VOLTAGE_METER_ADC means nothing
+        # without ADC_VBAT_PIN, because adcConfig->vbat.enabled stays false and
+        # the meter reads zero rather than reporting nothing.
+        self.assertEqual(
+            genconfig.DEFAULT_NEEDS[("DEFAULT_VOLTAGE_METER_SOURCE",
+                                     "VOLTAGE_METER_ADC")], ("ADC_VBAT_PIN",))
+        self.assertEqual(
+            genconfig.DEFAULT_NEEDS[("DEFAULT_CURRENT_METER_SOURCE",
+                                     "CURRENT_METER_ADC")], ("ADC_CURR_PIN",))
+
+
 class FusedAnnotationTests(unittest.TestCase):
     """
     netmap._unfuse_annotation. Altium writes a hidden designator-and-ball token

@@ -227,6 +227,30 @@ def timer_occurrence_errors(run: BoardRun) -> List[str]:
     return out
 
 
+def defaults_without_backing(run: BoardRun) -> List[str]:
+    """
+    A DEFAULT_* naming a peripheral that was never configured.
+
+    Firmware falls back to nothing when these are absent - VOLTAGE_METER_NONE,
+    BLACKBOX_DEVICE_NONE - so the emitter ties each to having found the pin or
+    the device. This is the other direction: asserting one with nothing behind
+    it is worse than omitting it, because the meter then reads zero instead of
+    reporting nothing, and a zero looks like an answer.
+
+    Derived from the emitted text rather than from genconfig's bookkeeping, so a
+    bug in the latter cannot hide here. ROADMAP 4.10.
+    """
+    d = defines(run.text)
+    out = []
+    for (name, value), needs in sorted(genconfig.DEFAULT_NEEDS.items()):
+        if d.get(name) != value:
+            continue
+        for n in needs:
+            if n not in d:
+                out.append(f"{name}={value} without {n}")
+    return sorted(out)
+
+
 def timer_channel_collisions(run: BoardRun) -> List[str]:
     """
     Two TIMER_PIN_MAP rows resolving to one timer channel.
@@ -414,6 +438,7 @@ STRICT_CHECKS = {
     "malformed_pin_defines": malformed_pin_defines,
     "duplicate_pin_defines": duplicate_pin_defines,
     "timer_occurrence_errors": timer_occurrence_errors,
+    "defaults_without_backing": defaults_without_backing,
     "spi_conflicts": spi_conflicts,
     "dma_conflicts": dma_conflicts,
 }
