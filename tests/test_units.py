@@ -382,6 +382,43 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
+class TargetMissTests(unittest.TestCase):
+    """
+    netmap.describe_target_miss: the sheet names a part, and it is not one.
+
+    "Many sheets never name the MCU" is true of 32 boards in the corpus and
+    useless on the three that name one and get it wrong.
+    """
+
+    DATA = {"targets": {"STM32F745": {}, "STM32H743": {}, "STM32G474": {}}}
+
+    def words(self, *texts):
+        return [Word(t, 0, 0, 10, 3) for t in texts]
+
+    def test_a_single_character_away_is_offered(self):
+        msg = netmap.describe_target_miss(self.words("STM32G475XYZ"), self.DATA)
+        self.assertIn("STM32G474", msg)
+        self.assertIn("--target STM32G474", msg)
+
+    def test_two_candidates_are_listed_and_neither_is_recommended(self):
+        # STM32F743 is one character from both STM32F745 and STM32H743, and
+        # nothing on the sheet chooses. Picking one would be alphabetical order
+        # dressed up as evidence, and the wrong tables build a plausible config.
+        msg = netmap.describe_target_miss(self.words("STM32F743VIH6"), self.DATA)
+        self.assertIn("STM32F745", msg)
+        self.assertIn("STM32H743", msg)
+        self.assertNotIn("--target STM32F745", msg)
+
+    def test_a_sheet_naming_no_part_says_nothing(self):
+        self.assertIsNone(
+            netmap.describe_target_miss(self.words("BEEPER", "PA9"), self.DATA))
+
+    def test_an_unrelated_part_is_reported_without_a_guess(self):
+        msg = netmap.describe_target_miss(self.words("STM32L152"), self.DATA)
+        self.assertIn("STM32L152", msg)
+        self.assertNotIn("--target STM32", msg)
+
+
 class VocabularyAgreementTests(unittest.TestCase):
     """
     Every spelling `classify` understands must also pass `NET_VOCAB`.

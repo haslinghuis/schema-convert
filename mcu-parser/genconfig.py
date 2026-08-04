@@ -1848,6 +1848,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     target = target or netmap.detect_target(words, fw)
     if not target:
         raise SystemExit(netmap.describe_unreadable(words)
+                         or netmap.describe_target_miss(words, fw)
                          or "Could not detect FC_TARGET_MCU: no part number on "
                             "the sheet matches a seeded target. Many sheets "
                             "simply never name the MCU - pass --target")

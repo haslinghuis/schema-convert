@@ -1401,6 +1401,50 @@ def detect_target(words: Sequence[Word], data: dict) -> Optional[str]:
     return None
 
 
+def describe_target_miss(words: Sequence[Word], data: dict) -> Optional[str]:
+    """
+    Why detection failed, when the sheet *does* name a part.
+
+    "Many sheets never name the MCU" is true of 32 boards here and useless on
+    the ones that name one and get it wrong. Three sheets from one vendor read
+    STM32F743VIH6, which is not a part ST makes - VIH6 is an LQFP100 H743 and
+    the F7 line has no 743. Detection is right to refuse it, and saying so, with
+    the part that is one character away, is the difference between a dead end
+    and a one-field fix.
+
+    Only a single-character substitution is offered. Anything looser starts
+    inventing a part the vendor did not write.
+    """
+    blob = " ".join(w.text.upper() for w in words)
+    seen = {m.group(0) for m in re.finditer(r"STM32[FGHCLNUWS]\d[\dX]{2}", blob)}
+    if not seen:
+        return None
+    known = sorted({n.upper() for n in data["targets"]})
+    for marking in sorted(seen):
+        near = [k for k in known
+                if len(k) == len(marking)
+                and sum(a != b for a, b in zip(k, marking)) == 1]
+        if len(near) == 1:
+            return (f"The sheet names {marking}, which is not a part this tool "
+                    f"has tables for. {near[0]} differs from it by one "
+                    f"character; if that is the intended part, pass --target "
+                    f"{near[0]}. Worth telling the vendor either way, since the "
+                    "marking on the sheet is then wrong")
+        if near:
+            # More than one candidate and nothing here can choose between them:
+            # naming the first would be alphabetical order dressed up as
+            # evidence, and the wrong pin tables produce a config that looks
+            # fine and is not.
+            return (f"The sheet names {marking}, which is not a part this tool "
+                    f"has tables for. These differ from it by one character: "
+                    f"{', '.join(near)}. Nothing on the sheet says which is "
+                    "meant, so pass --target with the one you intend - and tell "
+                    "the vendor, since the marking is wrong either way")
+    return (f"The sheet names {', '.join(sorted(seen))}, which is not a target "
+            "this tool has tables for. Pass --target with the part you mean, or "
+            "check the marking on the sheet")
+
+
 def describe_pages(sym: Symbol) -> str:
     """' on page 4 of 5' - empty for a single-sheet plot, where it says nothing."""
     if sym.page_count < 2:
