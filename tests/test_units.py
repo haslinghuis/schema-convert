@@ -447,6 +447,64 @@ class TimerRateClashTests(unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class BusNamedChipSelectTests(unittest.TestCase):
+    """
+    genconfig.identify_bus_cs. Fifteen boards name every chip select after its
+    bus - SPI1_NSS, SPI2_CS - so the bus is stated and the device is not. It is
+    read at the peripheral end from the chip's own pin names.
+
+    Proximity to a part marking was tried first and rejected: it put a select on
+    a baro 350pt away while a gyro sat at 328pt, and "nearest" has no honest
+    cutoff. A pin name says what the chip *is*.
+    """
+
+    def sheet(self, *texts, at=(500.0, 500.0)):
+        """The net at (100,100); the given words beside it."""
+        out = [Word("SPI1_NSS", 100, 100, 130, 103)]
+        for i, t in enumerate(texts):
+            out.append(Word(t, 110 + i, 110 + i, 140 + i, 113 + i))
+        out.append(Word("FAR_AWAY", at[0], at[1], at[0] + 20, at[1] + 3))
+        return out
+
+    def find(self, words, parts=None):
+        return genconfig.identify_bus_cs("SPI1_NSS", words, [], parts or {})
+
+    def test_two_distinctive_pin_names_identify_the_chip(self):
+        cat, idx, ev = self.find(self.sheet("SDIN", "CLKOUT", "GND"))
+        self.assertEqual(cat, "osd")
+
+    def test_a_flash_is_told_from_its_data_pins(self):
+        cat, _, _ = self.find(self.sheet("DI(DQ0)", "WP#(DQ2)", "HOLD#(DQ3)"))
+        self.assertEqual(cat, "flash")
+
+    def test_one_token_is_not_enough(self):
+        cat, _, ev = self.find(self.sheet("SDIN", "GND", "VCC"))
+        self.assertIsNone(cat)
+        self.assertIn("SDIN", ev)
+
+    def test_a_tie_decides_nothing(self):
+        cat, _, _ = self.find(self.sheet("SDIN", "CLKOUT", "FSYNC", "INT1"))
+        self.assertIsNone(cat)
+
+    def test_names_every_spi_chip_has_are_not_evidence(self):
+        # SCK, SDI, SDO and a bare CS are on all of them. A bare CS in the
+        # table was enough to make an OSD out of a gyro's chip select.
+        cat, _, ev = self.find(self.sheet("SCK", "SDI", "SDO", "CS"))
+        self.assertIsNone(cat)
+        self.assertEqual(ev, [])
+
+    def test_the_imu_index_is_taken_from_the_sheet(self):
+        cat, idx, _ = self.find(self.sheet("IMU2_INT", "FSYNC", "INT1"))
+        self.assertEqual((cat, idx), ("gyro", "2"))
+
+    def test_a_chip_drawn_far_away_is_not_evidence(self):
+        # The reach is the size of a symbol, not of the sheet.
+        words = [Word("SPI1_NSS", 100, 100, 130, 103),
+                 Word("SDIN", 900, 900, 930, 903),
+                 Word("CLKOUT", 905, 905, 935, 908)]
+        self.assertIsNone(self.find(words)[0])
+
+
 class TimerChannelCollisionTests(unittest.TestCase):
     """
     genconfig.timer_channel_collisions. A channel has one compare register, so
@@ -542,6 +600,7 @@ class VocabularyAgreementTests(unittest.TestCase):
         "TX1", "RX1", "UART3_TX", "USART6_RX", "TXD6", "RXD6",
         "I2C1_SCL", "I2C2_SDA", "IIC_SCL",
         "SPI2_SCK", "SPI1_MISO", "SCK3", "SPI_SDO2",
+        "SPI1_NSS", "SPI2_CS", "SPI4_SS",
         "GYRO_1_CS", "GYRO2-CS", "GYRO-EXTI1", "GYRO_INT1", "CLKIN",
         "GYRO_1_CLKIN", "MAX7456_SPI_CS", "AT7456_MOSI", "FLASH_CS",
         "BARO_CS", "SDCARD_SPI_CS", "SDIO_CMD",

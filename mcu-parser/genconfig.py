@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import json
+import math
 import re
 import sys
 from collections import defaultdict
@@ -94,6 +95,11 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # The index sits on either side, as it does for the UARTs: SPI3_SCK and SCK3
     # are the same bus.
     (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
+    # A chip select named after its bus rather than its device. The digit is the
+    # bus; which device it selects is read at the peripheral end, in
+    # identify_bus_cs(). 41 nets over 15 boards, and on those boards nothing was
+    # emitted for the devices at all.
+    (re.compile(r"^SPI(\d)[-_](?:NSS|SS|CS)(\d)?$"), "bus_cs"),
     (re.compile(r"^(SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)$"), "spi_bus"),
     # ...and a third position for the same index. SPI2_SCK, SCK2 and SPI_SCK2
     # are one bus written three ways; the last was read as nothing, which left
@@ -1221,6 +1227,77 @@ def read_vbat_divider(words: Sequence[Word], mcu_labels: Sequence[Word],
                   "of 110 is only right for a 100K/10K divider")
 
 
+# Pin names that belong to one kind of chip and to nothing else on these sheets.
+# Chosen for being distinctive: SCK, SDI, SDO and a bare CS are on every SPI part
+# and say nothing about which one it is - a bare CS in this table was enough to
+# make an OSD out of a gyro's chip select.
+DEVICE_PINS = {
+    "osd": re.compile(r"^(SDIN|SDOUT|CLKOUT|LOS|VSYNC|HSYNC|XFB|OSDBP)$", re.I),
+    "flash": re.compile(r"^(DQ[0-3]|.*\(DQ[0-3]\)|WP#?|/WP|HOLD#?|/HOLD|CS#)$", re.I),
+    "gyro": re.compile(r"^(FSYNC|INT[12]|AD0|IMU\d?(_INT)?|CLKIN|SENS_VDD)$", re.I),
+    "baro": re.compile(r"^(CSB|BARO(_INT)?)$", re.I),
+}
+IMU_INDEX_RE = re.compile(r"^IMU(\d)", re.I)
+# How far from the net's far end to read. A chip's own pin names are printed on
+# its symbol, so this is the size of a symbol, not of the sheet.
+DEVICE_REACH = 80.0
+
+
+def identify_bus_cs(net: str, words: Sequence[Word], mcu_labels: Sequence[Word],
+                    parts: Dict[str, List["PartHit"]]
+                    ) -> Tuple[Optional[str], Optional[str], List[str]]:
+    """
+    Which device a chip select named after its *bus* belongs to.
+
+    Fifteen boards name every select `SPI1_NSS`, `SPI2_CS`, `SPI4_SS`. The bus is
+    stated outright and the device is not, which is the exact inverse of
+    trace_cs_bus() above - and on those boards nothing was emitted at all: one
+    sheet has four buses, four detected devices, and not one `_CS_PIN` or
+    `_SPI_INSTANCE`, a config declaring drivers it cannot reach.
+
+    Read at the peripheral end, from the chip's own pin names. Proximity to a
+    detected part marking was tried first and is not good enough - it put a
+    select on a baro 350pt away while a gyro sat at 328pt, and "nearest" has no
+    honest cutoff. A pin name is evidence of *what the chip is*: SDIN/CLKOUT/LOS
+    is a MAX7456 and nothing else; DI(DQ0)/WP#/HOLD# is a SPI flash. Two
+    independent tokens are required and a tie decides nothing, so a far end with
+    no distinctive names beside it comes back undecided rather than guessed.
+
+    The gyro index comes free where the sheet numbers its IMUs: a board naming
+    IMU1_INT and IMU2_INT beside two selects says which is which.
+    """
+    mcu = {id(w) for w in mcu_labels}
+    far = [w for w in words if w.text.upper() == net.upper() and id(w) not in mcu]
+    score: Dict[str, set] = {k: set() for k in DEVICE_PINS}
+    seen_index: Dict[str, int] = {}
+    for w in far:
+        for v in words:
+            if v.page != w.page:
+                continue
+            if math.hypot(v.x0 - w.x0, v.y0 - w.y0) > DEVICE_REACH:
+                continue
+            for cat, rx in DEVICE_PINS.items():
+                if rx.match(v.text):
+                    score[cat].add(v.text.upper())
+            if (m := IMU_INDEX_RE.match(v.text)):
+                seen_index[m.group(1)] = seen_index.get(m.group(1), 0) + 1
+        # The part marking counts for one token - corroboration, not the case.
+        for cat, hits in parts.items():
+            cat = "gyro" if cat == "acc" else cat
+            if cat not in score:
+                continue
+            for h in hits:
+                if h.fitted and h.page == w.page and \
+                        math.hypot(h.x - w.x0, h.y - w.y0) <= DEVICE_REACH:
+                    score[cat].add(f"part:{h.marking}")
+    ranked = sorted(((len(v), k) for k, v in score.items()), reverse=True)
+    top, cat = ranked[0]
+    if top < 2 or (len(ranked) > 1 and top == ranked[1][0]):
+        return None, None, sorted(t for v in score.values() for t in v)
+    index = max(seen_index, key=seen_index.get) if seen_index and cat == "gyro" else None
+    return cat, index, sorted(score[cat])
+
+
 def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
                  buses: Dict[str, Dict[str, str]], pitch: float
                  ) -> Tuple[Optional[str], Optional[str]]:
@@ -2040,6 +2117,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     i2c_named: Dict[str, Dict[str, str]] = defaultdict(dict)
     sdio: Dict[str, str] = {}
     spi_groups: Dict[str, Dict[str, str]] = defaultdict(dict)
+    # (bus index, pin, net) for selects named after the bus - see identify_bus_cs
+    bus_cs: List[Tuple[str, str, str]] = []
     spi_named: Dict[str, Dict[str, str]] = defaultdict(dict)   # bus stated on the sheet
     simple: Dict[str, str] = {}
     pinios: List[Tuple[str, str]] = []
@@ -2099,6 +2178,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         elif role == "sdio":
             sdio[sub or "ck"] = l.pin
             sdio.setdefault("device", idx or "1")
+        elif role == "bus_cs":
+            bus_cs.append((idx or "1", l.pin, l.net))
         elif role.endswith("_cs"):
             spi_groups[role[:-3]]["cs"] = l.pin
         elif role == "pinio":
@@ -2344,6 +2425,33 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # drawn at the device rather than at the MCU. Hand the traced device that
     # bus's data pins and let assign_spi_buses name the instance from the pins,
     # exactly as it does for a device whose own nets were labelled.
+    # A select named after its bus is the inverse: the bus is stated and the
+    # device is not, so the device is read at the peripheral end and then handed
+    # that bus's data pins, exactly as the traced case below is.
+    for bus_index, pin, net in bus_cs:
+        cat, index, evidence = identify_bus_cs(net, words, labels, parts)
+        bus = f"SPI{bus_index}"
+        if not cat:
+            cfg.warnings.append(
+                f"{net} on {pin} is a chip select on {bus}, but which device it "
+                "selects is not readable at the far end of the net"
+                + (f" (only {', '.join(evidence)} nearby)" if evidence else
+                   " - nothing identifying is drawn there")
+                + f". Add the device's _CS_PIN and _SPI_INSTANCE by hand, or "
+                  f"--set <DEVICE>_CS={pin}")
+            continue
+        owner = f"{cat}2" if cat == "gyro" and index == "2" else cat
+        if spi_groups.get(owner, {}).get("cs"):
+            cfg.notes.append(f"{net} names a {owner} chip select on {bus}, but "
+                             f"{owner} already has one - keeping the first")
+            continue
+        spi_groups[owner]["cs"] = pin
+        for role, p in spi_named.get(bus, {}).items():
+            spi_groups[owner].setdefault(role, p)
+        cfg.notes.append(
+            f"{net} on {pin} selects the {owner} on {bus}: the far end of that "
+            f"net is drawn beside {', '.join(evidence)}")
+
     for owner, pins in spi_groups.items():
         if set(pins) != {"cs"}:
             continue

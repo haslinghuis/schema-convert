@@ -43,7 +43,7 @@ is in each section; this is the index.
 | | | boards |
 |---|---|---|
 | §3.3 | Chip-select-only devices — the device is known, the bus is not | 33 on 19 |
-| §3.3b | The inverse: 41 selects named after the bus, device unknown. Investigated; needs the peripheral's pin names, not marking proximity | 41 on 15 |
+| §3.3b | Bus-named selects: 24 of 41 now identified from the peripheral's pin names; 17 have nothing identifying drawn at the far end | 17 left |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 19 buses on 14 |
@@ -1191,7 +1191,7 @@ the net is checkable, which is why this has not surfaced as a wrong pin. Fixing
 it properly means matching labels to rows as an assignment problem rather than
 independently, which is not worth it for two boards.
 
-### 3.3b Chip selects named after the bus, not the device — INVESTIGATED, NOT SHIPPED
+### 3.3b Chip selects named after the bus, not the device — FIXED
 
 The largest single block left in §3.3, and the measurements are worth keeping
 because the obvious implementation does not survive them.
@@ -1202,7 +1202,7 @@ device* the select belongs to. This is the exact inverse of the CS-only case
 above, where the device is known and the bus has to be traced - and the two are
 complementary, so the same boards often have both.
 
-The cost is high and concentrated. `the four-bus H7` is the clean example: four SPI
+The cost is high and concentrated. The clearest example has four SPI
 buses fully emitted, four devices detected (ICM42688P, DPS310, W25N01G,
 MAX7456), and **not one `_CS_PIN` or `_SPI_INSTANCE`** - the config declares
 drivers it has no way to reach. Roughly eight defines per board.
@@ -1246,8 +1246,37 @@ the same shape as `NET_VOCAB` - and it identifies the chip directly instead of
 inferring it from how close a marking happens to be drawn. It also degrades
 honestly: a far end with none of those names beside it is simply undecided.
 
-Do that before touching this again, and validate on `the four-bus H7`, where all four
-answers are independently obvious from the sheet.
+#### Done, and the vocabulary was the whole difference
+
+`identify_bus_cs()` reads the far end for the chip's own pin names. Two
+independent tokens are required and a tie decides nothing, so a net with nothing
+distinctive beside it comes back **undecided** and says so, naming what it did
+find. The part marking still counts, but as one token among several rather than
+as the case.
+
+The reach is 80pt - the size of a symbol, not of the sheet - which is what the
+proximity attempt lacked and why it reached a chip 1717pt away.
+
+| | |
+|---|---|
+| identified | 24 of 41 |
+| undecided, and honest about it | 17 |
+| misattributed | 0 |
+| corpus | **+59 defines on 12 boards, none lost**; one more board to 100% |
+
+The validation board comes out 4/4 with the gyro indices right -
+`SPI1`→gyro 1, `SPI2`→gyro 2, `SPI3`→OSD, `SPI4`→flash - and now emits the four
+`_CS_PIN`/`_SPI_INSTANCE` pairs it had none of, plus `GYRO_2_EXTI_PIN` once the
+second IMU exists. A second sheet from the same vendor, with a different
+arrangement, resolves differently and correctly - which is the check that it is
+reading the sheet and not the family.
+
+The gyro index came free: a board that labels `IMU1_INT` and `IMU2_INT` beside
+two selects has said which is which.
+
+Still open here: 17 nets whose far end carries nothing identifying, and the
+`SPIn_CS` boards whose select appears only once on the sheet - there is no far
+end to read. Those now name the pin and suggest `--set`, which is §4.7's job.
 
 ### 3.4 Only STM32 families are harvested — 14 boards blocked
 
