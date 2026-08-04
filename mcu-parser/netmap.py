@@ -1128,10 +1128,39 @@ def _owner(sym: Symbol, w: Word) -> Optional[Tuple[SymbolPart, str]]:
     return (best[0], best[1]) if best else None
 
 
-def _pair(sym: Symbol, labels: Sequence[Word], offset: float
+# ADC1_8, ADC12_IN8, ADC3_INP0 - a peripheral instance and a channel number.
+OWN_ADC_RE = re.compile(r"^ADC(\d+)[-_](?:IN|INP)?(\d{1,2})$")
+
+
+def _restates_the_pin(text: str, row: PinRow, caps: dict) -> bool:
+    """
+    Is this label only naming what the pin already is?
+
+    Sheets print a pin's own peripheral channel beside it - `ADC1_8` next to
+    PC5, which the firmware tables give as ADC1/ADC2 channel 8. That is an
+    annotation, not a net, but it is drawn nearer the symbol than the net label
+    behind it, so nearest-wins reads it as the net and the real one loses the
+    row. It cost a board its ADC_RSSI_PIN.
+
+    Checked against the capability map rather than by shape, so a net that
+    merely looks like this - a board is free to name a net ADC1_8 and wire it
+    somewhere else entirely - is only demoted where the pin really does have
+    that exact device and channel.
+    """
+    m = OWN_ADC_RE.match(text.upper())
+    if not m:
+        return False
+    entry = (caps.get("adc") or {}).get(row.pin)
+    if not entry:
+        return False
+    return (m.group(2) == str(entry.get("channel"))
+            and any(d in str(entry.get("devices", "")) for d in m.group(1)))
+
+
+def _pair(sym: Symbol, labels: Sequence[Word], offset: float, caps: dict
           ) -> Tuple[List[Tuple[Word, PinRow]], List[Word]]:
     pairs, orphans = [], []
-    claimed: Dict[int, Tuple[float, Tuple[Word, PinRow]]] = {}
+    claimed: Dict[int, Tuple[tuple, Tuple[Word, PinRow]]] = {}
     for w in labels:
         owner = _owner(sym, w)
         if owner is None:
@@ -1151,17 +1180,15 @@ def _pair(sym: Symbol, labels: Sequence[Word], offset: float
         # came first put 3V3_MCU on a gyro interrupt and on an OSD chip select.
         gap = {"L": part.left_edge - w.x1, "R": w.x0 - part.right_edge,
                "T": part.top_edge - w.y1, "B": w.y0 - part.bottom_edge}[side]
-        # Distance decides, alignment breaks the tie. Distance to the whole
-        # point, because below that it is extraction noise rather than
+        # A label that only restates the pin's own capability loses to any real
+        # net, however close it is drawn - that is not a distance question.
+        # Then distance decides, and alignment breaks the tie. Distance to the
+        # whole point, because below that it is extraction noise rather than
         # draughtsmanship: raw floats let a stray "N" take a row from the
         # I2C1_SCL beside it by a thousandth of a point, on a row it was not
         # even level with.
-        #
-        # Alignment first was tried, and is better on the one sheet that prints
-        # a pin's own ADC channel nearer than the net - but it costs three F7
-        # boards a whole SPI3 bus, so it loses on the corpus 16 defines to 6.
-        # See ROADMAP 1.14 for the case this ordering gets wrong.
-        rank = (round(gap), abs(best.pos - at))
+        rank = (_restates_the_pin(w.text, best, caps),
+                round(gap), abs(best.pos - at))
         prev = claimed.get(id(best))
         loser = w if prev is not None and rank >= prev[0] else \
             (prev[1][0] if prev is not None else None)
@@ -1245,7 +1272,7 @@ def _resolve_axis(sym: Symbol, labels: Sequence[Word], caps: dict,
     best: Optional[Result] = None
     best_key: Optional[Tuple] = None
     for off in candidates:
-        pairs, orphans = _pair(sym, labels, off)
+        pairs, orphans = _pair(sym, labels, off, caps)
         sat = chk = 0
         onpower = 0
         links: List[Link] = []

@@ -382,6 +382,52 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
+class OwnCapabilityLabelTests(unittest.TestCase):
+    """
+    netmap._restates_the_pin. Sheets print a pin's own ADC channel beside it,
+    nearer the symbol than the net label behind it, so the nearest-wins rule
+    read the annotation as the net and the real one lost the row - one board's
+    ADC_RSSI_PIN. It is settled against the capability map, not by shape: a
+    board is free to *name* a net ADC1_8 and wire it somewhere else.
+    """
+
+    caps = {"adc": {"PC5": {"devices": "12", "channel": "8"},
+                    "PC2": {"devices": "3", "channel": "0"}}}
+
+    def row(self, pin):
+        return netmap.PinRow(pin, 0.0, "R", [], True)
+
+    def test_the_pins_own_channel_is_an_annotation(self):
+        for text in ("ADC1_8", "ADC2_8", "ADC12_IN8", "adc1_inp8"):
+            with self.subTest(text=text):
+                self.assertTrue(
+                    netmap._restates_the_pin(text, self.row("PC5"), self.caps))
+
+    def test_another_pins_channel_is_not(self):
+        # Same spelling, wrong pin: PC2 is ADC3 channel 0, so on that row the
+        # label is saying something the pin is not, and it is a net name.
+        self.assertFalse(
+            netmap._restates_the_pin("ADC1_8", self.row("PC2"), self.caps))
+
+    def test_the_wrong_channel_on_the_right_device_is_not(self):
+        self.assertFalse(
+            netmap._restates_the_pin("ADC1_7", self.row("PC5"), self.caps))
+
+    def test_the_wrong_device_on_the_right_channel_is_not(self):
+        self.assertFalse(
+            netmap._restates_the_pin("ADC3_8", self.row("PC5"), self.caps))
+
+    def test_a_pin_with_no_adc_entry(self):
+        self.assertFalse(
+            netmap._restates_the_pin("ADC1_8", self.row("PE4"), self.caps))
+
+    def test_ordinary_net_names_are_untouched(self):
+        for text in ("RSSI", "ADC_VBAT", "ADC_CURR", "ADC_RSSI", "MOTOR1"):
+            with self.subTest(text=text):
+                self.assertFalse(
+                    netmap._restates_the_pin(text, self.row("PC5"), self.caps))
+
+
 class PinSupportTests(unittest.TestCase):
     """netmap.pin_supports: the firmware's answer for a pin."""
 

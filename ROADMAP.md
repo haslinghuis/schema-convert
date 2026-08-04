@@ -46,10 +46,10 @@ is in each section; this is the index.
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
-| §1.14 | A label naming the pin's own capability outranks the net behind it | 1 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
+| §3.5 | Two sheets name a part that does not exist (`STM32F743`); the harness then forces the wrong family | 2 |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -503,14 +503,25 @@ roles (`FLASH_CS_PIN` *and* `SPI3_SDO_PIN` on one pin; `GYRO_1_CS_PIN` *and*
 
 On the board itself, exact agreement with the vendor went **54 → 66 of 81**.
 
-**The case still wrong.** One sheet prints a pin's own ADC channel (`ADC1_8`)
-between the symbol and the wire, nearer than the net; `RSSI` is behind it and
-now loses the row. Ranking by alignment first fixes that board — the annotation
-is 2.5pt off the row and `RSSI` is 0.3pt off it — but costs three F7 boards a
-whole SPI3 bus, 16 defines against 6. So distance-first stays, and one board
-loses `ADC_RSSI_PIN` and `ADC1_DMA_OPT`. The real discriminator is that a label
-naming the pin's own capability is not a net name at all, which is a different
-fix from ranking.
+**The case that was still wrong - now FIXED, and not by ranking.** One sheet
+prints a pin's own ADC channel (`ADC1_8`) between the symbol and the wire,
+nearer than the net; `RSSI` sat behind it and lost the row. Two orderings were
+measured and both were wrong: alignment-first fixes that board and costs three
+F7 boards a whole SPI3 bus, 16 defines against 6.
+
+The discriminator is not distance at all. `ADC1_8` says "ADC1, channel 8", and
+the firmware tables give `PC5` as `devices: '12', channel: '8'` - the label only
+restates what the pin already is, so it is an annotation and cannot be the net.
+`_restates_the_pin` checks exactly that against the capability map and demotes
+such a label below any real net, whatever the distances are. Checked against the
+map rather than by shape, because a board is free to name a net `ADC1_8` and
+wire it somewhere else entirely.
+
+`ADC_RSSI_PIN` and `ADC1_DMA_OPT` return on that board - it had no ADC defines
+at all without this - and **0 of 5217 defines move** across the other 104.
+
+That fix came out of §3.7, which set out to settle this with the drawn wires and
+could not: see there for why, and for the vendor typo the attempt uncovered.
 
 ### 1.15 Two more spellings, from the same board
 
@@ -1145,10 +1156,29 @@ SPI3 pins reaches `SPI3_SCK` and `SPI3_SDO` and stops. What actually answers
 "which bus" on this board is the peripheral-end labels being drawn together —
 which is what `trace_cs_bus()` already reads.
 
+**Landing it against §1.14's `ADC1_8` case was then tried, and it failed too** -
+which is the whole value of having run it. On that board the MCU symbol has no
+drawn stub at its edge at all: the nearest segment is 70pt away, so "which
+label is on the pin's net" has no answer. The fallback test - a net label is
+drawn on its wire, an annotation is not - does not separate them either:
+`ADC1_8` is 1.95pt from a wire and `RSSI` is 2.03pt. Both are on wires.
+
+What did settle it needed no geometry: the firmware tables give `PC5` as
+`devices: '12', channel: '8'`, and `ADC1_8` says exactly that, so the label
+restates the pin and cannot be its net. See §1.14. **Two failed geometric
+attempts pointed straight at a non-geometric answer**, which is the argument for
+running the experiment rather than reasoning about it.
+
+The attempt also turned up a defect in the measuring instrument. That board is
+converted by the corpus harness as an **STM32F722**. Its sheet reads
+`STM32F743VIH6` - a part that does not exist, a vendor typo for STM32**H**743 -
+so detection fails and the harness's family guess forces F7. Every corpus number
+recorded for it, including the "lost ADC_RSSI_PIN" that started this, was
+measured against the wrong MCU. Two of the 104 readable boards are forced this
+way; both are that vendor's, both the same typo.
+
 So: a corroborating signal for *local* structure, not a replacement for the
-label pipeline, and not a route to a netlist on sheets drawn this way. The
-bounded use worth landing is deciding which of two labels level with a pin is
-on its net. Two prototype details to carry over: the text-to-net probe radius
+label pipeline, and not a route to a netlist on sheets drawn this way. Two prototype details to carry over: the text-to-net probe radius
 must be smaller than the row pitch (2.88pt on this board, and a 6pt probe put
 `SWCLK` on `PA15`), and junction dots are not yet told from plain crossings —
 the endpoint-on-segment rule does not merge crossings, but it will also miss a
