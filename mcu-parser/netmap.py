@@ -62,6 +62,18 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # it, on a board whose symbol spells its pins out in full.
 PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:-[A-Z0-9_]+)*(?:/(.*))?$")
 
+# The same name written the other way round: function first, pin last. One
+# vendor's symbol does this down its right-hand column while the left column
+# reads pin-first, so half its pins were invisible:
+#
+#   USART3_RX/PD9   SPI2_SCK/PB13   TIM3_CH3(M7)/PB0   TIM4_CH3(M11)PD14
+#
+# The separator is optional because one of those has none, and the leading part
+# is taken as the AF list. Used only where a pin name is being *recognised* -
+# not where PIN_RE excludes a word from being a net label, since a label that
+# merely ends in something pin-shaped is still a label.
+PIN_TAIL_RE = re.compile(r"^(?P<afs>.+?)[/_-]?(?P<pin>P[A-K]\d{1,2})$")
+
 # Supply and system pins. They are not routable, but they occupy rows in the
 # symbol, so knowing where they are is what lets the tool say "this net landed on
 # VCAP" instead of quietly discarding it.
@@ -368,7 +380,8 @@ def assemble_pin_names(words: Sequence[Word], gap: float = 2.5) -> List[Word]:
     """
     out: List[Word] = []
     for w in words:
-        if not (PIN_RE.match(w.text) or POWER_PIN_RE.match(w.text)):
+        if not (PIN_RE.match(w.text) or POWER_PIN_RE.match(w.text)
+                or PIN_TAIL_RE.match(w.text)):
             continue
         text, x1 = w.text, w.x1
         # Absorb words butting up against the right-hand end, repeatedly, so a
@@ -414,6 +427,11 @@ def _tag_pins(words: Sequence[Word]) -> List[Tagged]:
         p = POWER_PIN_RE.match(w.text)
         if p:
             tagged.append((w, p.group(1).upper(), [], False))
+            continue
+        m = PIN_TAIL_RE.match(w.text)
+        if m:
+            afs = [a for a in m.group("afs").split("/") if a]
+            tagged.append((w, m.group("pin"), afs, True))
     return tagged
 
 
