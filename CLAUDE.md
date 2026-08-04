@@ -152,12 +152,21 @@ So the audit's job here is done: it found three real defects, they merged, and
 what is left is coverage nobody can reach. Re-run it after the tables move, not
 on a schedule.
 
-**Seeding needs the right tree.** `seed_firmware.py` picks the newest clone on
-`master`, and the one under `../betaflight/master/` tracks a *fork* whose master
-lags `betaflight/betaflight`. `git pull` there says "already up to date" while
-being eight commits behind upstream, which is how a reseed can silently produce
-nothing. Check `git log betaflight/betaflight master` against the tree before
-seeding, or clone upstream fresh and pass `--firmware`.
+**Check the tree is on upstream before seeding.** `seed_firmware.py` picks the
+newest clone on `master`, and those clones track the *fork*, not
+`betaflight/betaflight`. When the fork is behind, `git pull` reports "already up
+to date" while sitting several commits short of upstream — so a reseed appears
+to succeed and silently produces the older tables. It has happened once, eight
+commits' worth, including the three pin-table fixes.
+
+Both are in sync as of `c18421eb5`, and `tests/check_seed_drift.py --firmware
+<tree>` answers the question in seconds. Run it before trusting a reseed; if the
+fork has drifted again, `gh repo sync haslinghuis/betaflight --branch master`
+then `git pull --ff-only`.
+
+Only the tree under `../betaflight/master/` is safe to fast-forward. The others
+carry uncommitted work on feature branches — `test-h5-i2c3` had ten dirty files
+throughout this — and must not be touched.
 
 ---
 
