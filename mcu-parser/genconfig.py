@@ -770,6 +770,33 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
     return out
 
 
+def timer_channel_collisions(picks: Sequence["TimerPick"]) -> List[str]:
+    """
+    Two functions driven from one timer *channel*.
+
+    Worse than sharing a unit, and not the same check: a channel has one compare
+    register, so both pins emit the same waveform. Two motors on one channel
+    always spin together; a motor and an LED strip put the motor's signal on the
+    data line.
+
+    Found by counting the split for ROADMAP 4.8 part 2, and the rate-class
+    report cannot see the worst of it - two motors are one class, so a board
+    driving MOTOR4 and MOTOR6 from TIM2_CH3 passed that check cleanly.
+    """
+    by: Dict[str, List[str]] = defaultdict(list)
+    for p in picks:
+        by[p.channel].append(p.label)
+    out = []
+    for channel, labels in sorted(by.items()):
+        if len(labels) < 2:
+            continue
+        out.append(
+            f"{channel} drives {' and '.join(sorted(labels))}: one timer channel "
+            "has one compare register, so both pins carry the same waveform. "
+            "Give one of them another channel, or another pin")
+    return out
+
+
 def read_timer_hints(words: Sequence[Word]) -> Dict[str, str]:
     """
     Pick up annotations the schematic author wrote, e.g. the words
@@ -2598,6 +2625,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         for p in picks:
             if p.source == "inferred":
                 cfg.notes.append(f"{p.label} -> {p.channel} inferred (no annotation)")
+        for line in timer_channel_collisions(picks):
+            cfg.warnings.append(line)
         for line in timer_rate_clashes(picks, caps):
             cfg.warnings.append(line)
 

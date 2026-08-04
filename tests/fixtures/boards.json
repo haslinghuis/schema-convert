@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "1d5531eef"
+  "tool_rev": "bab218997"
  },
  "boards": [
   {
@@ -60,6 +60,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
@@ -94,6 +95,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
@@ -128,6 +130,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [
      "TIM3: LED strip+gyro CLKIN"
     ],
@@ -164,6 +167,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [
      "unclassified",
@@ -202,6 +206,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
@@ -236,6 +241,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
@@ -270,6 +276,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
@@ -304,6 +311,7 @@
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
+    "timer_channel_collisions": [],
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [
      "unclassified"

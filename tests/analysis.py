@@ -227,6 +227,26 @@ def timer_occurrence_errors(run: BoardRun) -> List[str]:
     return out
 
 
+def timer_channel_collisions(run: BoardRun) -> List[str]:
+    """
+    Two TIMER_PIN_MAP rows resolving to one timer channel.
+
+    Stronger than the rate-class check and not implied by it: a channel has one
+    compare register, so both pins carry the same waveform whatever their
+    classes. Two motors on one channel is invisible to the rate check and always
+    wrong.
+    """
+    d = defines(run.text)
+    by: Dict[str, List[str]] = {}
+    for _, label, occurrence, _ in timer_rows(run.text):
+        pin = d.get(label)
+        channels = run.caps["timers"].get(pin) or [] if pin else []
+        if 1 <= occurrence <= len(channels):
+            by.setdefault(channels[occurrence - 1], []).append(label)
+    return sorted(f"{ch}: {'+'.join(sorted(labels))}"
+                  for ch, labels in by.items() if len(labels) > 1)
+
+
 def timer_rate_class_clashes(run: BoardRun) -> List[str]:
     """
     TIM units carrying two functions that want different rates of them.
@@ -383,6 +403,7 @@ DEFECT_CHECKS = {
     # the function to, and the hazard is latent under DShot bitbang. What must
     # not happen is a new one appearing unnoticed. ROADMAP 4.8.
     "timer_rate_class_clashes": timer_rate_class_clashes,
+    "timer_channel_collisions": timer_channel_collisions,
 }
 
 # Invariants that hold on every board today. These are asserted empty outright -

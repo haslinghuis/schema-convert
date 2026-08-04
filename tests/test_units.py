@@ -447,6 +447,37 @@ class TimerRateClashTests(unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class TimerChannelCollisionTests(unittest.TestCase):
+    """
+    genconfig.timer_channel_collisions. A channel has one compare register, so
+    two pins on it carry the same waveform. Not implied by the rate-class check:
+    two motors are one class and that check sees nothing.
+    """
+
+    def pick(self, label, pin, channel):
+        return genconfig.TimerPick(pin, label, 1, channel, 0, "inferred")
+
+    def test_two_motors_on_one_channel_are_caught(self):
+        out = genconfig.timer_channel_collisions([
+            self.pick("MOTOR4_PIN", "PA2", "TIM2_CH3"),
+            self.pick("MOTOR6_PIN", "PB10", "TIM2_CH3")])
+        self.assertEqual(len(out), 1)
+        self.assertIn("TIM2_CH3", out[0])
+        self.assertIn("MOTOR4_PIN", out[0])
+
+    def test_the_rate_check_cannot_see_that_case(self):
+        picks = [self.pick("MOTOR4_PIN", "PA2", "TIM2_CH3"),
+                 self.pick("MOTOR6_PIN", "PB10", "TIM2_CH3")]
+        self.assertEqual(genconfig.timer_rate_clashes(picks, {"family": "STM32H7"}), [])
+        self.assertNotEqual(genconfig.timer_channel_collisions(picks), [])
+
+    def test_different_channels_of_one_timer_are_fine(self):
+        out = genconfig.timer_channel_collisions([
+            self.pick("MOTOR1_PIN", "PA0", "TIM2_CH1"),
+            self.pick("MOTOR2_PIN", "PA1", "TIM2_CH2")])
+        self.assertEqual(out, [])
+
+
 class TargetMissTests(unittest.TestCase):
     """
     netmap.describe_target_miss: the sheet names a part, and it is not one.
