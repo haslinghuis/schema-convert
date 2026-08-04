@@ -223,6 +223,11 @@ mod commands {
         target: Option<String>,
         page: Option<u32>,
         hse_mhz: Option<u32>,
+        // Functions the sheet did not yield, named as the sheet would name
+        // them: {"MOTOR6": "PE11"}. The pipeline validates each against the
+        // firmware tables and refuses the ones it cannot honour, so nothing
+        // here needs to know what a pin is.
+        overrides: Option<std::collections::BTreeMap<String, String>>,
     ) -> Result<serde_json::Value, String> {
         if !Path::new(&pdf).is_file() {
             return Err(format!("No such file: {pdf}"));
@@ -259,6 +264,14 @@ mod commands {
         }
         if let Some(h) = hse_mhz {
             cmd.arg("--hse-mhz").arg(h.to_string());
+        }
+        // BTreeMap so the argument order is stable: the same inputs must give
+        // the same command, or two identical runs could differ.
+        for (name, pin) in overrides.unwrap_or_default() {
+            let pin = pin.trim();
+            if !pin.is_empty() {
+                cmd.arg("--set").arg(format!("{}={}", name.trim(), pin));
+            }
         }
 
         let out = cmd

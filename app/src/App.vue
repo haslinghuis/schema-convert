@@ -28,10 +28,52 @@ const report = ref<Report | null>(null);
 const tab = ref<"report" | "config">("report");
 const copied = ref(false);
 
+// Functions the sheet did not yield, as function -> pin the operator supplies.
+// Kept across runs so a value survives the re-run that applies it.
+const overrides = ref<Record<string, string>>({});
+const extraName = ref("");
+
 const filename = computed(() => pdf.value?.split(/[/\\]/).pop() ?? "");
 const canRun = computed(
   () => !!pdf.value && !!board.value.trim() && !!manufacturer.value.trim() && !busy.value,
 );
+
+// Everything offered a box: what the sheet did not produce, plus anything
+// already supplied, plus anything typed in by hand. A function that was absent
+// and has now been placed must stay listed - it is no longer in `absent`,
+// because supplying it is what made it appear.
+const placeable = computed(() => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const f of [...(report.value?.meta.absent ?? []), ...Object.keys(overrides.value)]) {
+    if (!seen.has(f)) {
+      seen.add(f);
+      out.push(f);
+    }
+  }
+  return out;
+});
+
+const PIN = /^P[A-K]\d{1,2}$/i;
+const badPin = (v: string) => !!v.trim() && !PIN.test(v.trim());
+
+// The pipeline refuses one value at a time and names it: "--set UART3_TX=PA5:
+// PA5 cannot do uart_tx3 ...". Show that against the field it is about rather
+// than only in the general error box.
+const rejected = computed(() => {
+  const m = /--set\s+([A-Za-z0-9_]+)=/.exec(error.value ?? "");
+  return m ? m[1].toUpperCase() : null;
+});
+
+function addFunction() {
+  const name = extraName.value.trim().toUpperCase().replace(/_PIN$/, "");
+  if (name && !(name in overrides.value)) overrides.value[name] = "";
+  extraName.value = "";
+}
+
+function forget(name: string) {
+  delete overrides.value[name];
+}
 
 onMounted(async () => {
   env.value = await invoke<Environment>("environment");
@@ -60,6 +102,9 @@ async function run() {
       board: board.value.trim().toUpperCase(),
       manufacturer: manufacturer.value.trim().toUpperCase(),
       target: target.value.trim() || null,
+      overrides: Object.fromEntries(
+        Object.entries(overrides.value).filter(([, v]) => v.trim()),
+      ),
     });
     tab.value = "report";
   } catch (e) {
@@ -202,6 +247,67 @@ async function copyConfig() {
         >
           {{ error }}
         </p>
+
+        <!-- What the sheet did not give. Some boards genuinely lack these; the
+             ones that do not are a page that was never supplied, or a drawing
+             convention the reader cannot follow. Either way the only way
+             forward is to be told, so the list that reports the gap is also
+             where it gets filled in. -->
+        <section
+          v-if="report && placeable.length"
+          class="min-h-0 flex-1 overflow-y-auto rounded-xl border border-neutral-800 p-3"
+        >
+          <h2 class="mb-1 text-xs font-medium text-neutral-300">Not found on this sheet</h2>
+          <p class="mb-3 text-xs leading-relaxed text-neutral-600">
+            Give a pin and generate again. Each one is checked against the
+            firmware tables and refused if it cannot do the job.
+          </p>
+
+          <div v-for="fn in placeable" :key="fn" class="mb-2">
+            <div class="flex items-center gap-2">
+              <label class="mono flex-1 truncate text-xs text-neutral-400" :for="`fn-${fn}`">
+                {{ fn }}
+              </label>
+              <input
+                :id="`fn-${fn}`"
+                v-model="overrides[fn]"
+                placeholder="PA5"
+                class="mono w-24 rounded border bg-neutral-900 px-2 py-1 text-xs uppercase outline-none"
+                :class="
+                  rejected === fn || badPin(overrides[fn] ?? '')
+                    ? 'border-red-800 focus:border-red-600'
+                    : 'border-neutral-700 focus:border-bf-500'
+                "
+                @keyup.enter="run"
+              />
+              <button
+                class="px-1 text-xs text-neutral-600 hover:text-neutral-300"
+                title="Remove"
+                @click="forget(fn)"
+              >
+                ✕
+              </button>
+            </div>
+            <p v-if="report.meta.placed[fn]" class="mono mt-0.5 text-xs text-bf-400">
+              placed by hand — not read from the sheet
+            </p>
+          </div>
+
+          <div class="mt-3 flex items-center gap-2 border-t border-neutral-800 pt-3">
+            <input
+              v-model="extraName"
+              placeholder="another function, e.g. MOTOR6"
+              class="mono min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs uppercase outline-none focus:border-bf-500"
+              @keyup.enter="addFunction"
+            />
+            <button
+              class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500"
+              @click="addFunction"
+            >
+              Add
+            </button>
+          </div>
+        </section>
       </section>
 
       <!-- Output -->

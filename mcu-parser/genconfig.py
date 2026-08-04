@@ -1758,17 +1758,21 @@ def firmware_provenance(fw: dict, trusted: Sequence[str]) -> List[str]:
     return out
 
 
-# The defines worth listing as "not found" when they are absent. Deliberately
-# not every define Betaflight knows: a list that cries about SDCARD_DETECT_PIN
-# on a board with no card slot teaches the reader to skim past it. These are the
-# ones whose absence is nearly always a sheet the tool could not follow rather
-# than a board that lacks the feature.
-EXPECTED_DEFINES = (
-    "MOTOR1_PIN", "MOTOR2_PIN", "MOTOR3_PIN", "MOTOR4_PIN",
-    "LED0_PIN", "BEEPER_PIN", "LED_STRIP_PIN",
-    "UART1_TX_PIN", "UART1_RX_PIN",
-    "GYRO_1_CS_PIN", "GYRO_1_EXTI_PIN",
-    "ADC_VBAT_PIN", "ADC_CURR_PIN",
+# The functions worth listing as "not found" when they are absent. Named as
+# functions rather than as defines - MOTOR6, not MOTOR6_PIN - because that is
+# what the reader is being asked about; the _PIN belongs to config.h, and the
+# emitter adds it.
+#
+# Deliberately not every function Betaflight knows: a list that cries about the
+# SD-card detect on a board with no card slot teaches the reader to skim past
+# it. These are the ones whose absence is nearly always a sheet the tool could
+# not follow rather than a board that lacks the feature.
+EXPECTED_FUNCTIONS = (
+    "MOTOR1", "MOTOR2", "MOTOR3", "MOTOR4",
+    "LED0", "BEEPER", "LED_STRIP",
+    "UART1_TX", "UART1_RX",
+    "GYRO_1_CS", "GYRO_1_EXTI",
+    "ADC_VBAT", "ADC_CURR",
 )
 
 
@@ -1776,16 +1780,15 @@ def _hand_placed(overrides: Dict[str, str], caps: dict) -> Tuple[List[Link], set
     """
     Turn `--set NAME=PIN` into the same thing the sheet would have given.
 
-    A define name is the net name the classifier already understands with _PIN
-    on the end - MOTOR6_PIN is MOTOR6, UART3_TX_PIN is UART3_TX, GYRO_1_EXTI_PIN
-    is GYRO_1_EXTI. So an override is routed through `classify` rather than
+    A function is named as the sheet would name it - MOTOR6, UART3_TX,
+    GYRO_1_EXTI - so an override is routed through `classify` rather than
     through a second table of its own, which means it supports every spelling
-    the reader does and cannot drift away from it.
+    the reader does and cannot drift away from it. A trailing _PIN is accepted
+    and dropped, since that is how the same thing is spelled in config.h and it
+    is an easy way to type it.
 
     Validated against the firmware map exactly as a read net is. Being told a
-    pin by hand is not a reason to emit one the build cannot honour - if the
-    tables disagree, the answer is a firmware PR, not a config that will not
-    work for months (see CLAUDE.md 1).
+    pin by hand is not a reason to emit one the build cannot honour.
     """
     out: List[Link] = []
     keys = set()
@@ -1799,17 +1802,18 @@ def _hand_placed(overrides: Dict[str, str], caps: dict) -> Tuple[List[Link], set
         role, idx, sub = classify(net)
         if role is None or role == "ignore":
             raise SystemExit(
-                f"--set {raw_name}: not a define this tool knows how to place. "
-                "Use the config.h name, e.g. MOTOR6_PIN, UART3_TX_PIN, "
-                "GYRO_1_EXTI_PIN, SPI2_SCK_PIN")
+                f"--set {raw_name}: not a function this tool knows how to "
+                "place. Name it as the sheet would, e.g. MOTOR6, UART3_TX, "
+                "GYRO_1_EXTI, SPI2_SCK")
         req = netmap.net_requirement(net)
         if req and not netmap.pin_supports(caps, pin, req[0], req[1]):
+            # Stated flatly. Every STM32 family the seeder harvests has been
+            # audited against its ST datasheet by afaudit.py, so the tables are
+            # not the doubtful party here: the pin is wrong.
             raise SystemExit(
-                f"--set {raw_name}={raw_pin}: the firmware tables say {pin} "
-                f"cannot do {req[0]}{req[1] or ''} on this MCU, so the build "
-                "would not honour it. Check the pin, or - if the silicon does "
-                "support it - fix the firmware table first; afaudit.py finds "
-                "exactly this class of error")
+                f"--set {raw_name}={raw_pin}: {pin} cannot do "
+                f"{req[0]}{req[1] or ''} on this MCU. The pin tables are "
+                "audited against ST's datasheets, so check the pin")
         out.append(Link(net, pin, "", bool(req), True, [], True, None))
         keys.add((role, idx, sub))
     return out, keys
@@ -1928,7 +1932,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
 
     hand, hand_keys = _hand_placed(overrides or {}, caps)
     for l in hand:
-        cfg.notes.append(f"{l.net}_PIN = {l.pin} supplied by hand, not read "
+        cfg.notes.append(f"{l.net} = {l.pin} supplied by hand, not read "
                          "from the sheet")
     for l in list(res.links) + hand:
         # Anything the firmware map rejected, or that landed on a supply pin, is
@@ -2698,11 +2702,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # genuinely do not carry these nets - they are on a page that was not
     # supplied, or drawn in a way nothing here follows - and then the only way
     # forward is to be told, so the line that reports the gap also says how.
-    absent = [d for d in EXPECTED_DEFINES if d not in cfg.emitted]
+    absent = [f for f in EXPECTED_FUNCTIONS if f"{f}_PIN" not in cfg.emitted]
     if absent:
         cfg.warnings.append(
             f"not produced from this sheet: {', '.join(absent)}. If the board "
-            "has them, supply each with --set NAME=PIN (e.g. --set "
+            f"has them, supply each with --set NAME=PIN (e.g. --set "
             f"{absent[0]}=PA5); every value is checked against the firmware "
             "tables before it is emitted")
     aligns = "GYRO_1_ALIGN and GYRO_2_ALIGN are" if gyro2 else "GYRO_1_ALIGN is a"
@@ -2738,6 +2742,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         "page_count": sym.page_count,
         "page_description": sheet,
         "ignored_pages": sym.ignored_pages,
+        # Functions a target normally has that this sheet did not yield, and
+        # the ones supplied by hand. As data, so a GUI can offer a box per
+        # function instead of scraping them back out of a warning string.
+        "absent": absent,
+        "placed": {l.net: l.pin for l in hand},
     }
     return cfg, meta
 
@@ -2766,13 +2775,14 @@ def main() -> int:
                          "not derive from SYSTEM_HSE_MHZ.")
     ap.add_argument("--set", dest="overrides", action="append", default=[],
                     metavar="NAME=PIN",
-                    help="place a define the sheet did not give, e.g. --set "
-                         "MOTOR6_PIN=PE11. Repeatable. NAME is the config.h "
-                         "name; the value is checked against the firmware "
-                         "tables and refused if the pin cannot do the job, and "
-                         "it replaces anything read for the same role. The "
-                         "report lists what a target normally has and this "
-                         "sheet did not produce.")
+                    help="place a function the sheet did not give, e.g. --set "
+                         "MOTOR6=PE11. Repeatable. NAME is the function as the "
+                         "sheet would name it (a trailing _PIN is accepted); "
+                         "the value is checked against the firmware tables and "
+                         "refused if the pin cannot do the job, and it replaces "
+                         "anything read for the same role. The report lists "
+                         "what a target normally has and this sheet did not "
+                         "produce.")
     ap.add_argument("--reference",
                     help="the sha256_... REFERENCE token issued by the Betaflight "
                          "team for a reviewed target. Cannot be computed locally; "

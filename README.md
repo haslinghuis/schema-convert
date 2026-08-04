@@ -100,8 +100,14 @@ recorded one.
 
 Vendor schematics and the `config.h` files generated from them are excluded by
 `.gitignore` and never committed. They are confidential submissions describing
-unreleased hardware. `mcu-parser/data/firmware.json` is also excluded — it is
-generated from a local Betaflight checkout and records which one.
+unreleased hardware.
+
+`mcu-parser/data/firmware.json` **is** committed, so a clone converts something
+without a Betaflight checkout first. Every byte of it is harvested from
+Betaflight's own GPL sources. It records the rev, branch and date it came from
+and deliberately not the path — the risk in generated data is rarely the data,
+it is the provenance stapled to it, and a checkout path can name the submission
+it was cut for. `tests/check_seed_drift.py` runs in CI to catch it going stale.
 
 ## Limitations
 
@@ -126,16 +132,20 @@ this sheet did not produce, and you can supply it:
 
 ```bash
 python3 mcu-parser/genconfig.py board.pdf --board NAME --manufacturer ID \
-        --set MOTOR6_PIN=PE11 --set ADC_RSSI_PIN=PC5
+        --set MOTOR6=PE11 --set ADC_RSSI=PC5
 ```
 
-`NAME` is the `config.h` name, and it goes through the same reader the sheet's
-own nets do, so every spelling it understands works here. A supplied value is
-still checked against the firmware tables and **refused** if the pin cannot do
-the job — being told a pin by hand is not a reason to emit one the build will
-not honour. It replaces anything read for the same role, and both facts are
-recorded in the report, because a config that mixes what was read with what was
-asserted and does not say which is the one failure mode worth avoiding.
+`NAME` is the function as the sheet would name it — the `_PIN` belongs to
+`config.h` and is added on the way out, though typing it does no harm. It goes
+through the same reader the sheet's own nets do, so every spelling it
+understands works here. A supplied value is still checked against the firmware
+tables and **refused** if the pin cannot do the job; those tables are audited
+against ST's datasheets by `afaudit.py`, so a refusal means the pin is wrong. It
+replaces anything read for the same role, and both facts are recorded in the
+report, because a config that mixes what was read with what was asserted and
+does not say which is the one failure mode worth avoiding.
+
+The desktop app does the same thing with a box per function.
 
 [`ROADMAP.md`](ROADMAP.md) has the full gap analysis: known defects, which
 `config.h` defines are never emitted (with how many real boards use them), and

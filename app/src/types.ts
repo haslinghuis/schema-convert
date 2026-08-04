@@ -24,6 +24,10 @@ export interface Meta {
   firmware: { rev?: string; branch?: string; date?: string };
   parts: Record<string, PartHit[]>;
   links: Link[];
+  /** Functions a target normally has that this sheet did not yield. */
+  absent: string[];
+  /** Functions supplied by hand this run, as function -> pin. */
+  placed: Record<string, string>;
 }
 
 export interface Report {

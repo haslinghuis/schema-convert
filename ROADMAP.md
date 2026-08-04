@@ -594,8 +594,10 @@ Three decisions worth recording:
   every spelling the sheet does and cannot drift away from it.
 - **It is checked against the firmware map exactly as a read net is,** and
   refused if the pin cannot do the job. Being told a pin by hand is not a reason
-  to emit one the build will not honour; if the silicon really does support it,
-  the answer is a firmware PR (§1, and `afaudit.py` finds that class of error).
+  to emit one the build will not honour — and since every STM32 family the
+  seeder harvests has been audited against its ST datasheet, the tables are not
+  the doubtful party: a refusal means the pin is wrong, and it says so plainly
+  rather than hedging about firmware PRs.
 - **It is a placement, not a text edit.** The value enters as though the sheet
   had carried it, so everything downstream follows: supplying four motors on a
   board with none produced the timer mapping, resolved a DMA collision between
@@ -604,6 +606,11 @@ Three decisions worth recording:
 Both the hand-placed value and anything it displaced are reported. A config that
 mixes what was read with what was asserted, and does not say which is which, is
 the "looks finished" failure the README warns about.
+
+The desktop app offers the same thing as a box per function, driven by
+`meta.absent` and `meta.placed` rather than by scraping the warning text — the
+list shrinks as functions are filled in, a refused pin is shown against the box
+it came from, and anything not on the curated list can be added by name.
 
 #### The pattern behind §1.8 through §1.11
 

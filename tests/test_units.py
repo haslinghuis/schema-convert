@@ -382,7 +382,7 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
-class HandPlacedDefineTests(unittest.TestCase):
+class HandPlacedFunctionTests(unittest.TestCase):
     """
     genconfig._hand_placed: --set NAME=PIN, for what a sheet does not give.
 
@@ -399,10 +399,15 @@ class HandPlacedDefineTests(unittest.TestCase):
     def place(self, **kw):
         return genconfig._hand_placed(kw, self.caps)
 
-    def test_a_define_name_is_its_net_name_plus_pin(self):
-        links, keys = self.place(MOTOR6_PIN="PC6")
+    def test_a_function_is_named_as_the_sheet_would(self):
+        links, keys = self.place(MOTOR6="PC6")
         self.assertEqual([(l.net, l.pin) for l in links], [("MOTOR6", "PC6")])
         self.assertIn(("motor", "6", None), keys)
+
+    def test_the_config_h_spelling_is_accepted_too(self):
+        # _PIN belongs to config.h, but it is the obvious thing to type.
+        links, _ = self.place(MOTOR6_PIN="PC6")
+        self.assertEqual([(l.net, l.pin) for l in links], [("MOTOR6", "PC6")])
 
     def test_the_name_is_case_and_space_insensitive(self):
         links, _ = self.place(**{" uart1_tx_pin ": " pa9 "})
@@ -422,7 +427,7 @@ class HandPlacedDefineTests(unittest.TestCase):
     def test_a_name_with_no_role_is_refused(self):
         with self.assertRaises(SystemExit) as e:
             self.place(WIBBLE_PIN="PA9")
-        self.assertIn("not a define this tool knows", str(e.exception))
+        self.assertIn("not a function this tool knows", str(e.exception))
 
     def test_a_value_that_is_not_a_pin_is_refused(self):
         with self.assertRaises(SystemExit) as e:
