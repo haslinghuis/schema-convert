@@ -58,6 +58,7 @@ is in each section below.
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
 | §4.8 | Timer rate clashes are now reported (part 1 done); the picker does not yet avoid them | 12 |
 | §4.9 | The pin editor offers no suggestions, though the sheet usually contains the answer | — |
+| §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -559,6 +560,51 @@ at all, and offering one of those is proposing hardware that is not there.
   good suggestion however well its name matches.
 
 Worth doing in that order: §4.8's grouping is what §4.9 needs to rank safely.
+
+---
+
+### 4.10 There is no statement of what a complete target contains
+
+A generated target is judged by what it *has*. Nothing states what a normal one
+carries, so a define that is simply absent reads the same as a define that does
+not apply — and for three of them the difference is whether the board works.
+
+| define | emitted here | hand-written | firmware default when absent |
+|---|---|---|---|
+| `DEFAULT_VOLTAGE_METER_SOURCE` | 73 of 104 (70%) | 583 of 619 (94%) | `VOLTAGE_METER_NONE` |
+| `DEFAULT_CURRENT_METER_SOURCE` | 59 (57%) | 561 (90%) | `VIRTUAL` / `MSP` / `NONE`, by build options |
+| `DEFAULT_BLACKBOX_DEVICE` | 79 (76%) | 537 (86%) | `BLACKBOX_DEVICE_NONE` |
+
+`battery.c` and `blackbox.c` fall back to *nothing*, not to something sensible.
+So a board whose divider the reader could not follow does not get a slightly
+worse config — it gets one with no battery voltage, no low-voltage warning, and
+no logging, and nothing about it looks wrong.
+
+**The conditional emission is correct and should stay.** Each of these is tied
+to having found the pin or the device, and that is the right coupling:
+`VOLTAGE_METER_ADC` with no `ADC_VBAT_PIN` leaves `adcConfig->vbat.enabled`
+false, so the meter reads zero rather than reporting nothing. Asserting the
+source without the pin would be the "looks finished" failure. The gap is not the
+rule, it is the 31 boards where the pin was not found.
+
+**What is wanted is the template as a checklist.** §4.7 already lists the
+functions a target normally has and this sheet did not produce; it does not say
+what each absence *costs*. `ADC_VBAT` missing should read as "no battery voltage
+and no low-voltage warning", not as one more name on a list. Three things:
+
+- Extend `EXPECTED_FUNCTIONS` into a table of function → the defines it enables
+  → what is lost without it, and say so in the report.
+- Emit the whole expected set as commented-out lines in the generated file, so a
+  reviewer diffing against a hand-written target sees the shape rather than
+  having to remember it.
+- Check the reverse too: a `DEFAULT_*` emitted with nothing behind it is a
+  defect, and there is no invariant for that today.
+
+The vendor config that prompted this had `DEFAULT_BLACKBOX_DEVICE
+BLACKBOX_DEVICE_SDCARD` where the tool produced nothing, because the card's chip
+select was named after its bus (§3.3b) - so the device was never placed and the
+default silently became `NONE`. That is the shape of it: an upstream miss, and
+then a functional loss with no warning attached.
 
 ---
 
