@@ -135,10 +135,15 @@ class ClassifyTests(unittest.TestCase):
         ("GYRO2-MISO", "gyro2_spi", None, "sdi"),
         ("GYRO1-CS", "gyro_cs", None, None),
         ("GYRO3-CS", "gyro3_cs", None, None),
-        # A part number is not a device index: MPU-6000 and ICM42688 must not
-        # be read as gyro 6 and gyro 4.
-        ("MPU6000-CS", None, None, None),
-        ("ICM42688-CS", None, None, None),
+        # Named after the part on the other end of the wire. The device is
+        # recognised by family and the part number is *not* a device index -
+        # MPU6000-CS is the first gyro's chip select, not the sixth's.
+        ("MPU6000-CS", "gyro_cs", None, None),
+        ("ICM42688-CS", "gyro_cs", None, None),
+        ("ICM42688.SCK", "gyro_spi", None, "sck"),
+        ("AT7456.CS", "osd_cs", None, None),
+        ("W25Q128.MOSI", "flash_spi", None, "sdo"),
+        ("BMP280-SCK", "baro_spi", None, "sck"),
         ("PPM", "rx_ppm", None, None),
         ("RX-PPM", "rx_ppm", None, None),
         ("PPM_IN", "rx_ppm", None, None),
@@ -187,6 +192,24 @@ class ClassifyTests(unittest.TestCase):
         for net, role, idx, sub in self.CASES:
             with self.subTest(net=net):
                 self.assertEqual(genconfig.classify(net), (role, idx, sub))
+
+    def test_a_part_number_is_never_a_device_index(self):
+        # The danger in naming a net after its part: MPU6000 and ICM42688 carry
+        # digits, and reading those as the index would invent a sixth or fourth
+        # IMU. Every one of these is the *first* gyro.
+        for net in ("MPU6000-CS", "ICM42688-CS", "ICM42688.SCK", "BMI270_CS"):
+            with self.subTest(net=net):
+                role, idx, _ = genconfig.classify(net)
+                self.assertTrue(role.startswith("gyro"), role)
+                self.assertNotIn("2", role.replace("gyro", "", 1) or "1")
+                self.assertIsNone(idx)
+
+    def test_a_bare_part_marking_is_not_a_net(self):
+        # detect_parts reads those off the sheet; only a part number with a
+        # signal after it names a wire.
+        for net in ("ICM42688", "MAX7456", "W25Q128", "BMP280"):
+            with self.subTest(net=net):
+                self.assertIsNone(genconfig.classify(net)[0])
 
     def test_motor_and_uart_do_not_collide(self):
         """VTX-SW is a rail switch, not UART SW; S1 is a motor, not a signal."""

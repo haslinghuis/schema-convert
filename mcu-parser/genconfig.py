@@ -209,6 +209,18 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     # the tool was not listening.
     n = re.sub(r"^IIC", "I2C", n)
     n = re.sub(r"[-_]PIN$", "", n) or n
+    # Some sheets name a net after the part on the other end of it, with a dot:
+    # ICM42688.CS, AT7456.SCK, W25Q128.MOSI. The dot is just a separator, and
+    # the part number is the device - which the rules already know by family, so
+    # the number is folded back to the family word rather than every variant
+    # being listed. Only where a separator follows, so a bare part marking on
+    # the sheet stays a part marking.
+    n = n.replace(".", "_")
+    for rx, family in DEVICE_FAMILIES:
+        n2 = rx.sub(family, n, count=1)
+        if n2 != n:
+            n = n2
+            break
 
     for rx, role in ROLE_RULES:
         m = rx.match(n)
@@ -956,6 +968,16 @@ SERIAL_PORT_NAMES = {  # configs spell 1/2/3/6 as USART, the rest as UART
     "3": "SERIAL_PORT_USART3", "6": "SERIAL_PORT_USART6",
 }
 
+
+# A part number standing in for the device it is. Matched only when a separator
+# follows, so 'ICM42688' on its own is still a part marking for detect_parts and
+# only 'ICM42688.CS' becomes a gyro chip select.
+DEVICE_FAMILIES = (
+    (re.compile(r"^(?:ICM|MPU|BMI|LSM|IIM|IAM)\d{3,5}[A-Z]*(?=[-_])"), "GYRO"),
+    (re.compile(r"^(?:MAX|AT)7456[A-Z]*(?=[-_])"), "OSD"),
+    (re.compile(r"^(?:W25[QNM]|GD25|MT25Q|PY25Q|MX66)[A-Z0-9]*(?=[-_])"), "FLASH"),
+    (re.compile(r"^(?:BMP|DPS|SPL|LPS|ICP)\d{2,5}[A-Z]*(?=[-_])"), "BARO"),
+)
 
 SPI_LINE_RE = re.compile(r"SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)", re.I)
 
