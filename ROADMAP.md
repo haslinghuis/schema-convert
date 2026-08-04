@@ -50,6 +50,8 @@ is in each section; this is the index.
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
+| §4.8 | Timer allocation is not checked against what each function needs of the whole TIM unit | 12 |
+| §4.9 | The pin editor offers no suggestions, though the sheet usually contains the answer | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -1386,6 +1388,105 @@ firmware revision it was validated against. A config generated against a patched
 tree looks identical to one generated against release firmware — which already
 mattered once, when a board depended on an unmerged pin-table fix. Record the
 seeder's firmware rev in the generated header.
+
+---
+
+### 4.8 Timer allocation is not verified against what each function needs
+
+`timerConfigure(timHw, period, hz)` sets the period and prescaler of a **whole
+TIM unit**, not of one channel. So two functions on one unit must want the same
+rate, and they do not:
+
+| function | rate | where |
+|---|---|---|
+| LED strip | 800 kHz carrier | `WS2811_CARRIER_HZ`, `light_ws2811strip.h` |
+| servo | 50 Hz default, 50–498 range | `servos.c`, `servo_pwm_rate` |
+| motor (DShot DMA) | protocol rate | `dshot_dpwm.c` |
+
+**Firmware does not catch it.** `timerAllocate()` refuses only when *that pin's*
+entry already has an owner; ownership is per pin, not per TIM unit. Two pins on
+one timer both allocate, and whichever configures last wins the period. This is
+the §2 shape exactly: it builds, and it does not work.
+
+**It is latent rather than always broken**, which is why it has survived. On
+everything but F4, `DEFAULT_DSHOT_BITBANG` defaults to `DSHOT_BITBANG_AUTO`, and
+`isDshotBitbangActive()` makes AUTO mean *on* unless the protocol is PROSHOT1000
+— bitbang drives GPIO from DMA and never touches the motor timers, so a motor
+sharing a unit with the LED strip costs nothing. On **F4 and APM32F4** the same
+AUTO means bitbang only when DShot telemetry is on. So the clash bites on F4
+without telemetry, and on any board where the user sets `dshot_bitbang = OFF`.
+
+**How often it happens** — measured, both ways:
+
+| | boards | with two rate classes on one TIM |
+|---|---|---|
+| generated here | 104 | **12 (11.5%)** |
+| hand-written, seeded MCUs | 373 | 6 (1.6%) |
+
+Ours: `ledstrip+motor` ×8, `camera+clkin+ledstrip` ×3, `clkin+motor` ×2,
+`camera+ledstrip` ×1. The convention is real — 98.4% of shipped targets keep the
+classes apart — and we break it seven times as often, which says most of ours
+are a choice the tool made rather than how the board is wired: where a pin
+carries several timer channels, the picker takes one without considering what
+else landed on that unit.
+
+**Fix:** two parts, and the first is cheap.
+
+1. *Report it.* Group the emitted `TIMER_PIN_MAPPING` by TIM unit, and warn when
+   one unit carries more than one rate class, naming the functions and saying
+   the clash only bites without bitbang. That is a dozen lines and an invariant
+   in `analysis.py` beside the occurrence check, which is the natural place —
+   `timer_occurrence_errors` already resolves pin+occurrence to a channel.
+2. *Avoid it.* When a pin has several timer options, prefer an occurrence whose
+   unit carries nothing of a different class. The picker already prefers
+   advanced timers for servos and dodges DMA collisions, so this is another term
+   in the same choice, not new machinery.
+
+Do (1) first and see how many of the 12 survive it: a board whose only LED strip
+pin shares a unit with its only motor pin has no fix, and should say so rather
+than be silently rearranged.
+
+### 4.9 The pin editor has no suggestions
+
+§4.7 gives a box per absent function. It cannot say what to put in it, and the
+data to narrow that is already in hand.
+
+**What the capability map can do.** On one H743 board with 15 unclassified nets,
+filtering by what the firmware says each pin supports:
+
+| function | candidates from the sheet's own nets |
+|---|---|
+| `ADC_VBAT`, `ADC_CURR` | 7 of 15 |
+| `LED_STRIP` (needs a timer) | 7 of 15 |
+| `LED0`, `GYRO_1_CS`, `GYRO_1_EXTI` | **15 of 15 — no filter at all** |
+
+That last row is the honest limit: a chip select, an interrupt and an LED are
+any GPIO, so capability filtering says nothing about them. Advertising a
+suggestion there would be a list of every free pin wearing a confident hat.
+
+**The better signal is the sheet's own unclassified nets**, ranked by name.
+The same board offers `LED_TRIP(PD12)` for `LED_STRIP` — one character out, and
+`PD12` is `TIM4_CH1` — `CURR_DET(PC1)` for `ADC_CURR`, and `ST_LED(PC2)` for
+`LED0`. Those are the answers, and they are already printed in the "nets with no
+config.h role" line; nothing joins them up. Suggesting from what the board
+actually draws is also the only kind of suggestion that is not an invention:
+of 41 pins on that MCU that could carry `MOTOR6`, 31 carry no net on the sheet
+at all, and offering one of those is proposing hardware that is not there.
+
+**Shape:**
+
+- Hard filter by the firmware map, exactly as `--set` already validates. A
+  suggestion that would be refused on submission is worse than none.
+- Rank by token overlap between the net name and the function name, so
+  `LED_TRIP`/`LED_STRIP` and `CURR_DET`/`ADC_CURR` come first.
+- Mark the provenance in the UI: *"`PD12` carries `LED_TRIP`, which this tool
+  did not recognise"* is a suggestion; *"`PH13` is free and can do TIM8_CH1"* is
+  a different and much weaker claim, and the two must not look alike.
+- Reject a suggestion that would create a §4.8 clash, which is what ties the two
+  together: a `LED_STRIP` candidate on a unit already carrying motors is not a
+  good suggestion however well its name matches.
+
+Worth doing in that order: §4.8's grouping is what §4.9 needs to rank safely.
 
 ---
 
