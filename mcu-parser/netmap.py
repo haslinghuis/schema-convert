@@ -694,12 +694,39 @@ def _is_split_half(accepted: Sequence[SymbolPart], pitch: float,
     # rows, not a large one. It was six, which is harmless while the pitch is
     # under-measured and far too generous once it is right.
     reach = pitch * 2
-    return any(
+    if any(
         part.left_edge <= p.right_edge + reach
         and p.left_edge <= part.right_edge + reach
         and part.top_edge <= p.bottom_edge + reach
         and p.top_edge <= part.bottom_edge + reach
-        for p in accepted if p.page == part.page)
+        for p in accepted if p.page == part.page):
+        return True
+
+    # Or drawn beside it, spanning the same rows. A symbol split by port group
+    # is two columns side by side running the full height of both - here 45pt
+    # apart, which is far outside any adjacency reach, and 18 pins against 64,
+    # which is just under the third the size test wants. Neither route admitted
+    # it and half an LQFP100 was dropped: 39 pins reported as unconnected on a
+    # board that had them.
+    #
+    # Safe because of what is already required above: the two share no pin at
+    # all. Any two symbols of the same MCU both carry PA0, so a disjoint pin set
+    # on the same page, on the same grid, spanning the same extent is a port
+    # group of one part and not a second one.
+    def span(p: SymbolPart) -> Tuple[float, float]:
+        vertical = any(ALONG[r.side] == "y" for r in p.rows)
+        return ((p.top_edge, p.bottom_edge) if vertical
+                else (p.left_edge, p.right_edge))
+
+    lo, hi = span(part)
+    for p in accepted:
+        if p.page != part.page:
+            continue
+        plo, phi = span(p)
+        overlap = min(hi, phi) - max(lo, plo)
+        if overlap > 0 and overlap >= 0.5 * min(hi - lo, phi - plo):
+            return True
+    return False
 
 
 # Words any flight-controller sheet has in quantity, whatever the vendor's
@@ -952,10 +979,19 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
 # The vocabulary flight-controller schematics use for nets that end up in a
 # config.h. Used to tell a net-label column apart from a column of package ball
 # coordinates or component values.
+# Deliberately NOT here: a bare Mn. `classify` reads M1 as a motor and some
+# sheets do label them that way, but a BGA plot's ball coordinates run A1..M12,
+# and admitting Mn put a whole row of them in the gutter of one board - which
+# then took the rows its real net labels wanted, costing that board its SPI1 and
+# SPI4 buses. Ball coordinates sitting exactly where a net label would is the
+# thing this vocabulary exists to exclude, so the collision is decided in favour
+# of the many boards rather than the one.
 NET_VOCAB = re.compile(
-    r"MOTOR|SERVO|GYRO|IMU|MPU|ICM|OSD|MAX7456|AT7456|FLASH|BARO|SDCARD|"
-    r"\bTX\d|\bRX\d|I2C\d|SCL|SDA|SCK|MISO|MOSI|\bCS\b|CS_|_CS|EXTI|CLKIN|CLOCK|"
-    r"LED|BEEP|BUZZ|CAM|VTX|USER\d|PINIO|ADC|BATT|CURR|RSSI|SWDIO|SWCLK|BOOT|OTG",
+    r"MOTOR|SERVO|PWM\d|ESC\d|GYRO|IMU|MPU|ICM|OSD|MAX7456|AT7456|"
+    r"FLASH|BARO|SDCARD|SDIO|SDMMC|\bTX\d|\bRX\d|TXD\d|RXD\d|U(?:S?ART)?\d[-_]"
+    r"[TR]X|I2C\d|SCL|SDA|SCK|SCLK|MISO|MOSI|\bSDI\b|SDI\d|\bSDO\b|SDO\d|\bCS\b|"
+    r"CS_|_CS|EXTI|CLKIN|CLOCK|LED|BEEP|BUZZ|CAM|VTX|USER\d|PINIO|PIO\d|ADC|"
+    r"BATT|CURR|VBAT|RSSI|SWDIO|SWCLK|BOOT|OTG",
     re.IGNORECASE,
 )
 
@@ -1187,7 +1223,14 @@ def _pair(sym: Symbol, labels: Sequence[Word], offset: float, caps: dict
         # draughtsmanship: raw floats let a stray "N" take a row from the
         # I2C1_SCL beside it by a thousandth of a point, on a row it was not
         # even level with.
+        # Then a name the vocabulary recognises beats one it does not, before
+        # distance is consulted at all. The strongest column is trusted
+        # wholesale, so it can carry a fragment the extractor made - "2C4" out
+        # of I2C4 - and that fragment happened to sit nearer the pin than the
+        # SCL beside it. Being a word this domain uses is better evidence of
+        # being the net than being a few points closer to it.
         rank = (_restates_the_pin(w.text, best, caps),
+                not NET_VOCAB.search(w.text),
                 round(gap), abs(best.pos - at))
         prev = claimed.get(id(best))
         loser = w if prev is not None and rank >= prev[0] else \

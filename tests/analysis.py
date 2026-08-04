@@ -43,11 +43,39 @@ ADC_PIN_DEFINES = ("ADC_VBAT_PIN", "ADC_CURR_PIN", "ADC_RSSI_PIN")
 # --------------------------------------------------------------------------- #
 
 def label_conservation(run: BoardRun) -> List[str]:
-    """Every net label the geometry found is either mapped to a row or orphaned."""
-    got = len(run.result.links) + len(run.result.orphans)
-    if got != len(run.labels):
+    """
+    Every net label the geometry found is either mapped to a row or orphaned.
+
+    Except a further copy of a name that *is* mapped. Some sheets draw the label
+    and its net annotation a point apart, so one row attracts two labels reading
+    the same thing; only one can own the row and the other is not a net that
+    went missing. Reporting it as an orphan would put a warning about a lost net
+    on every board drawn that way.
+
+    Counted per name, not in total: two copies of one name that land on two
+    different rows are both real links, and a blanket allowance for "it appears
+    twice" would excuse a genuine loss elsewhere. A copy of a name that is
+    mapped nowhere is still a loss and still fails.
+    """
+    def text_of(w) -> str:
+        # A real run holds Words; the analysis fixtures stand labels in as
+        # Links, or as bare strings.
+        return getattr(w, "text", None) or getattr(w, "net", None) or w
+
+    have: Dict[str, int] = {}
+    for w in run.labels:
+        key = text_of(w)
+        have[key] = have.get(key, 0) + 1
+    for name in [l.net for l in run.result.links] + list(run.result.orphans):
+        key = text_of(name)
+        have[key] = have.get(key, 0) - 1
+
+    mapped = {l.net for l in run.result.links}
+    lost = sorted(k for k, n in have.items() if n > 0 and k not in mapped)
+    if lost:
         return [f"{len(run.labels)} labels but {len(run.result.links)} links + "
-                f"{len(run.result.orphans)} orphans"]
+                f"{len(run.result.orphans)} orphans; unaccounted: "
+                + ", ".join(lost)]
     return []
 
 

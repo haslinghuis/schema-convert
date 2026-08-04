@@ -109,6 +109,13 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # board that reported 100% agreement on what was left.
     (re.compile(r"^MOTOR[-_]?(\d+)$|^M(\d+)$|^S(\d)$"), "motor"),
     (re.compile(r"^SERVO[-_]?(\d+)$"), "servo"),
+    # What the rest of the world calls a motor output. Two more spellings, and
+    # between them the largest single block of unclassified nets in the corpus:
+    # ESCn_SIGNAL on 5 boards (26 nets) and PWMn on 5 more (18). Betaflight's
+    # name for the thing is MOTORn; the sheet's is whatever the vendor's ESC
+    # connector is labelled. The digit-required form is what keeps ESC_SERIAL
+    # above out of this rule.
+    (re.compile(r"^PWM[-_]?(\d+)$|^ESC[-_]?(\d+)(?:[-_](?:SIGNAL|SIG))?$"), "motor"),
     # A PPM receiver and the ESC 1-wire passthrough both drive a timer input
     # capture, so the pin has to have a timer channel - checked in build().
     (re.compile(r"^(?:RX[-_]?)?PPM(?:[-_]?(?:IN|SIG|SIGNAL))?$"), "rx_ppm"),
@@ -121,7 +128,11 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # the index between separators: GYRO_1_CS, GYRO_1_CLKIN, MAX7456_SPI_CS.
     # The separator before the index is what the older patterns did not allow.
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?(?:EXTI|INT1?)$"), "gyro_exti"),
+    # EXTI takes the index on either side too - GYRO2-EXTI and GYRO-EXTI2 are
+    # one thing, 10 nets over 5 boards. Only EXTI: on INT the trailing digit is
+    # the sensor's own interrupt line (INT1), not which sensor it is.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?(?:EXTI[-_]?(\d)?|INT1?)$"),
+     "gyro_exti"),
     # The prefix is optional because one sheet names this net just CLKIN. The
     # MCU's own clock input is not a rival for it: that arrives on OSC_IN, which
     # the symbol names as a system pin and which never reaches classification.
@@ -158,6 +169,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:.*[-_])?RX(\d)(?:[-_]?R)?$"), "uart_rx"),
     (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?TX(?:[-_]?R)?$"), "uart_tx"),
     (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?RX(?:[-_]?R)?$"), "uart_rx"),
+    # TXD6/RXD6 - the D is for "data", and it is between the direction and the
+    # index where nothing above allows anything. 19 nets over 4 boards.
+    (re.compile(r"^(?:.*[-_])?TXD[-_]?(\d)$"), "uart_tx"),
+    (re.compile(r"^(?:.*[-_])?RXD[-_]?(\d)$"), "uart_rx"),
     # The bus is settled by the pins, not the name, so the index is optional -
     # plenty of sheets just write SCL / SDA, or SCL1 / SDA1.
     (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SCL[-_]?(\d)?$"), "i2c_scl"),
@@ -176,11 +191,11 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^LED[-_]?1$"), "led1"),
     (re.compile(r"^LED[-_]?2$"), "led2"),
     (re.compile(r"^LED[-_]?STRIP$|^WS2812$|^LED[-_]?DATA$"), "led_strip"),
-    (re.compile(r"^(?:BEEPER|BUZZER|BZ)[-_]?(?:PIN)?$"), "beeper"),
+    (re.compile(r"^(?:BEEPER|BUZZER|BUZZ|BEEP|BZ)[-_]?(?:PIN)?$"), "beeper"),
     (re.compile(r"^CAM[-_]?CONTROLL?$|^CAMERA[-_]?CONTROL$|^CC$"), "camera_control"),
     (re.compile(r"^USB[-_]?DETECT$|^VBUS[-_]?DETECT$"), "usb_detect"),
     (re.compile(r"^VTX[-_]?SW$|^VTX[-_]?(?:PWR|POWER|EN)$"), "pinio"),
-    (re.compile(r"^USER(\d)$|^PINIO(\d)$"), "pinio"),
+    (re.compile(r"^USER(\d)$|^PINIO(\d)$|^PIO(\d)$"), "pinio"),
     # A trailing switch/enable is a switched rail: CAM_SW, BEC-SWITCH, VTX_EN.
     # These are PINIO outputs, which is different from CAM-Controll (a PWM
     # camera-OSD line). Spelled out in full as well as abbreviated - one board

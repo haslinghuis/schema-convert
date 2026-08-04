@@ -382,6 +382,64 @@ class NetRequirementTests(unittest.TestCase):
                 self.assertEqual(netmap.net_requirement(net), want)
 
 
+class VocabularyAgreementTests(unittest.TestCase):
+    """
+    Every spelling `classify` understands must also pass `NET_VOCAB`.
+
+    They are two gates in series and it is easy to move only one. NET_VOCAB
+    decides what is collected as a label at all; classify decides what a
+    collected label means. Teaching classify about PWMn and ESCn_SIGNAL without
+    telling NET_VOCAB left those labels never reaching it - 18 and 26 nets in
+    the corpus, dropped one step before the rule that had just been written for
+    them, and reported as nothing.
+
+    Add a spelling to classify, add it here.
+
+    One deliberate exception, which is why this is a list and not a loop over
+    the rules: a bare `Mn`. classify reads it as a motor, but a BGA plot's ball
+    coordinates run A1..M12 and admitting it drops a row of them into the
+    gutter. See the note on NET_VOCAB.
+    """
+
+    EXCLUDED_ON_PURPOSE = ("M1", "M3", "M12")
+
+    SPELLINGS = (
+        "MOTOR1", "MOTOR_1", "PWM4", "PWM8", "ESC1_SIGNAL", "ESC2",
+        "SERVO1", "SERVO_2",
+        "TX1", "RX1", "UART3_TX", "USART6_RX", "TXD6", "RXD6",
+        "I2C1_SCL", "I2C2_SDA", "IIC_SCL",
+        "SPI2_SCK", "SPI1_MISO", "SCK3", "SPI_SDO2",
+        "GYRO_1_CS", "GYRO2-CS", "GYRO-EXTI1", "GYRO_INT1", "CLKIN",
+        "GYRO_1_CLKIN", "MAX7456_SPI_CS", "AT7456_MOSI", "FLASH_CS",
+        "BARO_CS", "SDCARD_SPI_CS", "SDIO_CMD",
+        "LED0", "LED_STRIP", "BEEPER", "BUZZ", "BEEP",
+        "PINIO1", "USER1", "PIO2", "VTX_PWR",
+        "ADC_VBAT", "ADC_CURR", "ADC_RSSI", "CAMERA_CONTROL",
+    )
+
+    def test_every_spelling_the_classifier_knows_is_collectable(self):
+        for text in self.SPELLINGS:
+            with self.subTest(net=text):
+                role = genconfig.classify(text)[0]
+                self.assertIsNotNone(
+                    role, f"{text} is listed here but classify does not know it")
+                self.assertTrue(
+                    netmap.NET_VOCAB.search(text),
+                    f"classify reads {text!r} as {role}, but NET_VOCAB does not "
+                    "recognise it, so a label spelled that way outside the "
+                    "strongest column is dropped before it ever reaches "
+                    "classify")
+
+    def test_a_bare_motor_number_stays_out(self):
+        for text in self.EXCLUDED_ON_PURPOSE:
+            with self.subTest(net=text):
+                self.assertEqual(genconfig.classify(text)[0], "motor")
+                self.assertIsNone(
+                    netmap.NET_VOCAB.search(text),
+                    f"{text} collides with a BGA ball coordinate; admitting it "
+                    "cost one board its SPI1 and SPI4")
+
+
 class HandPlacedFunctionTests(unittest.TestCase):
     """
     genconfig._hand_placed: --set NAME=PIN, for what a sheet does not give.

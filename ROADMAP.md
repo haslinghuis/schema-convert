@@ -42,14 +42,14 @@ is in each section; this is the index.
 
 | | | boards |
 |---|---|---|
-| §3.3 | Chip-select-only devices — half are really unrecognised net spellings; the rest need the peripheral end read, not wire tracing (§3.7) | 26 devices |
+| §3.3 | Chip-select-only devices — half are really unrecognised net spellings; the rest need the peripheral end read, not wire tracing (§3.7). `SPIn_NSS` on 9 boards (25 nets) is the biggest block | 26 devices |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 25 buses on 20 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
-| §3.5 | Two sheets name a part that does not exist (`STM32F743`); the harness then forces the wrong family | 2 |
+| §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -611,6 +611,71 @@ The desktop app offers the same thing as a box per function, driven by
 `meta.absent` and `meta.placed` rather than by scraping the warning text — the
 list shrinks as functions are filled in, a refused pin is shown against the box
 it came from, and anything not on the curated list can be added by name.
+
+### 1.17 A symbol split into columns side by side — FIXED
+
+An H743 read 64 of its 98 pins and reported nothing missing beyond a vague note
+about a second symbol. The MCU is drawn as two boxes on one sheet — ports A–D in
+one, port E in the other, 45pt apart, spanning the same rows. `_is_split_half`
+admits a second box on size (a third of the first, and this one is 18 pins
+against 64, just under) or on adjacency (`pitch * 2`, and 45pt is far outside
+it). Neither route let it in, so half an LQFP100 was dropped: 39 pins reported
+as unconnected on a board that has them.
+
+A third route: **drawn beside it, spanning the same extent.** Safe because of
+what the function already requires — the two share no pin at all, and any two
+symbols of the same MCU both carry PA0, so a disjoint pin set on the same page,
+on the same grid, over the same rows is a port group and not a second part.
+
+The board went 64 → 98 pins; `g4-multipage` went 32 → 48 rows and 18/18 → 21/21.
+
+### 1.18 The vocabulary that collects and the one that classifies had drifted
+
+The largest single defect of the session, and structural rather than a spelling.
+
+`NET_VOCAB` decides what is *collected* as a net label; `classify` decides what
+a collected label *means*. They are two gates in series, and only the second was
+being maintained. Teaching `classify` about `PWMn` and `ESCn_SIGNAL` changed
+nothing at all on the boards that use them — the labels were dropped one step
+earlier, by a vocabulary that had never heard of either, and reported as
+nothing.
+
+Auditing the two against each other found five more that had drifted apart long
+ago: `UART3_TX`, `USART6_RX`, `SPI_SDO2`, `SDIO_CMD`, and a bare `Mn`.
+
+There is now a test that asserts every spelling `classify` knows also passes
+`NET_VOCAB`, with the list of spellings written out. It has one deliberate
+exception, and the exception is the interesting part: a bare **`Mn` is
+excluded**. `classify` reads `M1` as a motor and sheets do label them that way,
+but a BGA plot's ball coordinates run `A1..M12`, and admitting `Mn` dropped a
+whole row of them into one board's gutter, where they took the rows its real net
+labels wanted and cost it SPI1 and SPI4 entirely. Ball coordinates sitting
+exactly where a net label would is the thing this vocabulary exists to exclude,
+so the collision is decided in favour of the many boards over the one.
+
+The same audit produced a ranking worth keeping. Counting unclassified nets over
+the whole corpus, by how many boards use each spelling:
+
+| boards | nets | spelling | verdict |
+|---|---|---|---|
+| 13 | 13 | `OSC_IN`/`OSC_OUT`, `USB_DM`/`DP` | correctly unclassified — no config.h role |
+| 9 | 25 | `SPIn_NSS` | a chip select needing device attribution — §3.3, not spelling |
+| 5 | 26 | `ESCn_SIGNAL` | **fixed** → motor |
+| 5 | 18 | `PWMn` | **fixed** → motor |
+| 5 | 10 | `GYRO-EXTIn` | **fixed** — index on either side, as the CS rule already allowed |
+| 4 | 19 | `TXDn`/`RXDn` | **fixed** → uart |
+| 5 | 7 | `PIOn` | **fixed** → pinio |
+| 8 | 8 | `BUZZ`, `BEEP` | **fixed** → beeper |
+| 6 | 6 | `CAM` | left alone — could be the control line or the video signal |
+
+Corpus over the whole group: **+285 defines on 30 boards**, and a vocabulary
+tie-break in the bargain — a label the vocabulary recognises now beats one it
+does not before distance is consulted, because the trusted column can carry a
+fragment the extractor made (`2C4` out of `I2C4`) that happens to sit nearer the
+pin than the `SCL` beside it.
+
+Run the ranking whenever a submission arrives. It is five minutes and it is the
+only thing that finds this class.
 
 #### The pattern behind §1.8 through §1.11
 
