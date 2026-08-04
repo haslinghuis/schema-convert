@@ -94,7 +94,11 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # on it (GYRO-SCK). Take that at face value - it removes the guesswork.
     # The index sits on either side, as it does for the UARTs: SPI3_SCK and SCK3
     # are the same bus.
-    (re.compile(r"^SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
+    # CLK is accepted here for the same reason the no-separator form below
+    # accepts it: on a bus named SPIn it is that bus's clock, not the SDIO one.
+    # Only the separator form was missing it, which cost two boards a whole SPI4
+    # over the single net SPI4_CLK_PIN.
+    (re.compile(r"^SPI(\d)[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO)$"), "spi_bus"),
     # A chip select named after its bus rather than its device. The digit is the
     # bus; which device it selects is read at the peripheral end, in
     # identify_bus_cs(). 41 nets over 15 boards, and on those boards nothing was
@@ -133,7 +137,7 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # Vendors also copy Betaflight's own define names onto their nets, which put
     # the index between separators: GYRO_1_CS, GYRO_1_CLKIN, MAX7456_SPI_CS.
     # The separator before the index is what the older patterns did not allow.
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CS(\d)?$"), "gyro_cs"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CS[-_]?(\d)?$"), "gyro_cs"),
     # EXTI takes the index on either side too - GYRO2-EXTI and GYRO-EXTI2 are
     # one thing, 10 nets over 5 boards. Only EXTI: on INT the trailing digit is
     # the sensor's own interrupt line (INT1), not which sensor it is.
@@ -145,7 +149,7 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:(?:GYRO|IMU)[-_]?(\d)?[-_]?)?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
     # The device index sits on either side here too, exactly as it does for the
     # chip select above: GYRO2-MISO and GYRO_MISO2 are the same second IMU.
-    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)(\d)?$"),
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)?$"),
      "gyro_spi"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)(?:[-_]SPI)?[-_]?CS$"), "osd_cs"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),

@@ -989,7 +989,8 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
 NET_VOCAB = re.compile(
     r"MOTOR|SERVO|PWM\d|ESC\d|GYRO|IMU|MPU|ICM|OSD|MAX7456|AT7456|"
     r"FLASH|BARO|SDCARD|SDIO|SDMMC|\bTX\d|\bRX\d|TXD\d|RXD\d|U(?:S?ART)?\d[-_]"
-    r"[TR]X|I2C\d|SCL|SDA|SCK|SCLK|MISO|MOSI|\bSDI\b|SDI\d|\bSDO\b|SDO\d|\bCS\b|"
+    r"[TR]X|I2C\d|SCL|SDA|SCK|SCLK|SPI\d[-_]CLK|MISO|MOSI|\bSDI\b|SDI\d|\bSDO\b|"
+    r"SDO\d|\bCS\b|"
     r"CS_|_CS|_NSS|_SS\b|EXTI|CLKIN|CLOCK|LED|BEEP|BUZZ|CAM|VTX|USER\d|PINIO|"
     r"PIO\d|ADC|"
     r"BATT|CURR|VBAT|RSSI|SWDIO|SWCLK|BOOT|OTG",

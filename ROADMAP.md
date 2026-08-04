@@ -46,7 +46,8 @@ is in each section; this is the index.
 | §3.3b | Bus-named selects: 24 of 41 now identified from the peripheral's pin names; 17 have nothing identifying drawn at the far end | 17 left |
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
-| §1.13 | SPI buses still refused for a missing line — every one is an unbound net label, the §1.12/§1.13 class | 19 buses on 14 |
+| §1.13 | SPI buses still refused for a missing line | 17 buses on 13 |
+| §1.20 | 396 unbound net labels, 61% of them on 8 boards — geometry, not spelling: 42% already classify to a real role | 396 on 54 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
@@ -679,6 +680,27 @@ pin than the `SCL` beside it.
 
 Run the ranking whenever a submission arrives. It is five minutes and it is the
 only thing that finds this class.
+
+### 1.19 The rule stated in §1.16 was not applied to trailing indices
+
+§1.16 ended by stating the pattern as a rule: *when a pattern matches an indexed
+name, the index may be preceded by a separator.* Checking the rules against it
+found two that only honour it in the leading position.
+
+`GYRO_CS2` classified and `GYRO_CS_1` did not - the trailing `(\d)?` allowed no
+separator before it. Same in the gyro SPI rule, so `GYRO_MISO_2` was nothing
+while `GYRO_MISO2` was fine. And the separator form of the SPI bus rule accepted
+`SCK`, `SCLK`, `MISO`, `MOSI`, `SDI`, `SDO` but not `CLK`, which the *no*-separator
+form beside it has always accepted - so `SPI4_CLK_PIN` was unreadable and cost
+two boards their whole SPI4.
+
+Corpus: **+16 defines**, incomplete buses 19 → 17, and one correction worth
+noting - a board that had `USE_ACC_MPU6000` now has `USE_ACC_SPI_MPU6000`,
+because recognising the chip select is what says the part is on SPI.
+
+Small, but the way it was found is the point: not from a board, from re-reading
+a rule this file already contained and checking the code against it. Worth doing
+whenever a rule gets written down here.
 
 #### The pattern behind §1.8 through §1.11
 
