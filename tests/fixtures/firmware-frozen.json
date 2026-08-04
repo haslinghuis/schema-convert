@@ -1,10 +1,10 @@
 {
  "//": "Frozen subset of seed_firmware.py output, committed so the golden tests are hermetic: they must not change when the developer re-seeds from a moving Betaflight tree. Public Betaflight pin-table data only - no vendor material. Regenerate with tests/update_golden.py --reseed.",
  "schema": 1,
- "generated": "2026-07-31T18:31:06Z",
+ "generated": "2026-08-04T10:48:04Z",
  "firmware": {
-  "rev": "852a86b41",
-  "date": "2026-07-29",
+  "rev": "2d0f789d1",
+  "date": "2026-08-03",
   "branch": "master"
  },
  "drivers": {
@@ -977,6 +977,16 @@
      "devices": "12",
      "channel": "7"
     }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 4,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 3,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 2
+   },
+   "sdio": {
+    "pin_config": false,
+    "driver": true
    }
   },
   "STM32F722": {
@@ -1817,6 +1827,16 @@
      "devices": "12",
      "channel": "7"
     }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 4,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 3,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 2
+   },
+   "sdio": {
+    "pin_config": false,
+    "driver": true
    }
   },
   "STM32G474": {
@@ -2285,16 +2305,6 @@
       "role": "scl"
      }
     ],
-    "PB6": [
-     {
-      "dev": "I2C1",
-      "role": "scl"
-     },
-     {
-      "dev": "I2C4",
-      "role": "scl"
-     }
-    ],
     "PB8": [
      {
       "dev": "I2C1",
@@ -2329,13 +2339,13 @@
       "role": "scl"
      }
     ],
-    "PA8": [
+    "PF6": [
      {
       "dev": "I2C2",
-      "role": "sda"
+      "role": "scl"
      }
     ],
-    "PF6": [
+    "PA8": [
      {
       "dev": "I2C2",
       "role": "sda"
@@ -2545,6 +2555,16 @@
      "devices": "4",
      "channel": "2"
     }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 3,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 16,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 16
+   },
+   "sdio": {
+    "pin_config": false,
+    "driver": false
    }
   },
   "STM32H562": {
@@ -2813,6 +2833,10 @@
      {
       "dev": "UART1",
       "dir": "rx"
+     },
+     {
+      "dev": "UART5",
+      "dir": "rx"
      }
     ],
     "PA9": [
@@ -2870,6 +2894,12 @@
      }
     ],
     "PB11": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     }
+    ],
+    "PC4": [
      {
       "dev": "UART3",
       "dir": "rx"
@@ -2997,7 +3027,19 @@
       "dir": "rx"
      }
     ],
+    "PG9": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
     "PC6": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PG14": [
      {
       "dev": "UART6",
       "dir": "tx"
@@ -3063,7 +3105,23 @@
       "dir": "tx"
      }
     ],
+    "PE2": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART10",
+      "dir": "rx"
+     }
+    ],
     "PD14": [
+     {
+      "dev": "UART9",
+      "dir": "rx"
+     }
+    ],
+    "PG0": [
      {
       "dev": "UART9",
       "dir": "rx"
@@ -3075,13 +3133,25 @@
       "dir": "tx"
      }
     ],
-    "PE2": [
+    "PG1": [
+     {
+      "dev": "UART9",
+      "dir": "tx"
+     }
+    ],
+    "PG11": [
      {
       "dev": "UART10",
       "dir": "rx"
      }
     ],
     "PE3": [
+     {
+      "dev": "UART10",
+      "dir": "tx"
+     }
+    ],
+    "PG12": [
      {
       "dev": "UART10",
       "dir": "tx"
@@ -3413,7 +3483,19 @@
       "role": "scl"
      }
     ],
+    "PB3": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
     "PB11": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PB12": [
      {
       "dev": "I2C2",
       "role": "sda"
@@ -3443,7 +3525,13 @@
       "role": "scl"
      }
     ],
-    "PF14": [
+    "PF5": [
+     {
+      "dev": "I2C4",
+      "role": "scl"
+     }
+    ],
+    "PG7": [
      {
       "dev": "I2C4",
       "role": "scl"
@@ -3456,6 +3544,12 @@
      }
     ],
     "PF15": [
+     {
+      "dev": "I2C4",
+      "role": "sda"
+     }
+    ],
+    "PG6": [
      {
       "dev": "I2C4",
       "role": "sda"
@@ -3527,6 +3621,16 @@
      "devices": "12",
      "channel": "8"
     }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 5,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 16,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 16
+   },
+   "sdio": {
+    "pin_config": true,
+    "driver": true
    }
   }
  }
