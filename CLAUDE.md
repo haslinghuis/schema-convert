@@ -1,7 +1,9 @@
 # Working on schema-convert
 
 Converts flight-controller schematic PDFs into Betaflight `config.h` targets.
-Read `README.md` for what it does and `ROADMAP.md` for what is known broken.
+Read `README.md` for what it does, `ROADMAP.md` for what is still open, and
+`FINDINGS.md` for every defect it has had - its opening section lists the seven
+shapes they keep taking, which is the fastest way to avoid repeating one.
 
 Every rule below is here because it was violated and cost something. None of it
 is general advice.

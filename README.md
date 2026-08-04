@@ -147,9 +147,12 @@ does not say which is the one failure mode worth avoiding.
 
 The desktop app does the same thing with a box per function.
 
-[`ROADMAP.md`](ROADMAP.md) has the full gap analysis: known defects, which
-`config.h` defines are never emitted (with how many real boards use them), and
-what would need circuit-level analysis rather than net-label matching.
+[`ROADMAP.md`](ROADMAP.md) is what is still open: which `config.h` defines are
+never emitted (with how many real boards use them), and what would need
+circuit-level analysis rather than net-label matching.
+[`FINDINGS.md`](FINDINGS.md) is every defect the tool has had and how it was
+found — worth reading before changing the parser, since most of what has gone
+wrong here has gone wrong more than once.
 
 ## License
 
