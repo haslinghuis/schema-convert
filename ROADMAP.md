@@ -51,7 +51,7 @@ is in each section below.
 | §3.5 | Sheets that never name their MCU. Not broken: 100% agreement given `--target` | 34 |
 | §3.4 | **AT32** peripheral tables are not harvested, so those boards cannot be converted at all | 17 |
 | §1.13 | SPI buses still refused for a missing line | 17 buses on 13 |
-| §1.20 | Unbound net labels that classify to a real role, after the fused-annotation fix | 145 on 30 |
+| §1.20 | Unbound net labels that classify to a real role, after the fused-annotation and rotated-name fixes | see §1.21 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |

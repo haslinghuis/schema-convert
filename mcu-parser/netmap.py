@@ -627,7 +627,17 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
     spare = [t for t in spare if id(t) not in {id(x) for x in left}]
     right = _fill_edge_holes(right, spare, lambda w: w.x1, lambda w: w.y0)
 
-    horizontal = biggest(lambda w: w.y0)
+    # A rotated name is aligned at one end and grows from the other, exactly as
+    # a column of horizontal ones is: a top edge shares y0 and runs downward, a
+    # bottom edge shares y1 and runs up. So the same argument the two columns
+    # get above applies here, and clustering on y0 alone reads a bottom edge as
+    # "the names that happen to be the same length". One F7 kept the eleven
+    # 3-character names of its bottom edge and dropped PB10, PB11 and VCAP_1,
+    # orphaning the three labels that wanted them - with nothing else wrong,
+    # because a shorter edge is still a valid edge.
+    by_y0, by_y1 = biggest(lambda w: w.y0), biggest(lambda w: w.y1)
+    horizontal, h_coord = ((by_y1, lambda w: w.y1) if len(by_y1) > len(by_y0)
+                           else (by_y0, lambda w: w.y0))
     # A horizontal edge only wins when it is clearly the stronger reading: the
     # two columns of an ordinary symbol also share a handful of y values where
     # rows happen to line up, and mistaking that for a top edge would tear a
@@ -637,7 +647,7 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
         # be what tips the comparison above.
         horizontal = _fill_edge_holes(
             horizontal, [t for t in tagged if id(t) not in {id(x) for x in horizontal}],
-            lambda w: w.y0, lambda w: w.x0)
+            h_coord, lambda w: w.x0)
         mid_y = (box[1] + box[3]) / 2
         side = "T" if sum(t[0].y0 for t in horizontal) / len(horizontal) < mid_y else "B"
         rows = [PinRow(pin, w.x0, side, afs, gpio)

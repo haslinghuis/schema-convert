@@ -1132,3 +1132,51 @@ The desktop app offers the same thing as a box per function, driven by
 list shrinks as functions are filled in, a refused pin is shown against the box
 it came from, and anything not on the curated list can be added by name.
 
+
+---
+
+### 1.21 A rotated pin name is aligned at one end, and only one was clustered — FIXED
+
+The mirror of §1.20, found the same way it describes: from a board whose gyro
+would not bind, not from reading the code.
+
+An edge is found by clustering pin names on a shared coordinate, and §1.20
+already records that *which* coordinate depends on the edge - a left column
+shares `x0`, a right column shares `x1`, and taking only one of them reads a
+column as "the names that happen to be the same length". The code says so in a
+comment. It then clustered the horizontal edges on `y0` alone.
+
+A rotated name has the same asymmetry: a top edge shares `y0` and runs
+downward, a bottom edge shares `y1` and runs up. On an F7 whose bottom edge
+carried sixteen names, `y1` was a clean 229.26 for every one of them while `y0`
+tracked nothing but character count:
+
+```
+PA3 … PB2  y0 ~219.5   3 chars
+PB10 PB11  y0  216.68  4 chars
+VCAP_1     y0  209.54  6 chars
+```
+
+At `tol=1.0` that keeps the eleven 3-character names and drops the rest, so
+`GYRO1_CLK`, `GYRO1_EXTI` and `V_CAP` had nowhere to bind. Nothing looked wrong:
+the edge that remained is a perfectly good edge, agreement stayed at 100%
+because it measures what was read, and the missing `GYRO_1_EXTI` was reported
+as "not produced from this sheet" - which reads as a gap in the *drawing*. The
+operator's move is then to place the pin by hand, asserting from the schematic
+something the tool had already drawn correctly and thrown away.
+
+Clustering both ends and taking the stronger reading, exactly as the two
+columns already do.
+
+```
+corpus (153 sheets)   pins read 8473 -> 8546     orphaned labels 426 -> 387
+                      nets checked 2191 -> 2213  all 22 newly checked agree
+per board             19 better, 134 unchanged, 0 worse
+```
+
+One board looked worse by orphan count and is not: it reads five more pins,
+newly binds `S8` and emits `MOTOR8_PIN` with its timer mapping, and its two
+UART bindings are untouched. The sheet carries duplicate `RX1`/`TX2` labels, so
+widening the edge brought a second unpaired instance of each into scope. Raw
+orphan count rises when more of a symbol becomes visible; it is not by itself a
+measure of loss, and the binding set is - it only gained.
