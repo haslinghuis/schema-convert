@@ -44,6 +44,7 @@ container you intend to support is the usual answer, and is what CI should do.
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -86,6 +87,31 @@ def build_python() -> str:
         run(str(exe), "-m", "pip", "install", "--quiet", "--upgrade",
             "pip", "pyinstaller")
     return str(exe)
+
+
+# The frozen binary is what the app actually runs, and nothing about a stale one
+# looks wrong: it starts, converts, and behaves like the revision it was built
+# from. So record what went into it, and let check_sidecar.py refuse a bundle
+# whose sources have moved since. Content, not mtimes - a checkout rewrites
+# those, and a rebuild that only touched a comment should not fail a build.
+SOURCE_STAMP = "sources.sha256"
+
+
+def pipeline_sources() -> "list[Path]":
+    """Exactly what freeze_pipeline puts inside the executable."""
+    parser = REPO / "mcu-parser"
+    return sorted([*parser.glob("*.py"), *(parser / "data").rglob("*")])
+
+
+def stamp_sources() -> str:
+    """One digest over every frozen input and its path."""
+    h = hashlib.sha256()
+    for f in pipeline_sources():
+        if not f.is_file():
+            continue
+        h.update(f.relative_to(REPO).as_posix().encode())
+        h.update(f.read_bytes())
+    return h.hexdigest()
 
 
 def freeze_pipeline(out: Path) -> Path:
@@ -165,6 +191,7 @@ def main() -> int:
     if not args.skip_pipeline:
         print("freezing the pipeline...")
         exe = freeze_pipeline(RESOURCES / "pipeline")
+        (exe.parent / SOURCE_STAMP).write_text(stamp_sources() + "\n")
         print(f"  {exe.relative_to(REPO)}  "
               f"{exe.stat().st_size / 1_048_576:.1f} MB")
     if not args.skip_poppler:

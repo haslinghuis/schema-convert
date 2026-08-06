@@ -1234,3 +1234,37 @@ board each. The middle one wants a dot accepted as a separator and the last
 wants a part number accepted as a device prefix; both are general changes to
 every rule in the table rather than to this one, and `CLK_G473` shows what the
 second would cost if it were done carelessly.
+
+---
+
+### 1.23 The desktop app shipped a converter from an older revision — FIXED
+
+Caught while rebuilding the app after §1.21 and §1.22, and it had already
+happened: the first bundle of the session shipped a pipeline frozen before
+either fix.
+
+`app/src-tauri/resources/pipeline/schema-convert` is not a wrapper. It is the
+whole converter frozen with PyInstaller, and the installed app runs *that*, not
+the repository's Python. `tauri build` copies it into the bundle and never
+rebuilds it, so `npm run tauri:build` produces a working `.deb`, `.rpm` and
+`.AppImage` around a converter of any age.
+
+The §1.1 shape exactly. Nothing is broken and no diagnostic fires: the app
+starts, converts, and behaves like the revision it was frozen from. The only
+symptom is the desktop app disagreeing with the repository - which reads as a
+bug in the conversion, and would be looked for in the code that had already
+been fixed. It was found only by running the bundled binary directly and seeing
+it still print `not produced from this sheet: GYRO_1_EXTI`.
+
+`build_sidecars.py` now records a digest over every input it freezes - each
+`mcu-parser/*.py` and everything under `mcu-parser/data` - beside the
+executable. `check_sidecar.py` recomputes it and refuses to bundle when the two
+disagree, and `tauri.conf.json` runs it from `beforeBuildCommand` so it cannot
+be skipped. Content rather than mtimes: a checkout rewrites those, and a build
+should not fail because a file was touched.
+
+It guards the bundle only. `beforeDevCommand` is untouched, because a source
+checkout runs the repository's Python and never reads the frozen copy - which
+is also why this went unnoticed for as long as it did. The stamp is gitignored
+along with the rest of `resources/`, so a fresh clone fails closed and is told
+to build the sidecars.
