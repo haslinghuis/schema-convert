@@ -123,6 +123,14 @@ class ClassifyTests(unittest.TestCase):
         ("GYRO-CS", "gyro_cs", None, None),
         ("ICM-INT", "gyro_exti", None, None),
         ("GYRO-CLOCK", "gyro_clkin", None, None),
+        # CLK is the SPI clock everywhere else, so it only reads as the gyro
+        # clock input when the net names the device it belongs to. Five
+        # spellings of that across the corpus, and none were read.
+        ("GYRO_CLK", "gyro_clkin", None, None),
+        ("GYRO1_CLK", "gyro_clkin", None, None),
+        ("IMUCLK", "gyro_clkin", None, None),
+        ("CLK_IMU", "gyro_clkin", None, None),
+        ("GYRO2_CLK", "gyro2_clkin", None, None),
         ("GYRO-MISO", "gyro_spi", None, "sdi"),
         ("GYRO_MOSI", "gyro_spi", None, "sdo"),
         ("GYRO-SCLK", "gyro_spi", None, "sck"),
@@ -210,6 +218,26 @@ class ClassifyTests(unittest.TestCase):
         for net in ("ICM42688", "MAX7456", "W25Q128", "BMP280"):
             with self.subTest(net=net):
                 self.assertIsNone(genconfig.classify(net)[0])
+
+    def test_an_unattributed_clock_is_not_a_gyro_clock(self):
+        # The counterpart to reading GYRO_CLK: CLK on its own is the SPI clock
+        # in this file, the corpus carries CLK_G473 for an MCU oscillator and
+        # SW_CLK for the debug port, and FLASH_CLK and OSD_CLK belong to other
+        # devices. Widening the gyro rule far enough to catch those would put a
+        # 32kHz square wave on a bus clock.
+        for net in ("CLK", "CLK_G473", "SW_CLK", "SWCLK", "FLASH_CLK",
+                    "OSD_CLK", "SPI_CLK", "FC-CLK"):
+            with self.subTest(net=net):
+                role = genconfig.classify(net)[0]
+                self.assertNotEqual(role, "gyro_clkin", net)
+
+    def test_a_gyro_bus_clock_is_not_the_gyro_clock_input(self):
+        # SCK and SCLK name the bus even with the same device prefix, and they
+        # are checked as a bus clock rather than as a timer.
+        for net in ("GYRO_SCK", "GYRO1_SCLK", "IMU_SCK"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], "gyro_spi")
+                self.assertEqual(netmap.net_requirement(net)[0], "spi_sck")
 
     def test_motor_and_uart_do_not_collide(self):
         """VTX-SW is a rail switch, not UART SW; S1 is a motor, not a signal."""
@@ -368,6 +396,8 @@ class NetRequirementTests(unittest.TestCase):
         ("MOTOR3", ("timer", "3")),
         ("LED-STRIP", ("timer", None)),
         ("GYRO-CLOCK", ("timer", None)),
+        ("GYRO_CLK", ("timer", None)),
+        ("CLK_IMU", ("timer", None)),
         ("ADC-BATT", ("adc", None)),
         # Nets that constrain nothing: a chip select or an LED can be any GPIO,
         # so they must not be scored as agreement.
@@ -665,7 +695,7 @@ class VocabularyAgreementTests(unittest.TestCase):
         "SPI2_SCK", "SPI1_MISO", "SCK3", "SPI_SDO2",
         "SPI1_NSS", "SPI2_CS", "SPI4_SS",
         "GYRO_1_CS", "GYRO2-CS", "GYRO_CS_2", "GYRO_MISO_2", "SPI4_CLK",
-        "GYRO-EXTI1", "GYRO_INT1", "CLKIN",
+        "GYRO-EXTI1", "GYRO_INT1", "CLKIN", "GYRO_CLK", "IMUCLK", "CLK_IMU",
         "GYRO_1_CLKIN", "MAX7456_SPI_CS", "AT7456_MOSI", "FLASH_CS",
         "BARO_CS", "SDCARD_SPI_CS", "SDIO_CMD",
         "LED0", "LED_STRIP", "BEEPER", "BUZZ", "BEEP",

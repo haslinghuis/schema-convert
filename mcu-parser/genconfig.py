@@ -147,6 +147,14 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # MCU's own clock input is not a rival for it: that arrives on OSC_IN, which
     # the symbol names as a system pin and which never reaches classification.
     (re.compile(r"^(?:(?:GYRO|IMU)[-_]?(\d)?[-_]?)?(?:CLOCK|CLKIN)$"), "gyro_clkin"),
+    # Only CLOCK and CLKIN were read, and the corpus spells this nine ways:
+    # GYRO_CLK, GYRO1_CLK, GYRO_4_CLK, IMUCLK, CLK_IMU. Bare CLK is not one of
+    # them and must not be - everywhere else in this file CLK means the SPI
+    # clock, and the corpus also carries CLK_G473 for an MCU oscillator. So the
+    # net has to say which device it belongs to, and the index sits on either
+    # side of the prefix exactly as it does for CS and EXTI above.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_]?CLK$"), "gyro_clkin"),
+    (re.compile(r"^CLK[-_]?(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?$"), "gyro_clkin"),
     # The device index sits on either side here too, exactly as it does for the
     # chip select above: GYRO2-MISO and GYRO_MISO2 are the same second IMU.
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)?$"),

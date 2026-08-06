@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "bf3c0e98a"
+  "tool_rev": "e6c6995cf"
  },
  "boards": [
   {
@@ -257,8 +257,8 @@
    "net_labels": 40,
    "offset": 0.0,
    "agreement": [
-    19,
-    19
+    20,
+    20
    ],
    "orphan_labels": 0,
    "nets_on_power_pins": 0,
@@ -266,12 +266,12 @@
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 50,
-   "timer_rows": 11,
+   "config_defines": 51,
+   "timer_rows": 12,
    "warnings": 8,
-   "notes": 19,
-   "netmap_digest": "9e260d1c0418556392d145d6130f01480d2bc7bb16d6fb0d9ea5a1c54ca6760b",
-   "config_digest": "8251328cf8ce0cc00db48785bb981e3c22fa02eaba3101d8c0ff080da2a01a0c",
+   "notes": 20,
+   "netmap_digest": "ec80cfba90bf497f61ffcc32e0b5a1441ed9b58e5da8fe00436f4b5cb96431e0",
+   "config_digest": "01e6c9135caee10db5732dba4ffe42db4018f5fb329f7b3484cdc583178c0206",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

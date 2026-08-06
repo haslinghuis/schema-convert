@@ -1056,6 +1056,12 @@ NET_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^MOTOR(\d+)$|^M(\d)$"), "timer"),
     (re.compile(r"^.*LED[-_]?STRIP.*$"), "timer"),
     (re.compile(r"^.*(?:CLOCK|CLKIN)$"), "timer"),
+    # The same spellings genconfig.classify reads as a gyro clock input. Both
+    # gates have to know a name or the pair is useless: a role with no
+    # requirement is emitted unchecked, and a requirement with no role checks a
+    # pin nothing will ever use.
+    (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?\d?[-_]?CLK$"
+                r"|^CLK[-_]?(?:GYRO|IMU|MPU|ICM)[-_]?\d?$"), "timer"),
     (re.compile(r"^ADC[-_].*$|^.*[-_](?:BATT|VBAT|CURR|CURRENT|RSSI)$"), "adc"),
 ]
 

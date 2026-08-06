@@ -1180,3 +1180,57 @@ UART bindings are untouched. The sheet carries duplicate `RX1`/`TX2` labels, so
 widening the edge brought a second unpaired instance of each into scope. Raw
 orphan count rises when more of a symbol becomes visible; it is not by itself a
 measure of loss, and the binding set is - it only gained.
+
+---
+
+### 1.22 The gyro clock input was read as CLKIN and CLOCK, and it has nine spellings — FIXED
+
+Shape 2, found by the method shape 2 prescribes: not by reading the rule, but by
+counting what came out *unclassified* across the whole corpus. 878 net instances
+on 153 sheets, and filtering them to anything clock-shaped:
+
+```
+GYRO_4_CLK x3   GYRO_CLK x2   IMUCLK x2   GYRO1_CLK   CLK_IMU
+EXT_CLKGY       ICM42688.CLK  42688P_CLKIN
+```
+
+The rule read `CLOCK` and `CLKIN` only. Every one of those boards bound the net
+to a pin, printed it in "nets with no config.h role", and emitted no
+`GYRO_n_CLKIN_PIN` - so the operator's move is to place by hand a pin the sheet
+had already given.
+
+**Bare `CLK` is deliberately still not read.** Everywhere else in `classify` CLK
+means the SPI clock - `SPI1CLK`, `SPI4_CLK`, `1-CLK` are all SCK - and the same
+corpus carries `CLK_G473` for an MCU oscillator, `SW_CLK` and `SWDCLK` for the
+debug port, and `FLASH_CLK` and `OSD_CLK` for other devices' buses. So the net
+has to say which device the clock belongs to, and the index sits on either side
+of the prefix exactly as §1.16 says it does for CS and EXTI. A test asserts the
+unattributed ones stay out, because widening this rule far enough to catch
+`FC-CLK` would put a 32kHz square wave on a bus clock.
+
+**Both gates had to learn it** (§1.18). `classify` gives the role and
+`netmap.NET_RULES` gives the requirement, and a name known to one alone is
+useless in a specific way: a role with no requirement is emitted unchecked, and
+a requirement with no role checks a pin nothing will use. `NET_VOCAB` already
+collected these, via its `GYRO|IMU|MPU|ICM` alternatives.
+
+```
+corpus (153 sheets)   boards emitting CLKIN 30 -> 37   unclassified nets 878 -> 868
+                      defines 6037 -> 6051             timer rows 594 -> 601
+per board             9 better, 0 worse
+```
+
+Two of the nine gain no define and are still an improvement. They carry
+`GYRO_4_CLK`, which now classifies, and so now goes through the firmware check
+and the third-or-later-IMU path: *"GYRO_4_CLK is on PC14, which Betaflight's
+STM32H743 tables do not support for that function - omitted"* and *"names a
+third or later IMU; only GYRO_1 and GYRO_2 are generated - add it by hand"*.
+Before it was one entry in a list of nets with no role. Classifying a net the
+generator cannot use is not a silent drop as long as the reason is stated -
+which is the §1.1 test any new role has to pass.
+
+Not read, and left that way: `EXT_CLKGY`, `ICM42688.CLK` and `42688P_CLKIN`, one
+board each. The middle one wants a dot accepted as a separator and the last
+wants a part number accepted as a device prefix; both are general changes to
+every rule in the table rather than to this one, and `CLK_G473` shows what the
+second would cost if it were done carelessly.
