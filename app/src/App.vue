@@ -57,6 +57,47 @@ const placeable = computed(() => {
 const PIN = /^P[A-K]\d{1,2}$/i;
 const badPin = (v: string) => !!v.trim() && !PIN.test(v.trim());
 
+// What the last successful run was actually given. Typing in a box changes
+// nothing on its own - the value reaches config.h only by re-running - so the
+// panel needs to distinguish a pin that has been generated from one that has
+// only been typed. Without this there is no way to say "not applied yet", and
+// the boxes look identical either side of the run that applies them.
+const applied = ref<Record<string, string>>({});
+
+// Normalised exactly once, and used both for the comparison above and for the
+// call itself, so a box can never count as applied while differing from what
+// was sent.
+const cleanOverrides = computed(() => {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(overrides.value)) {
+    const pin = v.trim().toUpperCase();
+    if (pin) out[k] = pin;
+  }
+  return out;
+});
+
+const anyBadPin = computed(() => Object.values(overrides.value).some((v) => badPin(v ?? "")));
+
+// A function whose box disagrees with the generated config - either newly
+// filled, edited, or cleared.
+const pending = computed(() => {
+  const now = cleanOverrides.value;
+  const keys = new Set([...Object.keys(now), ...Object.keys(applied.value)]);
+  return [...keys].filter((k) => (now[k] ?? "") !== (applied.value[k] ?? ""));
+});
+
+const canApply = computed(
+  () => !!pdf.value && !busy.value && !anyBadPin.value && pending.value.length > 0,
+);
+
+// "Add" only ever meant "give me a box for a function the sheet did not list".
+// With an empty name it did nothing and said nothing, which reads as a broken
+// button when it sits directly under the boxes that do hold values.
+const canAddFunction = computed(() => {
+  const name = extraName.value.trim().toUpperCase().replace(/_PIN$/, "");
+  return !!name && !placeable.value.includes(name);
+});
+
 // The pipeline refuses one value at a time and names it: "--set UART3_TX=PA5:
 // PA5 cannot do uart_tx3 ...". Show that against the field it is about rather
 // than only in the general error box.
@@ -66,8 +107,9 @@ const rejected = computed(() => {
 });
 
 function addFunction() {
+  if (!canAddFunction.value) return;
   const name = extraName.value.trim().toUpperCase().replace(/_PIN$/, "");
-  if (name && !(name in overrides.value)) overrides.value[name] = "";
+  overrides.value[name] = "";
   extraName.value = "";
 }
 
@@ -102,10 +144,11 @@ async function run() {
       board: board.value.trim().toUpperCase(),
       manufacturer: manufacturer.value.trim().toUpperCase(),
       target: target.value.trim() || null,
-      overrides: Object.fromEntries(
-        Object.entries(overrides.value).filter(([, v]) => v.trim()),
-      ),
+      overrides: cleanOverrides.value,
     });
+    // Only after the pipeline accepted them. A rejected value must keep
+    // showing as outstanding, since it is still not in the config.
+    applied.value = { ...cleanOverrides.value };
     tab.value = "report";
   } catch (e) {
     error.value = String(e);
@@ -288,10 +331,32 @@ async function copyConfig() {
                 ✕
               </button>
             </div>
-            <p v-if="report.meta.placed[fn]" class="mono mt-0.5 text-xs text-bf-400">
+            <p v-if="pending.includes(fn)" class="mono mt-0.5 text-xs text-amber-400">
+              not in the config yet
+            </p>
+            <p
+              v-else-if="report.meta.placed[fn]"
+              class="mono mt-0.5 text-xs text-bf-400"
+            >
               placed by hand — not read from the sheet
             </p>
           </div>
+
+          <!-- Typing a pin does not change the config; only a run does. The
+               action that applies them belongs next to the boxes, not only at
+               the top of the column. -->
+          <button
+            :disabled="!canApply"
+            class="mt-1 w-full rounded-md bg-bf-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition enabled:hover:bg-bf-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600"
+            @click="run"
+          >
+            <template v-if="busy">Generating…</template>
+            <template v-else-if="anyBadPin">Fix the pin names above</template>
+            <template v-else-if="pending.length">
+              Apply {{ pending.length }} pin{{ pending.length > 1 ? "s" : "" }} and generate
+            </template>
+            <template v-else>All supplied pins are in the config</template>
+          </button>
 
           <div class="mt-3 flex items-center gap-2 border-t border-neutral-800 pt-3">
             <input
@@ -301,12 +366,20 @@ async function copyConfig() {
               @keyup.enter="addFunction"
             />
             <button
-              class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500"
+              :disabled="!canAddFunction"
+              class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 transition enabled:hover:border-neutral-500 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:text-neutral-700"
+              :title="
+                extraName.trim() ? 'Already listed above' : 'Name a function to add a box for it'
+              "
               @click="addFunction"
             >
               Add
             </button>
           </div>
+          <p class="mt-1 text-xs leading-relaxed text-neutral-600">
+            Add only gives you a box. The pin reaches
+            <span class="mono">config.h</span> when you generate.
+          </p>
         </section>
       </section>
 
