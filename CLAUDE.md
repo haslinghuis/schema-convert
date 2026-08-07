@@ -170,6 +170,16 @@ throughout this — and must not be touched.
 
 ---
 
+## Editing the docs
+
+`str.replace` returns the string unchanged when the pattern does not match, so a
+scripted edit that misses silently succeeds. One §4.8 update was written,
+committed and pushed without ever being in the file - the section title changed
+in the same script and the title *did* match, which made it look applied.
+
+Grep for a phrase from the new text after every scripted doc edit. It is one
+line and it is the only thing that catches this.
+
 ## Delegating to subagents
 
 What worked, and why:

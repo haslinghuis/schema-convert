@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "576a0f3e4"
+  "tool_rev": "8b5a2c043"
  },
  "boards": [
   {
@@ -122,18 +122,16 @@
    "uncorroborated_mismatches": 0,
    "config_defines": 63,
    "timer_rows": 7,
-   "warnings": 7,
-   "notes": 10,
+   "warnings": 6,
+   "notes": 11,
    "netmap_digest": "36b20591e52e3f5e8f7b89536af30407eb517a171fd636fda67fb4e5211c0589",
-   "config_digest": "5847fe2be06f594e0d37e24afa63eb4451455a4cada86d589db11574020e2b51",
+   "config_digest": "4c952bf77b80b2bb139c312a868799209b6d7c48554ef32eb66e164bd5bae1a7",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
     "timer_channel_collisions": [],
-    "timer_rate_class_clashes": [
-     "TIM3: LED strip+gyro CLKIN"
-    ],
+    "timer_rate_class_clashes": [],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }

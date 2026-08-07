@@ -56,7 +56,7 @@ is in each section below.
 | §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
-| §4.8 | Timer rate clashes are now reported (part 1 done); the picker does not yet avoid them | 12 |
+| §4.8 | Timer rate clashes: reported and avoided where a legal alternative exists; 5 boards have none | 5 |
 | §4.9 | The pin editor offers no suggestions, though the sheet usually contains the answer | — |
 | §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
@@ -464,7 +464,7 @@ of these were found by running the corpus, not the suite.
 The config repo allows an optional `config.c` next to `config.h` for
 board-specific init. Not emitted, and not detected when one would be needed.
 
-### 4.8 Timer allocation is not verified against what each function needs — PART 1 DONE
+### 4.8 Timer allocation is not verified against what each function needs — DONE
 
 `timerConfigure(timHw, period, hz)` sets the period and prescaler of a **whole
 TIM unit**, not of one channel. So two functions on one unit must want the same
@@ -503,21 +503,42 @@ are a choice the tool made rather than how the board is wired: where a pin
 carries several timer channels, the picker takes one without considering what
 else landed on that unit.
 
-**Fix:** two parts, and the first is cheap.
+**Both parts are done.**
 
-1. *Report it.* Group the emitted `TIMER_PIN_MAPPING` by TIM unit, and warn when
-   one unit carries more than one rate class, naming the functions and saying
-   the clash only bites without bitbang. That is a dozen lines and an invariant
-   in `analysis.py` beside the occurrence check, which is the natural place —
-   `timer_occurrence_errors` already resolves pin+occurrence to a channel.
-2. *Avoid it.* When a pin has several timer options, prefer an occurrence whose
-   unit carries nothing of a different class. The picker already prefers
-   advanced timers for servos and dodges DMA collisions, so this is another term
-   in the same choice, not new machinery.
+*Report it.* `timer_rate_clashes()` groups the picks by TIM unit and warns when
+one carries more than one class, naming the functions, what each wants of the
+timer, and the bitbang caveat where a motor is involved. The caveat is
+family-aware, because the same clash is latent on H7 and live on F4 without
+DShot telemetry, and a warning that cries wolf on the common case stops being
+read. `analysis.timer_rate_class_clashes` records it per board, resolving each
+occurrence back through the firmware table rather than trusting genconfig's
+bookkeeping. It found one on a golden board immediately - `h5-rev-b` had its LED
+strip and its gyro CLKIN on TIM3.
 
-Do (1) first and see how many of the 12 survive it: a board whose only LED strip
-pin shares a unit with its only motor pin has no fix, and should say so rather
-than be silently rearranged.
+*Avoid it*, scoped by what the report then measured. The pin is fixed by the
+sheet, so the only freedom is which of that pin's channels to use, and that
+decides the unit. `avoid_rate_clashes()` re-picks one row at a time and **never
+a motor**: motors are grouped onto one timer deliberately, so moving one to
+dodge a clash would break the grouping to fix a symptom. What landed on top of
+them moves instead.
+
+| | |
+|---|---|
+| rate clashes | **16 → 5** |
+| rows moved | 14, all LED strip or camera control |
+| defines | unchanged - a re-pick, not an addition |
+
+Two things it fixed that were not the target. **Same-channel collisions went
+12 → 2** - two pins on one compare register is usually a board's LED strip
+sitting on a motor's channel, so moving one fixes both. And DMA contention
+*improved*, "every option already taken" going 12 → 9, because the strip leaving
+the motors' unit freed the stream it was contending for. DMA was the risk I
+flagged in moving rows on fixed-mapping parts; it went the other way.
+
+The 5 that remain are the structurally stuck boards the count identified, where
+no legal assignment exists - a board whose only LED-strip pin shares a unit with
+its only motor pin has no fix, and the warning is the honest output.
+`h5-rev-b` now records `[]`.
 
 ### 4.9 The pin editor has no suggestions
 

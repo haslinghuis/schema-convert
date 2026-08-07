@@ -640,6 +640,52 @@ class PinioBoxNameTests(unittest.TestCase):
         self.assertLessEqual(len(got), genconfig.BOX_NAME_MAX)
 
 
+class RateClashAvoidanceTests(unittest.TestCase):
+    """
+    genconfig.avoid_rate_clashes. The pin is fixed by the sheet; the only
+    freedom is which of that pin's channels to use, and that picks the unit.
+    """
+
+    CAPS = {"timers": {
+        "PA0": ["TIM2_CH1", "TIM5_CH1"],     # the LED strip has somewhere to go
+        "PB0": ["TIM3_CH3"],                 # this one does not
+        "PC6": ["TIM3_CH1", "TIM8_CH1"],     # a motor, which must not be moved
+    }}
+
+    def pick(self, label, pin, occ, channel):
+        return genconfig.TimerPick(pin, label, occ, channel, 0, "inferred")
+
+    def test_the_non_motor_moves_off_the_motors_timer(self):
+        picks = [self.pick("MOTOR1_PIN", "PC6", 1, "TIM3_CH1"),
+                 self.pick("LED_STRIP_PIN", "PA0", 1, "TIM2_CH1")]
+        picks[1].channel, picks[1].occurrence = "TIM3_CH3", 1   # same unit
+        notes = genconfig.avoid_rate_clashes(picks, self.CAPS)
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(picks[0].channel, "TIM3_CH1", "the motor must not move")
+        self.assertNotEqual(picks[1].channel.split("_")[0], "TIM3")
+
+    def test_a_motor_is_never_the_one_that_moves(self):
+        # Motors are grouped onto one timer deliberately; moving one to dodge a
+        # clash breaks the grouping to fix a symptom.
+        picks = [self.pick("MOTOR1_PIN", "PC6", 1, "TIM3_CH1"),
+                 self.pick("LED_STRIP_PIN", "PB0", 1, "TIM3_CH3")]
+        genconfig.avoid_rate_clashes(picks, self.CAPS)
+        self.assertEqual(picks[0].channel, "TIM3_CH1")
+
+    def test_with_no_alternative_the_clash_stands(self):
+        # PB0 reaches only TIM3, so there is nothing to move to and the warning
+        # is the honest output.
+        picks = [self.pick("MOTOR1_PIN", "PC6", 1, "TIM3_CH1"),
+                 self.pick("LED_STRIP_PIN", "PB0", 1, "TIM3_CH3")]
+        self.assertEqual(genconfig.avoid_rate_clashes(picks, self.CAPS), [])
+        self.assertNotEqual(genconfig.timer_rate_clashes(picks, {"family": "STM32H7"}), [])
+
+    def test_two_functions_of_one_class_are_left_alone(self):
+        picks = [self.pick("MOTOR1_PIN", "PC6", 1, "TIM3_CH1"),
+                 self.pick("MOTOR2_PIN", "PC6", 1, "TIM3_CH1")]
+        self.assertEqual(genconfig.avoid_rate_clashes(picks, self.CAPS), [])
+
+
 class BeeperTimerRowTests(unittest.TestCase):
     """
     A TIMER_PIN_MAP row for the beeper does nothing without BEEPER_PWM_HZ.

@@ -802,6 +802,70 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
     return out
 
 
+def avoid_rate_clashes(picks: List["TimerPick"], caps: dict) -> List[str]:
+    """
+    Re-pick occurrences so one TIM unit does not serve two rate classes.
+
+    The pin is fixed - the sheet says which pin carries the function - so the
+    only freedom is *which of that pin's channels* to use, and that decides the
+    unit. Solving it exactly over the whole board found 7 of 12 clashing boards
+    avoidable, and in 5 of those the single move is the LED strip.
+
+    Deliberately one move at a time, and never a motor. Motors are grouped onto
+    one timer on purpose, so moving one to dodge a clash would break the
+    grouping to fix a symptom; the LED strip, camera control or CLKIN that
+    landed on top of them is what should move. Where no single move works the
+    clash is reported unchanged - see ROADMAP 4.8, where 5 of the 12 have no
+    legal assignment at all.
+
+    DMA is numbered after this. On fixed-mapping parts a move can leave a row
+    with no free stream, and that is already reported by the numbering itself
+    rather than silently accepted.
+    """
+    notes: List[str] = []
+    def classes() -> Dict[str, set]:
+        out: Dict[str, set] = defaultdict(set)
+        for p in picks:
+            got = _rate_class(p.label)
+            if got:
+                out[p.channel.split("_")[0]].add(got[1])
+        return out
+
+    for _ in range(len(picks)):
+        clashing = {u for u, ks in classes().items() if len(ks) > 1}
+        if not clashing:
+            break
+        moved = False
+        for p in picks:
+            got = _rate_class(p.label)
+            if not got or got[1] == "motor":
+                continue
+            unit = p.channel.split("_")[0]
+            if unit not in clashing:
+                continue
+            for i, ch in enumerate(caps["timers"].get(p.pin) or [], start=1):
+                target = ch.split("_")[0]
+                if target == unit:
+                    continue
+                here = classes()
+                here[unit].discard(got[1])
+                if len(here.get(target, set()) | {got[1]}) > 1:
+                    continue
+                was = p.channel
+                p.occurrence, p.channel = i, ch
+                notes.append(
+                    f"{p.label} moved from {was} to {ch}: {unit} already "
+                    f"carries another function that needs a different rate of "
+                    f"it, and a timer's period belongs to the whole unit")
+                moved = True
+                break
+            if moved:
+                break
+        if not moved:
+            break
+    return notes
+
+
 def inert_beeper_timer_row(picks: Sequence["TimerPick"], cfg: "Config") -> List[str]:
     """
     A `TIMER_PIN_MAP` row for the beeper with no `BEEPER_PWM_HZ` behind it.
@@ -2765,6 +2829,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # This runs before the DMA numbering below, not after: a dropped row must
     # not take a DMA channel with it, and must not appear in the reasoning for
     # why another row was moved.
+    cfg.notes.extend(avoid_rate_clashes(picks, caps))
+
     defined = {m.group(1) for m in re.finditer(r"^#define\s+([A-Z][A-Z0-9_]+)",
                                                "\n".join(cfg.lines), re.M)}
     for p in list(picks):
