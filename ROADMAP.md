@@ -59,6 +59,7 @@ is in each section below.
 | §4.8 | Timer rate clashes: reported and avoided where a legal alternative exists; 5 boards have none | 5 |
 | §4.9 | Pin-editor suggestions: 136 offered on 59 boards; the rest have nothing on the sheet to offer | — |
 | §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
+| §4.11 | DMA contention against DShot bitbang: investigated, modelled, and dropped - the model flagged 151 of 467 shipped configs (FINDINGS §4.11) | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:

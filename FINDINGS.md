@@ -1289,3 +1289,58 @@ whenever a new submission arrives, before anything else is investigated.
 
 ## 2. Coverage — what the sheets carry and the tool did not emit
 
+### 4.11 A DMA-contention model that the corpus refused
+
+A config review argued that a generated F722 target needed `ADC_INSTANCE ADC3`
+and `ADC3_DMA_OPT 1`, because `ADC1_DMA_OPT 0` "conflicts with TIM8 through
+SPI1_RX". Two questions: is the remedy right, and should the generator have
+seen the problem itself.
+
+**The remedy is wrong, and provably.** `adcTagMap[]` in `adc_stm32f7xx.c` has
+`{ PC4, ADC_DEVICES_12, ADC_CHANNEL_14 }` - PC4 is an ADC1/ADC2 channel and not
+an ADC3 one. That board's `ADC_CURR_PIN` is `PC4`, and `adcInit()` gates every
+pin on `adcVerifyPin(tag, device)`, so on ADC3 the current channel is simply
+never enabled. No warning, no build error: the target comes up with voltage and
+RSSI working and current metering silently dead. `choose_adc()` already
+intersects the device sets of every ADC pin, so the generator would not have
+made that mistake - it is the kind a human makes when moving one define.
+
+**The problem it names is real in shape and did not survive measurement.**
+Chasing it produced a simulator: harvest `bbTimerHardware[]` and each target's
+`USE_SPI_DMA_ENABLE_EARLY` / `_LATE`, then replay `init.c`'s allocation order
+and ask whether DShot bitbang still gets a pacer stream. Run against the 467
+fixed-mapping configs in the config repo it flagged **151** - including
+CRAZYBEEF4FR, MATEKF411 and TMOTORF411, boards that fly on bitbang every day.
+That is not a corpus of broken configs, it is a broken model, and it was
+deleted rather than tuned.
+
+Three source facts are worth keeping, because two of them were read wrong first
+and cost most of the session:
+
+- **`spiInitBusDMA()` at `init.c:646` is inside `initMsc()`**, the mass-storage
+  boot path. The normal path calls it at 1048 or 1059, *after* `adcInit()` at
+  710. Reading the grep output instead of the function boundaries produced an
+  order - SPI before ADC - that was exactly backwards, and every conclusion
+  drawn from it was wrong in the same direction.
+- **`bbFindPacerTimer()` tests `dmaGetOwner(id)->owner == OWNER_FREE` and
+  continues the loop.** The pacer is not stuck with the first timer it likes;
+  it walks nine candidates on F4/F7. A collision with one of them is not a dead
+  motor, which is what made the first version of the model catastrophic where
+  reality is merely slightly worse. `bbMotorConfig()` really does return on
+  `dmaAllocate()` failure - but only after every candidate is exhausted.
+- **A `TIMER_PIN_MAP` row is not an allocation.** `timerAllocate()` runs at
+  feature init, and LED strip and PPM are runtime choices, so "TIM1 is in the
+  timer map" says nothing about whether TIM1 is free when the motors post-init.
+  Treating the map as ownership is what produced most of the 151.
+
+The rule this is the third instance of: **a checker is a claim about the world,
+so measure it against the world before shipping it.** §1.20 optimised against a
+diagnostic that was half noise; §1.24 found the noise. Here the corpus was
+consulted first and the checker never shipped, which is the cheap version of the
+same lesson. The build would not have caught it either way - see §2 of
+`CLAUDE.md`, a green build says the constants are self-consistent.
+
+For the PR itself the answer is: change nothing on the DMA line. If a change is
+wanted anyway, `ADC1_DMA_OPT 1` is the harmless one - it leaves DMA2_S0 to
+SPI1's receive side instead of pushing it to its second option - and 101 of the
+150 F7 configs in the repo write exactly that. `ADC3` must not be used at all.
