@@ -703,24 +703,6 @@ had; six of the newly-visible nets put SPI1 and SPI3 on pins the firmware tables
 do not support, and those are refused. It emits less and asserts nothing false,
 which is the trade this project keeps choosing.
 
-#### The pattern behind §1.8 through §1.11
-
-Four entries now, and they are all the same defect: **a rule that describes one
-spelling of a thing, written from the boards that happened to be on hand.**
-`TX4` but not `UART4_TX`. `SPI3_SCK` but not `SCK3` or `SPI_SCK2` or `SPI1CLK`.
-`GYRO1-CS` but not `GYRO_1_CS`. Pin names at the head but not the tail. `I2C`
-but not `IIC`. A separator that is a dash or an underscore but never a dot.
-
-None of it was findable by reading the code, and each one was silent: the nets
-went out as "no config.h role" while every diagnostic the tool prints stayed
-clean. What finds them is counting what came out the far end unclassified,
-across every board available — which is a five-minute check and should be run
-whenever a new submission arrives, before anything else is investigated.
-
----
-
-## 2. Coverage — what the sheets carry and the tool did not emit
-
 ### 2.2 Dual-gyro boards — DONE, and now proven on hardware sheets
 
 Three corpus boards emit a complete `GYRO_2_*` set (`SPI_INSTANCE`, `CS_PIN`,
@@ -1268,3 +1250,42 @@ checkout runs the repository's Python and never reads the frozen copy - which
 is also why this went unnoticed for as long as it did. The stamp is gitignored
 along with the rest of `resources/`, so a fresh clone fails closed and is told
 to build the sidecars.
+### 1.24 Half the "lost" net labels were echoes of nets that were found
+
+Chasing §1.20's unbound labels. The worst board reported 45 of them while
+sitting at **100% agreement**, and the list contained `Gyro_SCK`, `ADC_BATT` and
+`LED_STRIP_PIN` - all three of which were bound, to `PA5`, `PC0` and `PA10`.
+
+These sheets draw a signal's name at both ends: once beside the MCU pin and
+once at the chip it runs to. Only the MCU-side copy can pair with a row, so the
+far-end copy orphans - and was reported as *"matched no pin row and were
+omitted"*, which claims a net went missing when it did not.
+
+`split_orphans()` separates the two. Over the corpus, **325 reported → 237
+real**, and of the ones that classify to a role, **103 → 51**. The echoes are
+still counted, as a note rather than a warning, because a copy that did not bind
+is worth knowing about and is not worth alarming about.
+
+The point is not the filter, it is what the number was worth before it. §1.20
+ranked boards by this warning to decide where to look next; half of what it was
+ranking on was noise, and the worst-looking board was one of the healthiest.
+Check what a diagnostic counts before optimising against it.
+
+#### The pattern behind §1.8 through §1.11
+
+Four entries now, and they are all the same defect: **a rule that describes one
+spelling of a thing, written from the boards that happened to be on hand.**
+`TX4` but not `UART4_TX`. `SPI3_SCK` but not `SCK3` or `SPI_SCK2` or `SPI1CLK`.
+`GYRO1-CS` but not `GYRO_1_CS`. Pin names at the head but not the tail. `I2C`
+but not `IIC`. A separator that is a dash or an underscore but never a dot.
+
+None of it was findable by reading the code, and each one was silent: the nets
+went out as "no config.h role" while every diagnostic the tool prints stayed
+clean. What finds them is counting what came out the far end unclassified,
+across every board available — which is a five-minute check and should be run
+whenever a new submission arrives, before anything else is investigated.
+
+---
+
+## 2. Coverage — what the sheets carry and the tool did not emit
+

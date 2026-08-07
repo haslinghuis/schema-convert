@@ -640,6 +640,40 @@ class PinioBoxNameTests(unittest.TestCase):
         self.assertLessEqual(len(got), genconfig.BOX_NAME_MAX)
 
 
+class OrphanEchoTests(unittest.TestCase):
+    """
+    genconfig.split_orphans. A name that is mapped somewhere is not a lost net,
+    however many further copies of it failed to bind - these sheets draw a
+    signal's name at both ends and only the MCU-side copy can pair with a row.
+
+    Reporting the rest as lost claimed a loss on every board drawn that way: one
+    sheet listed 45 while sitting at 100% agreement, with Gyro_SCK, ADC_BATT and
+    LED_STRIP_PIN among them and every one bound.
+    """
+
+    def link(self, net, pin):
+        return netmap.Link(net, pin, "L", True, True, [], True, None)
+
+    def test_a_copy_of_a_mapped_name_is_an_echo(self):
+        lost, echoes = genconfig.split_orphans(
+            ["TX1"], [self.link("TX1", "PA9")])
+        self.assertEqual((lost, echoes), ([], 1))
+
+    def test_a_name_mapped_nowhere_is_a_loss(self):
+        lost, echoes = genconfig.split_orphans(
+            ["SPI4_SCK"], [self.link("TX1", "PA9")])
+        self.assertEqual((lost, echoes), (["SPI4_SCK"], 0))
+
+    def test_the_two_are_separated_not_merged(self):
+        lost, echoes = genconfig.split_orphans(
+            ["TX1", "SPI4_SCK", "TX1"], [self.link("TX1", "PA9")])
+        self.assertEqual(lost, ["SPI4_SCK"])
+        self.assertEqual(echoes, 2)
+
+    def test_nothing_orphaned_is_silent(self):
+        self.assertEqual(genconfig.split_orphans([], []), ([], 0))
+
+
 class RateClashAvoidanceTests(unittest.TestCase):
     """
     genconfig.avoid_rate_clashes. The pin is fixed by the sheet; the only

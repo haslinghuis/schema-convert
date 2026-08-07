@@ -802,6 +802,26 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
     return out
 
 
+def split_orphans(orphans: Sequence[str], links: Sequence[Link]
+                   ) -> Tuple[List[str], int]:
+    """
+    Separate net labels that were genuinely lost from echoes of mapped ones.
+
+    A name that *is* mapped somewhere is not a lost net, however many further
+    copies of it failed to bind: these sheets draw a signal's name at both ends,
+    once by the MCU pin and once at the chip it runs to, and only the MCU-side
+    copy can pair with a row.
+
+    Counting them as losses claimed one on every board drawn that way - a sheet
+    reporting 45 while sitting at 100% agreement, with Gyro_SCK, ADC_BATT and
+    LED_STRIP_PIN in the list and every one of them bound. Over the corpus it
+    was half of them: 325 reported, 237 real.
+    """
+    mapped = {l.net for l in links}
+    lost = [o for o in orphans if o not in mapped]
+    return lost, len(orphans) - len(lost)
+
+
 def avoid_rate_clashes(picks: List["TimerPick"], caps: dict) -> List[str]:
     """
     Re-pick occurrences so one TIM unit does not serve two rate classes.
@@ -2255,9 +2275,22 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cfg.warnings.append(
             f"{l.net} is wired to {l.pin}, a supply/system pin on this symbol - "
             "omitted; check the schematic")
-    if res.orphans:
+    # A name that *is* mapped somewhere is not a lost net, however many further
+    # copies of it failed to bind. These sheets draw a signal's name at both
+    # ends - once by the MCU pin and once at the chip it runs to - and only the
+    # MCU-side copy can pair with a row. Reporting the rest as "matched no pin
+    # row and were omitted" claimed a loss on every board drawn that way: one
+    # sheet reported 45 while sitting at 100% agreement, with Gyro_SCK, ADC_BATT
+    # and LED_STRIP_PIN all in the list and all of them bound.
+    lost, echoes = split_orphans(res.orphans, res.links)
+    if lost:
         cfg.warnings.append("net label(s) that matched no pin row and were "
-                            "omitted: " + ", ".join(res.orphans))
+                            "omitted: " + ", ".join(lost))
+    if echoes:
+        cfg.notes.append(
+            f"{echoes} further copy(ies) of names that are mapped elsewhere did "
+            "not pair with a row - the far end of a net drawn at both ends, not "
+            "a net that went missing")
 
     # ---- group the links by role -----------------------------------------
     motors: Dict[int, str] = {}
