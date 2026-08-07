@@ -729,6 +729,13 @@ RATE_CLASS = (
     ("CLKIN", "gyro CLKIN", "clock/32000, a 32kHz square wave"),
     ("PPM", "RX capture", "a 1MHz timebase (PWM_TIMER_1MHZ)"),
     ("ESCSERIAL", "escserial", "a 1MHz timebase"),
+    # Only when the buzzer is driven as PWM. beeperInit() calls beeperPwmInit
+    # only when beeperFrequency is non-zero, and that comes from
+    # BEEPER_PWM_HZ, which defaults to 0 - so on an ordinary active buzzer the
+    # pin is plain GPIO and never touches a timer. Listed here so that a board
+    # which *does* drive it as PWM has the clash caught; see
+    # inert_beeper_timer_row() for the other half.
+    ("BEEPER", "PWM beeper", "BEEPER_PWM_HZ"),
 )
 
 
@@ -793,6 +800,30 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
                 "(betaflight/config#646)")
         out.append(line)
     return out
+
+
+def inert_beeper_timer_row(picks: Sequence["TimerPick"], cfg: "Config") -> List[str]:
+    """
+    A `TIMER_PIN_MAP` row for the beeper with no `BEEPER_PWM_HZ` behind it.
+
+    `beeperInit()` reads `beeperFrequency` from `BEEPER_PWM_HZ`, which defaults
+    to 0, and only calls `beeperPwmInit()` when it is non-zero. An active buzzer
+    - which is what almost every board has - is driven as plain GPIO and never
+    allocates the timer, so the row does nothing at all.
+
+    It is a widespread copy-paste: 25 of the 619 shipped targets carry a beeper
+    row and exactly *one* of them sets `BEEPER_PWM_HZ`. Worth saying rather than
+    silently accepting, because a reviewer adding the row expects it to have an
+    effect, and a passive buzzer needs both halves.
+    """
+    if not any("BEEPER" in p.label for p in picks):
+        return []
+    if "BEEPER_PWM_HZ" in cfg.emitted:
+        return []
+    return ["BEEPER_PIN has a TIMER_PIN_MAP row but no BEEPER_PWM_HZ, so it "
+            "does nothing: beeperInit() drives the pin as plain GPIO unless "
+            "that frequency is set. Add BEEPER_PWM_HZ if the buzzer is passive, "
+            "or drop the row"]
 
 
 def timer_channel_collisions(picks: Sequence["TimerPick"]) -> List[str]:
@@ -2796,6 +2827,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 cfg.notes.append(f"{p.label} -> {p.channel} inferred (no annotation)")
         for line in timer_channel_collisions(picks):
             cfg.warnings.append(line)
+        for line in inert_beeper_timer_row(picks, cfg):
+            cfg.warnings.append(line)
         for line in timer_rate_clashes(picks, caps):
             cfg.warnings.append(line)
 
@@ -2904,7 +2937,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     for i, (net, _pin) in enumerate(pinios, start=1):
         cfg.define(f"PINIO{i}_BOX", str(39 + i), width=29)
         cfg.define(f"PINIO{i}_CONFIG", "129", width=29)
-        cfg.define(f"BOX_USER{i}_NAME", f'"{_box_name(net)}"', width=29)
+        cfg.define(f"BOX_USER{i}_NAME", f'"{_box_name(net, i)}"', width=29)
         cfg.add()
         cfg.warnings.append(
             f"PINIO{i} ({net}) is set to 129 (boot high, box switches off). The "
@@ -3087,9 +3120,35 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     return cfg, meta
 
 
-def _box_name(net: str) -> str:
-    n = net.upper().replace("-", " ").replace("_", " ").strip()
-    return "VTX PWR" if "VTX" in n else n
+# A PINIO net whose name says nothing: there is no box name to be had from it.
+GENERIC_BOX_NET = re.compile(r"^(?:PINIO|USER|PIO|PIN)\s*\d*(?:\s*(?:PIN|EN))?$",
+                             re.IGNORECASE)
+# The longest name any shipped target uses is 15 characters ("PROG PWR SWITCH"),
+# and the configurator shows these on a button.
+BOX_NAME_MAX = 15
+
+
+def _box_name(net: str, index: int) -> str:
+    """
+    The switch's name for the configurator, taken from the net.
+
+    Half the PINIO nets in the corpus say what the switch does - `VTX-SWITCH`,
+    `CAM_SW`, `BEC12V_EN`, `9V_EN` - and that is a far better button label than
+    "PINIO1". The other half are named `PINIO1` or `PIO1` and say nothing, so
+    those keep the positional fallback.
+
+    Tidied, not translated. An earlier version turned anything containing VTX
+    into "VTX PWR", which asserts the switch controls *power* where the sheet
+    said only "switch". Shipped targets do use that wording, but they were
+    written by someone who knew the board; this is read off a net name and
+    should not claim more than the net does.
+    """
+    n = re.sub(r"[-_]+", " ", net.upper())
+    n = re.sub(r"\s+", " ", n).strip()
+    n = re.sub(r"\s+PIN$", "", n)
+    if not n or GENERIC_BOX_NET.match(n):
+        return f"PINIO{index}"
+    return n[:BOX_NAME_MAX].strip()
 
 
 def main() -> int:

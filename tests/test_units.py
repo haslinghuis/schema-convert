@@ -612,6 +612,74 @@ class FusedAnnotationTests(unittest.TestCase):
         self.assertIs(netmap._unfuse_annotation(w), w)
 
 
+class PinioBoxNameTests(unittest.TestCase):
+    """
+    genconfig._box_name. Half the PINIO nets in the corpus say what the switch
+    does; the rest say nothing and keep the positional fallback.
+    """
+
+    def test_a_net_that_says_something_becomes_the_button_label(self):
+        for net, want in (("VTX-SWITCH", "VTX SWITCH"), ("CAM_SW", "CAM SW"),
+                          ("BEC12V_EN", "BEC12V EN"), ("9V_EN", "9V EN")):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig._box_name(net, 1), want)
+
+    def test_a_net_that_says_nothing_keeps_the_positional_name(self):
+        for net in ("PINIO1", "PIO1", "USER1", "PINIO2_PIN", "PIN-EN"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig._box_name(net, 2), "PINIO2")
+
+    def test_it_is_tidied_not_translated(self):
+        # An earlier version turned anything containing VTX into "VTX PWR",
+        # which claims the switch controls power where the sheet said only
+        # "switch". Read off a net name, it must not claim more than the net.
+        self.assertEqual(genconfig._box_name("VTX_SW", 1), "VTX SW")
+
+    def test_it_fits_the_button(self):
+        got = genconfig._box_name("A_VERY_LONG_SWITCH_NAME_HERE", 1)
+        self.assertLessEqual(len(got), genconfig.BOX_NAME_MAX)
+
+
+class BeeperTimerRowTests(unittest.TestCase):
+    """
+    A TIMER_PIN_MAP row for the beeper does nothing without BEEPER_PWM_HZ.
+    beeperInit() reads the frequency from it, defaults to 0, and only then calls
+    beeperPwmInit(). 25 shipped targets carry a beeper row; exactly one sets the
+    frequency.
+    """
+
+    def pick(self, label, channel):
+        return genconfig.TimerPick("PB9", label, 1, channel, -1, "inferred")
+
+    class Cfg:
+        def __init__(self, emitted=()):
+            self.emitted = set(emitted)
+
+    def test_a_row_without_the_frequency_is_reported(self):
+        out = genconfig.inert_beeper_timer_row(
+            [self.pick("BEEPER_PIN", "TIM4_CH4")], self.Cfg())
+        self.assertEqual(len(out), 1)
+        self.assertIn("BEEPER_PWM_HZ", out[0])
+
+    def test_with_the_frequency_it_is_silent(self):
+        self.assertEqual(genconfig.inert_beeper_timer_row(
+            [self.pick("BEEPER_PIN", "TIM4_CH4")],
+            self.Cfg(["BEEPER_PWM_HZ"])), [])
+
+    def test_a_pwm_beeper_clashes_with_another_class_on_one_unit(self):
+        out = genconfig.timer_rate_clashes(
+            [self.pick("BEEPER_PIN", "TIM4_CH4"),
+             self.pick("CAMERA_CONTROL_PIN", "TIM4_CH3")], {"family": "STM32F7"})
+        self.assertEqual(len(out), 1)
+        self.assertIn("PWM beeper", out[0])
+
+    def test_separate_units_do_not_clash(self):
+        self.assertEqual(genconfig.timer_rate_clashes(
+            [self.pick("BEEPER_PIN", "TIM4_CH4"),
+             self.pick("CAMERA_CONTROL_PIN", "TIM10_CH1")],
+            {"family": "STM32F7"}), [])
+
+
 class TimerChannelCollisionTests(unittest.TestCase):
     """
     genconfig.timer_channel_collisions. A channel has one compare register, so
