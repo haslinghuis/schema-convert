@@ -2951,15 +2951,34 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # card only wins when it is the only one. With just a card it is decisive:
     # 79 of the 85 card-only boards default to it.
     sdcard = bool(resolved.get("sdcard", ("", {}))[0]) or bool(sdio_pins)
-    if "flash" in parts:
+    # Detecting the chip is not the same as being able to reach it. This used to
+    # key on the part marking alone, which meant 44 of 104 boards defaulted
+    # blackbox to a device with no bus behind it - 24 of them on nothing but a
+    # W25Q silkscreen, where the part may not even be fitted. pg/flash.c leaves
+    # the instance NULL and logging never starts, so the config was claiming a
+    # feature it could not deliver. Firmware's own fallback is
+    # BLACKBOX_DEVICE_NONE, which is the same outcome and does not assert
+    # anything false.
+    flash_ok = any(x in cfg.emitted for x in
+                   ("FLASH_SPI_INSTANCE", "FLASH_QUADSPI_INSTANCE",
+                    "FLASH_OCTOSPI_INSTANCE"))
+    sdcard_ok = bool(sdio_pins) or "SDCARD_SPI_INSTANCE" in cfg.emitted
+    if "flash" in parts and flash_ok:
         cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH", width=29)
         if sdcard:
             cfg.notes.append(
                 "both an SD card and a flash chip are fitted; blackbox defaults "
                 "to the flash - the corpus is split roughly evenly on that, so "
                 "confirm the vendor's intent")
-    elif sdcard:
+    elif sdcard and sdcard_ok:
         cfg.define("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_SDCARD", width=29)
+    elif "flash" in parts or sdcard:
+        what = "flash chip" if "flash" in parts and not flash_ok else "SD card"
+        cfg.warnings.append(
+            f"DEFAULT_BLACKBOX_DEVICE is not set: a {what} is on the sheet but "
+            "nothing here can reach it - no bus instance was resolved, so the "
+            "device would never open. Resolve the bus (or set the instance by "
+            "hand) and the default follows")
     if "sdcard_detect" in simple:
         # A card-detect switch grounds the pin when a card is seated, so the
         # line reads low with a card in - which is what INVERTED means. 47 of

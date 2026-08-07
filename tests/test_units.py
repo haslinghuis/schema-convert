@@ -2347,12 +2347,18 @@ class SdcardTests(unittest.TestCase):
         self.assertEqual(support.defines(text).get("DEFAULT_BLACKBOX_DEVICE"),
                          "BLACKBOX_DEVICE_SDCARD")
 
-    def test_a_fitted_flash_still_wins_but_the_split_is_reported(self):
+    def test_a_flash_marking_alone_does_not_take_the_default_from_a_wired_card(self):
+        """
+        The flash here is a silkscreen and nothing else - no chip select, no
+        bus. It used to win the blackbox default anyway, because the rule keyed
+        on the part being detected; pg/flash.c would then leave the instance
+        NULL and logging would never start, while the card that *is* wired sat
+        unused. 24 corpus boards defaulted to a flash on this evidence alone.
+        """
         text, cfg, _ = generate(board(self.card(),
                                       parts=PARTS + ("W25Q128JVEIQ",)))
         self.assertEqual(support.defines(text).get("DEFAULT_BLACKBOX_DEVICE"),
-                         "BLACKBOX_DEVICE_FLASH")
-        self.assertTrue(any("SD card" in n for n in cfg.notes), cfg.notes)
+                         "BLACKBOX_DEVICE_SDCARD")
 
     def test_no_card_means_no_sdcard_defines(self):
         self.assertNotIn("SDCARD", generate(board())[0])
