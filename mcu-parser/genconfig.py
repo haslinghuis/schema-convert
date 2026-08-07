@@ -210,7 +210,10 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^LED[-_]?2$"), "led2"),
     (re.compile(r"^LED[-_]?STRIP$|^WS2812$|^LED[-_]?DATA$"), "led_strip"),
     (re.compile(r"^(?:BEEPER|BUZZER|BUZZ|BEEP|BZ)[-_]?(?:PIN)?$"), "beeper"),
-    (re.compile(r"^CAM[-_]?CONTROLL?$|^CAMERA[-_]?CONTROL$|^CC$"), "camera_control"),
+    # CTRL as well as CONTROL, and CAM as well as CAMERA. A board submitted as
+    # a PR carried CAM_CTRL and lost camera control entirely - the net was read,
+    # classified as nothing, and the feature simply never appeared.
+    (re.compile(r"^CAM(?:ERA)?[-_]?(?:CONTROLL?|CTRL)$|^CC$"), "camera_control"),
     (re.compile(r"^USB[-_]?DETECT$|^VBUS[-_]?DETECT$"), "usb_detect"),
     (re.compile(r"^VTX[-_]?SW$|^VTX[-_]?(?:PWR|POWER|EN)$"), "pinio"),
     (re.compile(r"^USER(\d)$|^PINIO(\d)$|^PIO(\d)$"), "pinio"),
@@ -2017,7 +2020,12 @@ CONSEQUENCE = {
 DEFAULT_NEEDS = {
     ("DEFAULT_VOLTAGE_METER_SOURCE", "VOLTAGE_METER_ADC"): ("ADC_VBAT_PIN",),
     ("DEFAULT_CURRENT_METER_SOURCE", "CURRENT_METER_ADC"): ("ADC_CURR_PIN",),
-    ("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH"): ("USE_FLASH",),
+    # USE_FLASH says the driver is compiled in; it says nothing about the chip
+    # being reachable. A PR shipped FLASH_CS_PIN and BLACKBOX_DEVICE_FLASH with
+    # no instance, so pg/flash.c left it NULL and logging was dead on arrival.
+    ("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_FLASH"):
+        ("USE_FLASH", ("FLASH_SPI_INSTANCE", "FLASH_QUADSPI_INSTANCE",
+                       "FLASH_OCTOSPI_INSTANCE")),
     ("DEFAULT_BLACKBOX_DEVICE", "BLACKBOX_DEVICE_SDCARD"): ("USE_SDCARD",),
 }
 
@@ -3007,7 +3015,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     for (name, value), needs in sorted(DEFAULT_NEEDS.items()):
         if name not in cfg.emitted or cfg.value_of(name) != value:
             continue
-        lacking = [n for n in needs if n not in cfg.emitted]
+        # An element may be a tuple, meaning any one of those will do - a flash
+        # is reachable over SPI, QUADSPI or OCTOSPI.
+        lacking = [n if isinstance(n, str) else " or ".join(n) for n in needs
+                   if (n not in cfg.emitted) if isinstance(n, str)
+                   or not any(x in cfg.emitted for x in n)]
         if lacking:
             cfg.warnings.append(
                 f"{name} is {value} but {', '.join(lacking)} was not emitted; "

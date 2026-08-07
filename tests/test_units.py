@@ -550,10 +550,24 @@ class ExpectedTargetShapeTests(unittest.TestCase):
             self.assertIn(f, genconfig.EXPECTED_FUNCTIONS, f"{f} is not expected")
 
     def test_the_backed_defines_name_real_config_h_symbols(self):
+        # An entry may be a plain name or a tuple meaning "any one of these" -
+        # a flash is reachable over SPI, QUADSPI or OCTOSPI.
         for (name, value), needs in genconfig.DEFAULT_NEEDS.items():
             with self.subTest(define=name):
                 self.assertTrue(name.startswith("DEFAULT_"))
-                self.assertTrue(all(n.isupper() for n in needs))
+                flat = [x for n in needs
+                        for x in ((n,) if isinstance(n, str) else n)]
+                self.assertTrue(all(x.isupper() for x in flat))
+
+    def test_a_blackbox_device_needs_a_way_to_reach_it(self):
+        # USE_FLASH only says the driver is compiled in. A PR shipped
+        # FLASH_CS_PIN and BLACKBOX_DEVICE_FLASH with no instance, so
+        # pg/flash.c left it NULL and logging was dead on arrival.
+        needs = genconfig.DEFAULT_NEEDS[("DEFAULT_BLACKBOX_DEVICE",
+                                         "BLACKBOX_DEVICE_FLASH")]
+        self.assertIn("USE_FLASH", needs)
+        self.assertTrue(any(isinstance(n, tuple) and "FLASH_SPI_INSTANCE" in n
+                            for n in needs))
 
     def test_a_source_with_nothing_behind_it_is_a_defect(self):
         # The pairing the emitter relies on: VOLTAGE_METER_ADC means nothing
