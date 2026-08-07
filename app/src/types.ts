@@ -28,6 +28,8 @@ export interface Meta {
   absent: string[];
   /** Functions supplied by hand this run, as function -> pin. */
   placed: Record<string, string>;
+  /** Candidates for each absent function, best first. */
+  suggestions: Record<string, { pin: string; net: string; score: number }[]>;
 }
 
 export interface Report {

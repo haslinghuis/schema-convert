@@ -640,6 +640,51 @@ class PinioBoxNameTests(unittest.TestCase):
         self.assertLessEqual(len(got), genconfig.BOX_NAME_MAX)
 
 
+class SuggestionTests(unittest.TestCase):
+    """
+    genconfig.suggest_for_absent. Two filters and a ranking, in that order of
+    authority: what the firmware says the pin can do, then only nets the sheet
+    actually draws, then the name.
+    """
+
+    CAPS = {"adc": {"PC1": {"devices": "123", "channel": "11"},
+                    "PC2": {"devices": "3", "channel": "0"}},
+            "timers": {"PD12": ["TIM4_CH1"], "PC2": []}}
+
+    def link(self, net, pin):
+        return netmap.Link(net, pin, "L", False, True, [], True, None)
+
+    def test_a_near_miss_name_is_offered(self):
+        got = genconfig.suggest_for_absent(
+            ["LED_STRIP"], [self.link("LED_TRIP", "PD12")], self.CAPS, set())
+        self.assertEqual(got["LED_STRIP"][0]["pin"], "PD12")
+        self.assertEqual(got["LED_STRIP"][0]["net"], "LED_TRIP")
+
+    def test_a_shared_word_is_offered(self):
+        got = genconfig.suggest_for_absent(
+            ["ADC_CURR"], [self.link("CURR_DET", "PC1")], self.CAPS, set())
+        self.assertEqual(got["ADC_CURR"][0]["pin"], "PC1")
+
+    def test_the_firmware_map_is_a_hard_filter(self):
+        # LED_STRIP needs a timer; PC2 has none, so it cannot be offered
+        # however well its name reads.
+        got = genconfig.suggest_for_absent(
+            ["LED_STRIP"], [self.link("LED_STRIP_SIG", "PC2")], self.CAPS, set())
+        self.assertNotIn("LED_STRIP", got)
+
+    def test_a_pin_already_used_is_not_offered(self):
+        got = genconfig.suggest_for_absent(
+            ["ADC_CURR"], [self.link("CURR_DET", "PC1")], self.CAPS, {"PC1"})
+        self.assertNotIn("ADC_CURR", got)
+
+    def test_an_unrelated_net_is_not_offered(self):
+        # Only nets the board draws are candidates, and only if the name gives
+        # some reason - otherwise this is a list of free pins in a hat.
+        got = genconfig.suggest_for_absent(
+            ["ADC_CURR"], [self.link("USB_DP", "PC1")], self.CAPS, set())
+        self.assertNotIn("ADC_CURR", got)
+
+
 class OrphanEchoTests(unittest.TestCase):
     """
     genconfig.split_orphans. A name that is mapped somewhere is not a lost net,

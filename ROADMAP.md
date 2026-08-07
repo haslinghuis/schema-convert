@@ -57,7 +57,7 @@ is in each section below.
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
 | §4.8 | Timer rate clashes: reported and avoided where a legal alternative exists; 5 boards have none | 5 |
-| §4.9 | The pin editor offers no suggestions, though the sheet usually contains the answer | — |
+| §4.9 | Pin-editor suggestions: 136 offered on 59 boards; the rest have nothing on the sheet to offer | — |
 | §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
@@ -540,7 +540,7 @@ no legal assignment exists - a board whose only LED-strip pin shares a unit with
 its only motor pin has no fix, and the warning is the honest output.
 `h5-rev-b` now records `[]`.
 
-### 4.9 The pin editor has no suggestions
+### 4.9 The pin editor has no suggestions — DONE
 
 §4.7 gives a box per absent function. It cannot say what to put in it, and the
 data to narrow that is already in hand.
@@ -581,6 +581,29 @@ at all, and offering one of those is proposing hardware that is not there.
   good suggestion however well its name matches.
 
 Worth doing in that order: §4.8's grouping is what §4.9 needs to rank safely.
+
+#### Done, in that order
+
+`suggest_for_absent()` applies two filters and a ranking, in that order of
+authority. **Capability** is a hard filter from the firmware map, exactly as
+`--set` is validated - a suggestion that would be refused on submission is worse
+than none. **Only the sheet's own nets** are candidates: of 41 pins that could
+carry `MOTOR6` on one H743, 31 carried no net at all, and offering those is
+proposing hardware that is not there. **The name** ranks what survives, on
+shared words plus character similarity.
+
+The three answers this section predicted all come out on the board it was
+written from: `LED_STRIP` ← `PD12 LED_TRIP` (one character out, and `PD12` is
+`TIM4_CH1`), `ADC_CURR` ← `PC1 CURR_DET`, `LED0` ← `PC2 ST_LED`.
+
+Corpus: **136 suggestions across 59 boards**, defines unchanged - they are notes
+and `meta.suggestions`, never an emission. Some catch vendor typos outright:
+`GYRO_1_EXTI` ← `PE9 SPI1_EXIT`.
+
+The editor shows them as clickable pins under each empty box, labelled with the
+*net* - `PD12 (LED_TRIP)`. That distinction is the point: "PD12 carries
+LED_TRIP" is a suggestion, "PD12 is free" is a much weaker claim wearing the
+same clothes, and the UI must not let them look alike.
 
 ---
 

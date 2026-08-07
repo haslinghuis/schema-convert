@@ -340,6 +340,27 @@ async function copyConfig() {
             >
               placed by hand — not read from the sheet
             </p>
+
+            <!-- The sheet usually contains the answer. A candidate is only ever
+                 a net the board actually draws, filtered by what the firmware
+                 says the pin can do - so the net's name is shown, not just the
+                 pin. "PD12 carries LED_TRIP" is a suggestion; "PD12 is free"
+                 would be a much weaker claim wearing the same clothes. -->
+            <p
+              v-else-if="(report.meta.suggestions[fn] ?? []).length"
+              class="mt-0.5 text-xs text-neutral-500"
+            >
+              <button
+                v-for="s in report.meta.suggestions[fn]"
+                :key="s.pin"
+                class="mono mr-2 underline decoration-dotted underline-offset-2 hover:text-bf-400"
+                :title="`${s.pin} carries ${s.net}, which the reader did not recognise`"
+                @click="overrides[fn] = s.pin"
+              >
+                {{ s.pin }}
+                <span class="text-neutral-600">({{ s.net }})</span>
+              </button>
+            </p>
           </div>
 
           <!-- Typing a pin does not change the config; only a run does. The

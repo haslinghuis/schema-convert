@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "7c43b11fc"
+  "tool_rev": "39556cf5d"
  },
  "boards": [
   {
@@ -267,7 +267,7 @@
    "config_defines": 51,
    "timer_rows": 12,
    "warnings": 8,
-   "notes": 20,
+   "notes": 23,
    "netmap_digest": "ec80cfba90bf497f61ffcc32e0b5a1441ed9b58e5da8fe00436f4b5cb96431e0",
    "config_digest": "01e6c9135caee10db5732dba4ffe42db4018f5fb329f7b3484cdc583178c0206",
    "known_defects": {

@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import json
+import difflib
 import math
 import re
 import sys
@@ -799,6 +800,51 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
                 "these functions on both leaves it no pacer at all "
                 "(betaflight/config#646)")
         out.append(line)
+    return out
+
+
+def suggest_for_absent(absent: Sequence[str], unknown: Sequence[Link],
+                       caps: dict, taken: Set[str]) -> Dict[str, List[dict]]:
+    """
+    For each function the sheet did not yield, which of its own unclassified
+    nets could be it.
+
+    Two filters and a ranking, in that order of authority.
+
+    *Capability* is a hard filter and comes from the firmware map, exactly as
+    `--set` is validated - a suggestion that would be refused on submission is
+    worse than none. It narrows well for ADC and timer functions and says
+    nothing at all about a chip select, an interrupt or an LED, which are any
+    GPIO; for those the net name is the only evidence there is.
+
+    *The sheet's own nets* are the only candidates. Of 41 pins on one H743 that
+    could carry MOTOR6, 31 carried no net at all - offering those would be
+    proposing hardware that is not there. A pin already used is dropped too.
+
+    *The name* ranks what survives. `LED_TRIP` for `LED_STRIP` is one character
+    out; `CURR_DET` for `ADC_CURR` shares a word. Both are already printed in
+    the "nets with no config.h role" line and nothing joined them up.
+    """
+    out: Dict[str, List[dict]] = {}
+    for fn in absent:
+        want = {w for w in re.split(r"[-_]", fn) if w and not w.isdigit()}
+        req = netmap.net_requirement(fn)
+        cands = []
+        for l in unknown:
+            if l.pin in taken:
+                continue
+            if req and not netmap.pin_supports(caps, l.pin, req[0], req[1]):
+                continue
+            have = {w for w in re.split(r"[-_.]", l.net.upper()) if w}
+            shared = len(want & have)
+            ratio = difflib.SequenceMatcher(None, fn, l.net.upper()).ratio()
+            if not shared and ratio < 0.5:
+                continue
+            cands.append({"pin": l.pin, "net": l.net,
+                          "score": round(shared + ratio, 3)})
+        if cands:
+            cands.sort(key=lambda c: (-c["score"], c["pin"]))
+            out[fn] = cands[:3]
     return out
 
 
@@ -3144,6 +3190,17 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # supplied, or drawn in a way nothing here follows - and then the only way
     # forward is to be told, so the line that reports the gap also says how.
     absent = [f for f in EXPECTED_FUNCTIONS if f"{f}_PIN" not in cfg.emitted]
+    used_pins = {v for k, v in cfg.values.items()
+                 if k.endswith("_PIN") and netmap.PIN_RE.match(v or "")}
+    suggestions = suggest_for_absent(absent, unknown, caps, used_pins)
+    for fn, cands in sorted(suggestions.items()):
+        best = cands[0]
+        cfg.notes.append(
+            f"{fn} was not produced, but {best['pin']} carries {best['net']}, "
+            "which this tool did not recognise" +
+            (f" (also {', '.join(c['pin'] + ' ' + c['net'] for c in cands[1:])})"
+             if len(cands) > 1 else "") +
+            f" - if that is it, --set {fn}={best['pin']}")
     if absent:
         cfg.warnings.append(
             f"not produced from this sheet: {', '.join(absent)}. If the board "
@@ -3234,6 +3291,12 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         # function instead of scraping them back out of a warning string.
         "absent": absent,
         "placed": {l.net: l.pin for l in hand},
+        # Candidates for each absent function, best first, so the editor can
+        # offer them instead of an empty box. Structured rather than scraped
+        # out of a note: each carries the pin, the net that suggested it, and
+        # a score, and the UI must show *which net* - "PD12 carries LED_TRIP"
+        # is a suggestion, "PD12 is free" is a much weaker claim.
+        "suggestions": suggestions,
     }
     return cfg, meta
 
