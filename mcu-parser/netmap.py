@@ -864,9 +864,25 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8,
     found = [got for p, ws in sorted(by_page.items())
              for got in _find_parts(ws, p, min_pins)]
     if not found:
-        raise SystemExit(describe_unreadable(words)
-                         or "Could not find an MCU symbol - no aligned pin-name "
-                            "column")
+        # "No aligned pin-name column" reads as a parse failure and sends a
+        # reader looking for one. Three documents in the corpus are datasheets
+        # and specifications rather than schematics - 1, 0 and 0 pin names in
+        # the whole file - and there is nothing there to parse. Counting first
+        # is what tells the two apart: a schematic this cannot read has pin
+        # names it failed to line up; a datasheet has none at all.
+        pins = sum(1 for w in words if PIN_RE.match(w.text))
+        raise SystemExit(
+            describe_unreadable(words)
+            or ((("No MCU symbol here, and no pin names at all in the whole "
+                  "document" if pins == 0 else
+                  f"No MCU symbol here, and only {pins} pin name"
+                  f"{'' if pins == 1 else 's'} in the whole document")
+                 + " - this reads as a datasheet or a specification rather "
+                   "than a schematic. Nothing here is a parse failure to "
+                   "chase; check it is the right file") if pins < 8 else
+                f"Could not find an MCU symbol: {pins} pin names are on the "
+                "sheet but none of them line up into a column, which is what "
+                "this reads a symbol from"))
 
     # Strength is distinct GPIO pins, not rows: a single-column symbol whose
     # names cluster on both alignments would otherwise count itself twice.

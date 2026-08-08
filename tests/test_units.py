@@ -901,6 +901,50 @@ class TargetMissTests(unittest.TestCase):
         self.assertNotIn("--target STM32", msg)
 
 
+class NoSymbolMessageTests(unittest.TestCase):
+    """
+    What `find_symbol` says when it finds nothing.
+
+    "No aligned pin-name column" reads as a parse failure and sends a reader
+    looking for one. Three files in the corpus are datasheets and
+    specifications rather than schematics, with 1, 0 and 0 pin names in the
+    whole document - there is nothing there to parse, and saying so is the
+    difference between checking the file and debugging the reader.
+    """
+
+    def find(self, words):
+        try:
+            netmap.find_symbol(words)
+        except SystemExit as e:
+            return str(e)
+        return ""
+
+    # Enough real words that describe_unreadable() passes it on: below 25 it
+    # is reported as a scan, which is a different answer to a different
+    # question.
+    FILLER = ["GND", "VCC", "SPI1_SCK", "UART1_TX", "I2C1_SCL", "MOTOR1"] * 6
+
+    def body(self, extra):
+        out = [Word(t, 10, 400 + i * 9, 40, 404 + i * 9)
+               for i, t in enumerate(self.FILLER)]
+        return out + extra
+
+    def test_a_document_with_no_pin_names_is_named_as_such(self):
+        msg = self.find(self.body([Word("Specification", 10, 10, 60, 14),
+                                   Word("Weight", 10, 20, 40, 24)]))
+        self.assertIn("no pin names at all", msg)
+        self.assertIn("datasheet", msg)
+
+    def test_a_schematic_it_cannot_read_says_the_names_were_there(self):
+        # Pin names present but scattered, so no column forms. That is a
+        # reading failure and should not be described as the wrong file.
+        msg = self.find(self.body(
+            [Word(f"PA{i}", 10 + i * 40, 10 + i * 37, 30 + i * 40, 14 + i * 37)
+             for i in range(10)]))
+        self.assertIn("none of them line up", msg)
+        self.assertNotIn("datasheet", msg)
+
+
 class CandidateFitTests(unittest.TestCase):
     """
     netmap._fit_against: when the sheet names a part that does not exist, how

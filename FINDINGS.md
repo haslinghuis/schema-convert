@@ -1031,6 +1031,20 @@ its MCU" bucket, which is harmless but not precise.
 
 ## 4. Engineering
 
+#### A third class: it is not a schematic
+
+Three more files in the corpus reach `find_symbol` with a perfectly good text
+layer and no symbol, and the message was *"no aligned pin-name column"* - which
+reads as a parse failure and sends a reader to look for one. They are a
+datasheet and two specifications, with **1, 0 and 0 pin names in the whole
+document**. There is nothing there to parse.
+
+Counting first is what separates the two. A schematic this cannot read has pin
+names it failed to line up, and now says so; a document with fewer than eight
+anywhere is named as a datasheet or specification, with the advice to check the
+file rather than the reader. Same shape as the two cases above: the answer was
+never geometry, and saying "geometry" costs somebody an afternoon.
+
 ### 4.1 No test suite — DONE
 
 Every change was once verified by regenerating boards and eyeballing diffs. That
