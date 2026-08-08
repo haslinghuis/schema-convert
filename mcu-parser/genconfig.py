@@ -900,12 +900,15 @@ def avoid_rate_clashes(picks: List["TimerPick"], caps: dict,
     notes: List[str] = []
 
     def rate_of(p: "TimerPick") -> Optional[Tuple[str, str, str]]:
-        # An inert beeper row asks nothing of its timer, so it must not cause a
-        # move: rearranging a working board to dodge a clash that only exists
-        # once someone sets BEEPER_PWM_HZ would be a change with no reason
-        # visible in the file.
-        got = _rate_class(p.label)
-        return None if got and got[0] == "BEEPER" and not pwm_beeper else got
+        # The inert beeper row counts here, and deliberately not in
+        # timer_rate_clashes(). The two do different things with the same
+        # fact: *warning* about a clash that exists only after someone sets
+        # BEEPER_PWM_HZ is noise on nearly every config, while *moving* a
+        # function off it costs nothing and leaves each one its own unit.
+        # Skipping it here put camera control and the beeper on one TIM4 - a
+        # config a reviewer rightly sent back, since the whole point of the
+        # occurrence column is to give each function a timer of its own.
+        return _rate_class(p.label)
 
     def classes() -> Dict[str, set]:
         out: Dict[str, set] = defaultdict(set)

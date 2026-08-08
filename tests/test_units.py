@@ -800,6 +800,22 @@ class BeeperTimerRowTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("PWM beeper", out[0])
 
+    def test_an_inert_beeper_row_still_moves_what_it_shares_a_unit_with(self):
+        # Warning about it is noise; moving off it is free. A pin whose only
+        # other channel is on a used unit stays put, so the move has to be
+        # possible - PB8 carries TIM4_CH3 and TIM10_CH1, which is the real
+        # board this came from.
+        caps = {"timers": {"PB8": ["TIM4_CH3", "TIM10_CH1"],
+                           "PB9": ["TIM4_CH4", "TIM11_CH1"]}}
+        picks = [genconfig.TimerPick("PB8", "CAMERA_CONTROL_PIN", 1, "TIM4_CH3",
+                                     -1, "inferred"),
+                 genconfig.TimerPick("PB9", "BEEPER_PIN", 1, "TIM4_CH4", -1,
+                                     "inferred")]
+        notes = genconfig.avoid_rate_clashes(picks, caps)
+        self.assertEqual(picks[0].channel, "TIM10_CH1")
+        self.assertEqual(picks[0].occurrence, 2)
+        self.assertTrue(any("moved from TIM4_CH3" in n for n in notes))
+
     def test_an_inert_beeper_row_clashes_with_nothing(self):
         # The row is emitted on every board that has a beeper pin with a timer,
         # so reporting this would put a clash on most configs that exists only

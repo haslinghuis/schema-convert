@@ -758,6 +758,16 @@ already driving something else. There the note says so: an inert row that would
 collide the moment it were used is worse than no row, since a reader cannot see
 that it is inert.
 
+**The exemption belongs in one of the two checks, not both.** Skipping the inert
+row in `avoid_rate_clashes()` as well left camera control and the beeper sharing
+TIM4 on the board this came from, and a reviewer sent that back on the rule the
+occurrence column exists for: each function gets a timer of its own. Warning
+about a clash that appears only after someone sets `BEEPER_PWM_HZ` is noise on
+nearly every config; *moving* a function off it costs nothing. So the row counts
+for the mover and not for the report - 3 more moves across the corpus, no new
+warnings, and camera control back on TIM10 where the hand-written config puts
+it.
+
 ### 4.13 The sheet can name the ADC instance, and a drawn net can be wrong — DONE
 
 Two halves of one board's problem, and neither is a parse failure.
