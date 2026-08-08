@@ -121,9 +121,15 @@ F4 was the blocking gap and is closed. Its audit now comes back **0 defects**:
 `TIM1_CH1N` on `PA11` was the one finding, it merged as #15510, and the loop
 closed the way it was meant to — datasheet → audit → firmware PR → reseed.
 #15512 (N657 timer options) and #15513 (H5/H7 `PF8`/`PF9`) came from the same
-pass. The remaining families without a datasheet are AT32 and APM32, and those
-are not harvested at all yet (ROADMAP §3.4), so nothing can be audited against
-them.
+pass.
+
+**AT32 is now harvested and cannot be audited**, which is a different state from
+the rest and worth keeping straight. Its tables are in `data/firmware.json` and
+12 corpus boards convert from them, but there is no Artery datasheet in
+`../manufacturers/datasheets/` - so the datasheet → audit → firmware PR → reseed
+loop does not close for AT32, and `afaudit.py` has nothing to check it against.
+The tables are trusted exactly as far as Betaflight's own port is. APM32 is
+neither harvested nor auditable.
 
 A full pass after the reseed comes back **0 defects on every family**:
 

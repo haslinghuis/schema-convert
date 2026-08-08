@@ -111,8 +111,9 @@ it was cut for. `tests/check_seed_drift.py` runs in CI to catch it going stale.
 
 ## Limitations
 
-- STM32 only so far; AT32, APM32 and PICO peripheral tables have a different
-  shape and are not harvested yet
+- STM32 and AT32; APM32 and PICO are not harvested yet. The AT32 tables have no
+  datasheet to audit against, so unlike every STM32 family they are trusted
+  exactly as far as Betaflight's own port is
 - Gyro orientation, the current-meter scale and PINIO polarity cannot be derived
   from a schematic at all, and are always flagged for the vendor
 - A device whose only net is a chip-select is usually traced to its bus at the

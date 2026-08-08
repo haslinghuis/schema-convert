@@ -483,6 +483,22 @@ settles by what it draws.
 No STM32 target's tables changed - the seed diff is two added targets and
 nothing else - and the corpus is unmoved at 5841 defines and 919 warnings.
 
+**Verified, and one thing not verified.** The tables were spot-checked against
+the source (`PA0` → `TMR2_CH1`/`TMR5_CH1`, `PB0` → `TMR1_CH2N`/`TMR3_CH3`/
+`TMR8_CH2N`, `PA9` → UART1 tx *and* I2C1 scl), and the DMA harvest matches the
+STM32 DMAMUX families exactly: no per-resource tables, a shared channel list of
+**14** - `DMA1` channels 1-7 and `DMA2` 1-7 - against H743's 16. Note that
+`MAX_TIMER_DMA_OPTIONS` claims 22 there while the array it indexes holds 14, so
+the lower ceiling binds; the generator already takes the minimum and says which
+one ran out.
+
+What cannot be verified is the table itself. There is no Artery datasheet in
+`../manufacturers/datasheets/`, so `afaudit.py` has nothing to check AT32
+against and the datasheet → audit → firmware PR → reseed loop does not close for
+it. Every STM32 family here has been audited to 0 defects; AT32 is trusted
+exactly as far as Betaflight's own port is, and that difference is worth
+remembering before filing anything upstream from it.
+
 APM32, PICO and X32 remain unharvested, and none of them appears in the corpus.
 
 ### 3.5 The MCU is often not named on the sheet
