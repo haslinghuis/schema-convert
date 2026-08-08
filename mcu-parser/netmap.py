@@ -858,6 +858,47 @@ def find_symbol(words: Sequence[Word], min_pins: int = 8,
     return Symbol(parts, min(pitches), npages, sorted(ignored))
 
 
+def _flip_one_sided(sym: "Symbol") -> Optional["Symbol"]:
+    """
+    The same symbol with its one-column parts pointed the other way, or None.
+
+    Which side a column of pin names is *of* is decided nowhere: the two
+    clusters are found by shared x0 and shared x1, and where a part has only
+    one column both find the same names, so the side it ends up with is an
+    artefact of which cluster won. It usually does not matter, because the
+    gutter is then searched on the one side that has anything in it.
+
+    It matters when a symbol is drawn as two columns far enough apart to be
+    read as two parts. One BGA H7 sheet has its PE names at x=456 with their
+    nets at 424, and its PA names at 496 with theirs at 522 - facing *outward*
+    - and both parts were assigned the inward side. Every net paired against
+    the other column's rows and the board read at 40% agreement with 29
+    orphans.
+
+    Nearness cannot decide it: an F405 sheet has the same two-part shape with
+    the columns facing *each other*, so the nearest net-like text to each is
+    the other's gutter. Choosing by distance fixed the H7 and broke that board
+    from 100% to nothing.
+
+    So this only proposes. The caller resolves both and keeps whichever the
+    firmware map agrees with more, which is the same arbiter that picks the
+    row offset - and the reason a wrong guess here cannot survive.
+    """
+    flippable = [p for p in sym.parts if p.sides in ({"L"}, {"R"})]
+    if not flippable:
+        return None
+    parts = []
+    for p in sym.parts:
+        if p.sides in ({"L"}, {"R"}):
+            other = "R" if p.sides == {"L"} else "L"
+            rows = [PinRow(r.pin, r.pos, other, r.afs, r.gpio) for r in p.rows]
+            parts.append(SymbolPart(p.page, rows, p.left_edge, p.right_edge,
+                                    p.top_edge, p.bottom_edge))
+        else:
+            parts.append(p)
+    return Symbol(parts, sym.pitch, sym.page_count, sym.ignored_pages)
+
+
 # Gutter text that is not a net label: component designators (C50, R21, U3),
 # package/value strings (04-0.1uF/16V/X5R, 04-10K/5%), and part numbers.
 JUNK_RE = re.compile(
@@ -1298,6 +1339,37 @@ def _pair(sym: Symbol, labels: Sequence[Word], offset: float, caps: dict
     return pairs, orphans
 
 
+def read_symbol(words: Sequence[Word], caps: dict,
+                page: Optional[int] = None) -> Tuple["Symbol", List[Word], "Result"]:
+    """
+    Find the symbol, its labels and their pin map - trying both readings of a
+    one-column part and keeping the one the firmware agrees with.
+
+    The sides of such a part are not evidence (see `_flip_one_sided`), and the
+    labels depend on them, so the two readings are two different sets of nets
+    and have to be resolved separately rather than compared as offsets.
+
+    Kept only on a strictly better score. A tie leaves the symbol as found,
+    since nothing was learned - and where neither reading checks anything, both
+    are equally unsupported and the first is as good as the second.
+    """
+    sym = find_symbol(words, page=page)
+    if sym is None:
+        return None, [], None
+    labels = find_net_labels(words, sym)
+    res = resolve(sym, labels, caps)
+
+    other = _flip_one_sided(sym)
+    if other is None:
+        return sym, labels, res
+    alt_labels = find_net_labels(words, other)
+    alt = resolve(other, alt_labels, caps)
+    if (alt.score[0], alt.score[0] - alt.score[1]) > (res.score[0],
+                                                      res.score[0] - res.score[1]):
+        return other, alt_labels, alt
+    return sym, labels, res
+
+
 def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
     """
     Try candidate label->row offsets and keep the one the firmware agrees with
@@ -1526,9 +1598,7 @@ def main() -> int:
                             "simply never name the MCU - pass --target")
     caps, data = load_caps(target)
 
-    sym = find_symbol(words, page=args.page)
-    labels = find_net_labels(words, sym)
-    res = resolve(sym, labels, caps)
+    sym, labels, res = read_symbol(words, caps, page=args.page)
 
     print(f"target {target}  ({caps['mcu']}, {caps['family']})")
     print(f"symbol: {len(sym.rows)} pins{describe_pages(sym)}, "

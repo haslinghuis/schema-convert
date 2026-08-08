@@ -1384,3 +1384,49 @@ The feature it was justifying stands on its own: `BEEPER_PWM_HZ` is settable
 from the CLI and the row is not, so a config without one has decided the board
 cannot drive a passive buzzer. That is still worth emitting. It just does not
 fix anything that was broken.
+
+
+### 1.25 Which side a lone column of pin names is *of* was never decided
+
+§1.20's genuine losses concentrated hard: 19 of 51 on one board, which read at
+**40% agreement with 29 orphans** while its near-identical sibling read at 90%.
+
+The sheet draws an H7 BGA as two columns of pin names - `PE0..` at x=456 with
+their nets out at 424, and `PA0..` at x=496 with theirs at 522. Two columns
+facing *outward*. `find_symbol` reads them as two one-sided parts, and gave both
+the inward side, so every net paired against the other column's rows.
+
+The side was never decided anywhere. The two columns are found by clustering on
+shared `x0` and on shared `x1`; a part with one column satisfies both, so which
+side it ends up with is an artefact of which cluster won - and it usually does
+not matter, because the gutter is then searched on the one side that has
+anything in it.
+
+**The first fix worked and was wrong.** Choosing the side whose nearest
+net-like text is closer fixed the H7 - and broke `F405-V1` from 100% to
+nothing, because that sheet has the same two-part shape with the columns facing
+*each other*. The nearest net-like text to each is then the other's gutter. No
+measurement of distance can separate the two layouts; they are geometrically
+the same picture.
+
+What separates them is the thing this tool already trusts for the row offset:
+**the firmware map.** `read_symbol()` resolves the symbol as found and again
+with its one-sided parts flipped, and keeps the reading that agrees with more of
+the capability table - strictly more, so a tie changes nothing. A wrong guess
+cannot survive that, which is why the guess is safe to make.
+
+| | before | after |
+|---|---|---|
+| that board's agreement | 40% | **100%** |
+| its defines | 24 | **61** |
+| its orphans | 29 | **4** |
+| corpus defines | 5806 | **5843** |
+| corpus warnings | 935 | **918** |
+| boards at 100% agreement | 90 | **91** |
+
+Instance values across the corpus: **5 added, 0 changed, 0 removed** - all five
+on that one board, which had been emitting none of them.
+
+The lesson is the one §4.11 and §4.14 keep circling. A rule that fixes the board
+in front of you is a hypothesis, and the corpus is what tells you whether it is
+a rule. Here the counter-example was one board away.

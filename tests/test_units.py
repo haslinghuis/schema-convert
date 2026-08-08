@@ -901,6 +901,42 @@ class TargetMissTests(unittest.TestCase):
         self.assertNotIn("--target STM32", msg)
 
 
+class OneSidedPartTests(unittest.TestCase):
+    """
+    netmap._flip_one_sided / read_symbol: which side a lone column of pin names
+    is *of*.
+
+    Nothing above decides it. The two clusters are found by shared x0 and
+    shared x1, and a single column satisfies both, so the side is an artefact
+    of which cluster won. Two real sheets have the same two-part shape and
+    opposite answers - one BGA H7 has its columns facing outward, an F405 has
+    them facing each other - so the reading is proposed and the firmware map
+    picks, exactly as it picks the row offset.
+    """
+
+    def part(self, side, pins, x0=100.0):
+        rows = [netmap.PinRow(p, 200.0 + i * 8, side) for i, p in enumerate(pins)]
+        return netmap.SymbolPart(1, rows, x0, x0 + 20, 0.0, 0.0)
+
+    def test_a_one_column_part_is_offered_the_other_side(self):
+        sym = netmap.Symbol([self.part("L", ["PA0", "PA1", "PA2"])], 8.0, 1, [])
+        other = netmap._flip_one_sided(sym)
+        self.assertEqual(other.parts[0].sides, {"R"})
+        self.assertEqual([r.pin for r in other.parts[0].rows], ["PA0", "PA1", "PA2"])
+
+    def test_a_two_sided_symbol_is_left_alone(self):
+        rows = [netmap.PinRow("PA0", 200.0, "L"), netmap.PinRow("PB0", 200.0, "R")]
+        sym = netmap.Symbol([netmap.SymbolPart(1, rows, 100.0, 120.0)], 8.0, 1, [])
+        self.assertIsNone(netmap._flip_one_sided(sym))
+
+    def test_the_edges_do_not_move_with_the_side(self):
+        # Flipping says where the labels are, not where the names are drawn.
+        sym = netmap.Symbol([self.part("R", ["PA0", "PA1"], x0=500.0)], 8.0, 1, [])
+        other = netmap._flip_one_sided(sym)
+        self.assertEqual((other.parts[0].left_edge, other.parts[0].right_edge),
+                         (500.0, 520.0))
+
+
 class VocabularyAgreementTests(unittest.TestCase):
     """
     Every spelling `classify` understands must also pass `NET_VOCAB`.

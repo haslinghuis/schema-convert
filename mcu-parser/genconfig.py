@@ -2426,9 +2426,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                             "simply never name the MCU - pass --target")
     caps = fw["targets"][target]
 
-    sym = find_symbol(words, page=page)
-    labels = find_net_labels(words, sym)
-    res = netmap.resolve(sym, labels, caps)
+    sym, labels, res = netmap.read_symbol(words, caps, page=page)
     hints = read_timer_hints(words)
     parts = detect_parts(words, fw["drivers"], aliases)
 
