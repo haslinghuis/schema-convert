@@ -292,6 +292,39 @@ collecting it.
 Four of the five gained boards get their blackbox default for free, since §4.10
 already ties that to a device the config can actually reach.
 
+#### Round five: the tail was never a tracing problem
+
+29 chip selects were still unresolved, and asking *which* refusal they hit gave
+the answer at once: **none of them.** Every one reported "only a CS net on this
+sheet", the message for a chip select that is never drawn a second time — and on
+the boards themselves it plainly was. One airbot H7 draws `FLASHCS` twice, the
+second time 22pt from `SPI1MISO` and 29pt from `SPI1CLK`, which is as clear as
+the evidence ever gets.
+
+The tracer could not see those labels. It matched bus lines with a regex of its
+own — `SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)` — which wants a separator and has
+never heard of `SPI1CLK`, `SCK3` or `SPI_SCK2`, all spellings `classify()`
+learned in earlier rounds of this same section. So a board whose *MCU side*
+resolved four buses could still report that its flash had no bus to join, from
+the same labels at the other end of the same wires.
+
+**§1.18 exactly**, a third time: the vocabulary that collects drifting from the
+one that classifies. The fix is the one that stays fixed — the tracer now calls
+`classify()`, the regex is deleted, and a test asserts that every spelling
+`classify` reads as an SPI line is one the tracer can trace.
+
+| | before | after |
+|---|---|---|
+| CS-only devices left to a human | 29 | **5** |
+| `*_SPI_INSTANCE` emitted | 191 | **217** |
+| `DEFAULT_BLACKBOX_DEVICE` emitted | 47 | **54** |
+| warnings, corpus-wide | 978 | **945** |
+
+Checked for the failure mode that matters, since a wrong bus is worse than
+none: comparing every emitted instance value across the corpus before and
+after, **26 added, 0 changed, 0 removed.** Recognising more labels moved no
+board's existing decision.
+
 | | before | after |
 |---|---|---|
 | CS-only devices left to a human | 77 | **27** |

@@ -951,6 +951,29 @@ class VocabularyAgreementTests(unittest.TestCase):
                     "strongest column is dropped before it ever reaches "
                     "classify")
 
+    def test_the_bus_tracer_reads_the_same_spellings(self):
+        # A third gate in the same series, and it had drifted too: the tracer
+        # used a regex wanting SPI1_SCK and knew nothing of SPI1CLK or SCK3, so
+        # a board whose MCU side resolved four buses still reported "only a CS
+        # net" - the same labels, at the device end, matching nothing. 24 of
+        # the 29 unresolved chip selects in the corpus were that.
+        buses = {f"SPI{n}": {"sck": "PA5", "sdi": "PA6", "sdo": "PA7"}
+                 for n in "1234"}
+        for text in self.SPELLINGS:
+            role, idx, sub = genconfig.classify(text)
+            if role != "spi_bus" or sub not in ("sck", "sdi", "sdo"):
+                continue
+            with self.subTest(net=text):
+                words = [Word("FLASH_CS", 100, 492, 130, 494),
+                         Word(text, 100, 500, 130, 502),
+                         Word(f"SPI{idx}_" + ("SDO" if sub != "sdo" else "SDI"),
+                              100, 508, 130, 510)]
+                bus, _ = genconfig.trace_cs_bus(words, [], "FLASH_CS", buses, 4.0)
+                self.assertEqual(
+                    bus, f"SPI{idx}",
+                    f"classify reads {text!r} as SPI{idx} {sub}, but the chip "
+                    "select tracer does not see it as one of that bus's lines")
+
     def test_a_bare_motor_number_stays_out(self):
         for text in self.EXCLUDED_ON_PURPOSE:
             with self.subTest(net=text):

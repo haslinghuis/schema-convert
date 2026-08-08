@@ -1380,8 +1380,6 @@ DEVICE_FAMILIES = (
     (re.compile(r"^(?:BMP|DPS|SPL|LPS|ICP)\d{2,5}[A-Z]*(?=[-_])"), "BARO"),
 )
 
-SPI_LINE_RE = re.compile(r"SPI(\d)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)", re.I)
-
 # 100K, 10k, 1M, 4K7, 13.7K, 100R, 100kΩ. The suffix carries the decimal point
 # in the 4K7 spelling, which is why this is not just a number and a multiplier.
 RESISTOR_RE = re.compile(r"^(\d+(?:\.\d+)?)([KMR])(\d*)(?:Ω|OHM)?$", re.I)
@@ -1596,11 +1594,21 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
     if not hits:
         return None, None
 
+    # Routed through classify(), not through a regex of its own. SPI_LINE_RE
+    # wanted SPI1_SCK and knew nothing of SPI1CLK, SCK3 or SPI_SCK2 - all
+    # spellings classify() has learned - so a board whose MCU side resolved
+    # four buses could still report "only a CS net", because the *same labels*
+    # at the device end matched nothing here. That is FINDINGS 1.18 exactly:
+    # the vocabulary that collects drifting from the one that classifies. The
+    # only fix that stays fixed is to have one of them.
     lines: Dict[str, List[Word]] = defaultdict(list)
+    roles: Dict[int, str] = {}
     for w in outside:
-        m = SPI_LINE_RE.fullmatch(w.text)
-        if m and f"SPI{m.group(1)}" in buses:
-            lines[f"SPI{m.group(1)}"].append(w)
+        role, idx, sub = classify(w.text)
+        if role == "spi_bus" and idx and sub in ("sck", "sdi", "sdo") \
+                and f"SPI{idx}" in buses:
+            lines[f"SPI{idx}"].append(w)
+            roles[id(w)] = sub
     if not lines:
         return None, None
 
@@ -1653,19 +1661,18 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
                        for other, vs in lines.items() if other != bus
                        for v in vs if v.page == h.page)
 
-    roles = {SPI_LINE_RE.fullmatch(w.text).group(2).lower()
-             for w in ws if with_the_chip_select(w)}
+    found = {roles[id(w)] for w in ws if with_the_chip_select(w)}
     # Either the bus's lines cluster tightly around the chip select, or - when
     # the part is drawn as a large symbol with its pins spread around it - every
     # one of them is still nearer than anything belonging to another bus. A
     # flash chip is routinely the second shape: its CS and one data line sit
     # together while the other two come off the far side, 130pt away, which is
     # still a third of the distance to the next bus.
-    clustered = len(roles) >= 2
+    clustered = len(found) >= 2
     enclosed = len(own) >= 2 and own[-1] < runner
     if not (clustered or enclosed):
         return None, (f"{cs_net}: {bus} is the nearest bus where it is drawn away "
-                      f"from the MCU, but only {len(roles)} of its lines are with "
+                      f"from the MCU, but only {len(found)} of its lines are with "
                       "it and the rest are no nearer than another bus, so the "
                       "grouping is not clear enough to use")
     if runner < near * 3:
