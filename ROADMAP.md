@@ -23,16 +23,21 @@ be judged against:
 
 | | before the corpus | now |
 |---|---|---|
-| schematics that yield a pin map | 104 / 168 | 104 / 168 |
+| schematics that yield a pin map | 104 / 168 | 116 / 168 |
 | MCU pins read | 3090 | 3865 |
 | nets checked against firmware | 1637 | 1920 |
 | of those, agreeing | 1601 | 1878 |
 | UART pins emitted | 299 | 576 |
 | boards with any UART pin | 34 | 70 |
-| boards at 100% agreement | 86 | 91 |
-| SPI devices needing a hand-set instance | 77 | 27 |
+| boards at 100% agreement | 86 | 94 |
+| SPI devices needing a hand-set instance | 77 | 4 |
 | boards whose SPI section is complete | 60 | 83 |
 | boards with a computed `DEFAULT_VOLTAGE_METER_SCALE` | 0 | 11 |
+| defines emitted across the corpus | — | 6480 |
+
+The 12 the corpus gained are AT32 (§3.4), and they moved every total above with
+them - which is the reason to re-run the whole pass after adding a platform
+rather than trusting the per-board numbers it was developed against.
 
 Run it before and after any change to extraction or classification. A change
 that improves one board and quietly costs three is the normal failure mode
