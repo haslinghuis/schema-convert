@@ -33,9 +33,21 @@ const copied = ref(false);
 const overrides = ref<Record<string, string>>({});
 const extraName = ref("");
 
+// Functions the sheet draws that this board does not fit. Not a correction to
+// the reader: a revision can move a function and leave the old label drawn,
+// wire and all, and nothing on the drawing separates that from a live net. So
+// it is a fact only the operator has, and it is stated rather than detected.
+const drops = ref<string[]>([]);
+const dropName = ref("");
+const appliedDrops = ref<string[]>([]);
+
 const filename = computed(() => pdf.value?.split(/[/\\]/).pop() ?? "");
 const canRun = computed(
-  () => !!pdf.value && !!board.value.trim() && !!manufacturer.value.trim() && !busy.value,
+  () =>
+    !!pdf.value &&
+    !!board.value.trim() &&
+    !!manufacturer.value.trim() &&
+    !busy.value,
 );
 
 // Everything offered a box: what the sheet did not produce, plus anything
@@ -45,7 +57,10 @@ const canRun = computed(
 const placeable = computed(() => {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const f of [...(report.value?.meta.absent ?? []), ...Object.keys(overrides.value)]) {
+  for (const f of [
+    ...(report.value?.meta.absent ?? []),
+    ...Object.keys(overrides.value),
+  ]) {
     if (!seen.has(f)) {
       seen.add(f);
       out.push(f);
@@ -76,7 +91,9 @@ const cleanOverrides = computed(() => {
   return out;
 });
 
-const anyBadPin = computed(() => Object.values(overrides.value).some((v) => badPin(v ?? "")));
+const anyBadPin = computed(() =>
+  Object.values(overrides.value).some((v) => badPin(v ?? "")),
+);
 
 // A function whose box disagrees with the generated config - either newly
 // filled, edited, or cleared.
@@ -86,9 +103,38 @@ const pending = computed(() => {
   return [...keys].filter((k) => (now[k] ?? "") !== (applied.value[k] ?? ""));
 });
 
+// Same rule as the pin boxes: a name in the list changes nothing until a run
+// takes it, so the two states have to look different.
+const pendingDrops = computed(() => {
+  const now = new Set(drops.value);
+  const was = new Set(appliedDrops.value);
+  return [...new Set([...now, ...was])].filter(
+    (k) => now.has(k) !== was.has(k),
+  );
+});
+
 const canApply = computed(
-  () => !!pdf.value && !busy.value && !anyBadPin.value && pending.value.length > 0,
+  () =>
+    !!pdf.value &&
+    !busy.value &&
+    !anyBadPin.value &&
+    pending.value.length + pendingDrops.value.length > 0,
 );
+
+const canDrop = computed(() => {
+  const name = dropName.value.trim().toUpperCase().replace(/_PIN$/, "");
+  return !!name && !drops.value.includes(name);
+});
+
+function addDrop() {
+  if (!canDrop.value) return;
+  drops.value.push(dropName.value.trim().toUpperCase().replace(/_PIN$/, ""));
+  dropName.value = "";
+}
+
+function keepDrop(name: string) {
+  drops.value = drops.value.filter((d) => d !== name);
+}
 
 // "Add" only ever meant "give me a box for a function the sheet did not list".
 // With an empty name it did nothing and said nothing, which reads as a broken
@@ -145,10 +191,12 @@ async function run() {
       manufacturer: manufacturer.value.trim().toUpperCase(),
       target: target.value.trim() || null,
       overrides: cleanOverrides.value,
+      drops: drops.value,
     });
     // Only after the pipeline accepted them. A rejected value must keep
     // showing as outstanding, since it is still not in the config.
     applied.value = { ...cleanOverrides.value };
+    appliedDrops.value = [...drops.value];
     tab.value = "report";
   } catch (e) {
     error.value = String(e);
@@ -217,9 +265,12 @@ async function copyConfig() {
       <ul class="ml-4 list-disc text-red-300/90">
         <li v-if="!env.python">Python 3.12 or newer is not on PATH</li>
         <li v-if="!env.pdftotext">
-          <span class="mono">pdftotext</span> is not on PATH (install poppler-utils)
+          <span class="mono">pdftotext</span> is not on PATH (install
+          poppler-utils)
         </li>
-        <li v-if="!env.pipeline">The conversion pipeline could not be located</li>
+        <li v-if="!env.pipeline">
+          The conversion pipeline could not be located
+        </li>
         <li v-if="env.pipeline && !env.firmware_rev">
           The firmware capability data is missing or unreadable
         </li>
@@ -233,9 +284,16 @@ async function copyConfig() {
           class="group flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-neutral-700 px-4 py-8 transition hover:border-bf-500 hover:bg-neutral-900"
           @click="pick"
         >
-          <span class="text-3xl text-neutral-600 group-hover:text-bf-500">⬒</span>
-          <span v-if="!pdf" class="text-sm text-neutral-400">Choose a schematic</span>
-          <span v-else class="mono px-2 text-center text-xs break-all text-neutral-200">
+          <span class="text-3xl text-neutral-600 group-hover:text-bf-500"
+            >⬒</span
+          >
+          <span v-if="!pdf" class="text-sm text-neutral-400"
+            >Choose a schematic</span
+          >
+          <span
+            v-else
+            class="mono px-2 text-center text-xs break-all text-neutral-200"
+          >
             {{ filename }}
           </span>
           <span class="text-xs text-neutral-600">stays on this machine</span>
@@ -300,7 +358,9 @@ async function copyConfig() {
           v-if="report && placeable.length"
           class="min-h-0 flex-1 overflow-y-auto rounded-xl border border-neutral-800 p-3"
         >
-          <h2 class="mb-1 text-xs font-medium text-neutral-300">Not found on this sheet</h2>
+          <h2 class="mb-1 text-xs font-medium text-neutral-300">
+            Not found on this sheet
+          </h2>
           <p class="mb-3 text-xs leading-relaxed text-neutral-600">
             Give a pin and generate again. Each one is checked against the
             firmware tables and refused if it cannot do the job.
@@ -308,7 +368,10 @@ async function copyConfig() {
 
           <div v-for="fn in placeable" :key="fn" class="mb-2">
             <div class="flex items-center gap-2">
-              <label class="mono flex-1 truncate text-xs text-neutral-400" :for="`fn-${fn}`">
+              <label
+                class="mono flex-1 truncate text-xs text-neutral-400"
+                :for="`fn-${fn}`"
+              >
                 {{ fn }}
               </label>
               <input
@@ -331,7 +394,10 @@ async function copyConfig() {
                 ✕
               </button>
             </div>
-            <p v-if="pending.includes(fn)" class="mono mt-0.5 text-xs text-amber-400">
+            <p
+              v-if="pending.includes(fn)"
+              class="mono mt-0.5 text-xs text-amber-400"
+            >
               not in the config yet
             </p>
             <p
@@ -373,13 +439,18 @@ async function copyConfig() {
           >
             <template v-if="busy">Generating…</template>
             <template v-else-if="anyBadPin">Fix the pin names above</template>
-            <template v-else-if="pending.length">
-              Apply {{ pending.length }} pin{{ pending.length > 1 ? "s" : "" }} and generate
+            <template v-else-if="pending.length + pendingDrops.length">
+              Apply {{ pending.length + pendingDrops.length }} change{{
+                pending.length + pendingDrops.length > 1 ? "s" : ""
+              }}
+              and generate
             </template>
             <template v-else>All supplied pins are in the config</template>
           </button>
 
-          <div class="mt-3 flex items-center gap-2 border-t border-neutral-800 pt-3">
+          <div
+            class="mt-3 flex items-center gap-2 border-t border-neutral-800 pt-3"
+          >
             <input
               v-model="extraName"
               placeholder="another function, e.g. MOTOR6"
@@ -390,7 +461,9 @@ async function copyConfig() {
               :disabled="!canAddFunction"
               class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 transition enabled:hover:border-neutral-500 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:text-neutral-700"
               :title="
-                extraName.trim() ? 'Already listed above' : 'Name a function to add a box for it'
+                extraName.trim()
+                  ? 'Already listed above'
+                  : 'Name a function to add a box for it'
               "
               @click="addFunction"
             >
@@ -400,6 +473,67 @@ async function copyConfig() {
           <p class="mt-1 text-xs leading-relaxed text-neutral-600">
             Add only gives you a box. The pin reaches
             <span class="mono">config.h</span> when you generate.
+          </p>
+        </section>
+
+        <!-- The other direction, and it is not the same panel's problem. Above
+             is a function the sheet failed to give; here is one it gives that
+             the board does not have. A revision moves a function and leaves the
+             old label drawn, wire and all - and no reader can tell that from a
+             live net, so it can only be stated. -->
+        <section v-if="report" class="rounded-xl border border-neutral-800 p-3">
+          <h2 class="mb-1 text-xs font-medium text-neutral-300">
+            Drawn but not fitted
+          </h2>
+          <p class="mb-2 text-xs leading-relaxed text-neutral-600">
+            Leave out a function this board does not have. It can matter beyond
+            the one define — a pin nobody fits still constrains what the rest
+            can use.
+          </p>
+
+          <div v-if="drops.length" class="mb-2 flex flex-wrap gap-1">
+            <span
+              v-for="d in drops"
+              :key="d"
+              class="mono flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs"
+              :class="
+                pendingDrops.includes(d)
+                  ? 'border-amber-800 text-amber-400'
+                  : 'border-neutral-700 text-neutral-400'
+              "
+            >
+              {{ d }}
+              <button
+                class="text-neutral-600 hover:text-neutral-300"
+                title="Keep it"
+                @click="keepDrop(d)"
+              >
+                ✕
+              </button>
+            </span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input
+              v-model="dropName"
+              placeholder="e.g. ADC_RSSI"
+              class="mono min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs uppercase outline-none focus:border-bf-500"
+              @keyup.enter="addDrop"
+            />
+            <button
+              :disabled="!canDrop"
+              class="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 transition enabled:hover:border-neutral-500 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:text-neutral-700"
+              title="Leave this function out of the config"
+              @click="addDrop"
+            >
+              Drop
+            </button>
+          </div>
+          <p
+            v-if="pendingDrops.length"
+            class="mono mt-1 text-xs text-amber-400"
+          >
+            not in the config yet — generate to apply
           </p>
         </section>
       </section>
@@ -416,7 +550,7 @@ async function copyConfig() {
         <template v-else>
           <div class="mb-3 flex items-center gap-2">
             <button
-              v-for="t in (['report', 'config'] as const)"
+              v-for="t in ['report', 'config'] as const"
               :key="t"
               class="rounded-md px-3 py-1.5 text-sm capitalize transition"
               :class="
@@ -449,19 +583,20 @@ async function copyConfig() {
             </button>
           </div>
 
-          <div class="min-h-0 flex-1 overflow-auto rounded-xl bg-neutral-900/50 p-4">
+          <div
+            class="min-h-0 flex-1 overflow-auto rounded-xl bg-neutral-900/50 p-4"
+          >
             <ReportPanel v-if="tab === 'report'" :report="report" />
             <pre
               v-else
               class="mono text-xs leading-relaxed whitespace-pre text-neutral-300"
-              >{{ report.config }}</pre
-            >
+              >{{ report.config }}</pre>
           </div>
 
           <p class="mt-2 text-xs leading-relaxed text-neutral-600">
-            A strong first draft, not a substitute for review. A config can build
-            cleanly and still not match the hardware — check the agreement score
-            and every warning before shipping a target.
+            A strong first draft, not a substitute for review. A config can
+            build cleanly and still not match the hardware — check the agreement
+            score and every warning before shipping a target.
           </p>
         </template>
       </section>

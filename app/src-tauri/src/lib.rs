@@ -228,6 +228,11 @@ mod commands {
         // firmware tables and refuses the ones it cannot honour, so nothing
         // here needs to know what a pin is.
         overrides: Option<std::collections::BTreeMap<String, String>>,
+        // Functions the sheet draws that the board does not fit: ["ADC_RSSI"].
+        // A revision can move a function and leave the old label drawn, and
+        // nothing on the sheet tells that from a live net - so this is a fact
+        // only the operator has.
+        drops: Option<Vec<String>>,
     ) -> Result<serde_json::Value, String> {
         if !Path::new(&pdf).is_file() {
             return Err(format!("No such file: {pdf}"));
@@ -271,6 +276,17 @@ mod commands {
             let pin = pin.trim();
             if !pin.is_empty() {
                 cmd.arg("--set").arg(format!("{}={}", name.trim(), pin));
+            }
+        }
+        // Sorted for the same reason the overrides are a BTreeMap: two runs
+        // with the same inputs have to produce the same command line.
+        let mut drops = drops.unwrap_or_default();
+        drops.sort();
+        drops.dedup();
+        for name in drops {
+            let name = name.trim();
+            if !name.is_empty() {
+                cmd.arg("--drop").arg(name);
             }
         }
 
