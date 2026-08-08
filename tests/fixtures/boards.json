@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "39556cf5d"
+  "tool_rev": "076d0f224"
  },
  "boards": [
   {
@@ -155,12 +155,12 @@
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 50,
+   "config_defines": 52,
    "timer_rows": 2,
-   "warnings": 10,
-   "notes": 16,
+   "warnings": 8,
+   "notes": 17,
    "netmap_digest": "8803587587c11eb296428a07f04d0f26a0e531c19686f2780defcfce54b59d5c",
-   "config_digest": "53b9ee181a9a507ff92e11f04d4145cc4cce09cef45ba1f4d7048fc9c1eb8ea7",
+   "config_digest": "d2c175639eeccf8ecf9ddefda1f253a7f3342f3854e3350fb9b6fa83da5bcb17",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -195,11 +195,11 @@
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
    "config_defines": 54,
-   "timer_rows": 6,
+   "timer_rows": 7,
    "warnings": 10,
-   "notes": 10,
+   "notes": 12,
    "netmap_digest": "8a941806809289352133a26bcd436162f3752fe6846976c721a0a8c78efa93f5",
-   "config_digest": "6c6843f391177de2d79d88534c43830c3cba9e9b5632f796fd32cb4f52256fa8",
+   "config_digest": "b6846a93074858be0456bad9cfb730134be86248d62efb5011a8b0bf7259538e",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -229,18 +229,20 @@
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 92,
-   "timer_rows": 10,
-   "warnings": 14,
-   "notes": 17,
+   "config_defines": 93,
+   "timer_rows": 11,
+   "warnings": 13,
+   "notes": 19,
    "netmap_digest": "2833f0f8a9a09d346f96126de30f080f048fbfd0b49e2f67ee7e54c0d61dcb0a",
-   "config_digest": "9c9b47797ea8e33ca338367dd7625ba772a4c97c9d51745f76b9649a47ab6b38",
+   "config_digest": "ff0d8fc08faa1ca2367de91b90ab1923b3b46d94b13995b7f8ad92a5092c1daa",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
     "instances_without_pins": [],
     "timer_channel_collisions": [],
-    "timer_rate_class_clashes": [],
+    "timer_rate_class_clashes": [
+     "TIM1: PWM beeper+motor"
+    ],
     "unaccounted_roles": [],
     "unvalidated_pin_defines": []
    }
@@ -299,12 +301,12 @@
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 62,
-   "timer_rows": 10,
-   "warnings": 8,
-   "notes": 19,
+   "config_defines": 64,
+   "timer_rows": 11,
+   "warnings": 7,
+   "notes": 21,
    "netmap_digest": "2de0726731ff7cc4e6ee1a441ad30488ff85c17069c84c68996f6c165e753574",
-   "config_digest": "fbc2289991069e7df3bf11508c08623babe91bdeadeb37c0b351aec8555a2636",
+   "config_digest": "583f8df1ee7b974f2f931ea93592cb017548a860cd32ae0ae5bdab644bee9be7",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],

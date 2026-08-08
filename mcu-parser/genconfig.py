@@ -747,7 +747,8 @@ def _rate_class(label: str) -> Optional[Tuple[str, str, str]]:
     return None
 
 
-def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
+def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict,
+                       pwm_beeper: bool = False) -> List[str]:
     """
     Two functions wanting different rates from one TIM unit.
 
@@ -769,6 +770,13 @@ def timer_rate_clashes(picks: Sequence["TimerPick"], caps: dict) -> List[str]:
         if not got:
             continue
         token, name, why = got
+        if token == "BEEPER" and not pwm_beeper:
+            # The row is emitted on every board now, and on a board with an
+            # active buzzer it is never allocated - so it cannot take a period
+            # from anyone. Reporting it would put a clash on most configs that
+            # only exists if the user later sets BEEPER_PWM_HZ, and at that
+            # point inert_beeper_timer_row()'s note is what they are reading.
+            continue
         units[p.channel.split("_")[0]][name].append(p.label)
         needs[name] = why
 
@@ -868,7 +876,8 @@ def split_orphans(orphans: Sequence[str], links: Sequence[Link]
     return lost, len(orphans) - len(lost)
 
 
-def avoid_rate_clashes(picks: List["TimerPick"], caps: dict) -> List[str]:
+def avoid_rate_clashes(picks: List["TimerPick"], caps: dict,
+                       pwm_beeper: bool = False) -> List[str]:
     """
     Re-pick occurrences so one TIM unit does not serve two rate classes.
 
@@ -889,10 +898,19 @@ def avoid_rate_clashes(picks: List["TimerPick"], caps: dict) -> List[str]:
     rather than silently accepted.
     """
     notes: List[str] = []
+
+    def rate_of(p: "TimerPick") -> Optional[Tuple[str, str, str]]:
+        # An inert beeper row asks nothing of its timer, so it must not cause a
+        # move: rearranging a working board to dodge a clash that only exists
+        # once someone sets BEEPER_PWM_HZ would be a change with no reason
+        # visible in the file.
+        got = _rate_class(p.label)
+        return None if got and got[0] == "BEEPER" and not pwm_beeper else got
+
     def classes() -> Dict[str, set]:
         out: Dict[str, set] = defaultdict(set)
         for p in picks:
-            got = _rate_class(p.label)
+            got = rate_of(p)
             if got:
                 out[p.channel.split("_")[0]].add(got[1])
         return out
@@ -903,7 +921,7 @@ def avoid_rate_clashes(picks: List["TimerPick"], caps: dict) -> List[str]:
             break
         moved = False
         for p in picks:
-            got = _rate_class(p.label)
+            got = rate_of(p)
             if not got or got[1] == "motor":
                 continue
             unit = p.channel.split("_")[0]
@@ -950,10 +968,13 @@ def inert_beeper_timer_row(picks: Sequence["TimerPick"], cfg: "Config") -> List[
         return []
     if "BEEPER_PWM_HZ" in cfg.emitted:
         return []
-    return ["BEEPER_PIN has a TIMER_PIN_MAP row but no BEEPER_PWM_HZ, so it "
-            "does nothing: beeperInit() drives the pin as plain GPIO unless "
-            "that frequency is set. Add BEEPER_PWM_HZ if the buzzer is passive, "
-            "or drop the row"]
+    return ["BEEPER_PIN's TIMER_PIN_MAP row does nothing until BEEPER_PWM_HZ "
+            "is set: beeperInit() drives the pin as plain GPIO while the "
+            "frequency is 0, which is right for the active buzzer nearly every "
+            "board fits. The row is emitted anyway because it is the half that "
+            "cannot be added later by CLI - timerAllocate() only searches "
+            "TIMER_PIN_MAPPING - so a passive buzzer needs just the frequency. "
+            "Which buzzer is fitted is not on the schematic"]
 
 
 def timer_channel_collisions(picks: Sequence["TimerPick"]) -> List[str]:
@@ -1064,8 +1085,69 @@ def dma_streams(caps: dict, key: str, opt: int) -> Optional[str]:
     return opts[opt] if 0 <= opt < len(opts) else None
 
 
+ADC_ANNOT_RE = re.compile(r"^ADC(\d)(?:[-_]?IN\d{1,2})?$", re.I)
+
+
+def read_adc_instance(words: Sequence["Word"], adc_pins: Dict[str, str],
+                      pitch: float) -> Tuple[Optional[int], List[str]]:
+    """
+    The ADC instance the sheet asks for, when it says.
+
+    Some sheets carry a summary table - "ADC Voltage (VBAT)  ADC3  PC1" - and
+    that is a statement about the board's intent that the pins alone do not
+    make: PC0 and PC1 can be read by any of the three, so nothing in the pin
+    map prefers one.
+
+    Rare. **None** of the 104 readable sheets in the corpus carries an `ADCn`
+    token; the one board this was written for acquired the annotation in a
+    later revision, after the instance came up in review. It is read anyway
+    because 193 of the 626 shipped configs define `ADC_INSTANCE`, so it is a
+    thing vendors mean to specify, and because reading it costs a regex.
+
+    It is read the way every other vendor annotation is: as a proposal that
+    firmware validates. The instance still has to be one every emitted ADC pin
+    can be sampled by, because `adcInit()` uses a single device for all of
+    them and `adcVerifyPin()` silently drops the ones it cannot reach - the
+    failure being a meter that reads zero on a board that boots and flies.
+
+    Returns the instance and what was read, or None and the reason.
+    """
+    if not adc_pins:
+        return None, []
+    votes: Dict[str, int] = {}
+    for w in words:
+        m = ADC_ANNOT_RE.match(w.text)
+        if not m:
+            continue
+        for role, pin in adc_pins.items():
+            if any(v.page == w.page and v.text.upper() == pin
+                   and abs(v.yc - w.yc) <= pitch * 2 for v in words):
+                # The pin has to be on the annotation's own row, and the row
+                # has to be a table row rather than the MCU symbol's gutter -
+                # which it is, because a pin name in the gutter has the net
+                # beside it, not a device number.
+                near = [v for v in words
+                        if v.page == w.page and v.text.upper() == pin
+                        and abs(v.yc - w.yc) <= pitch * 2]
+                if near:
+                    votes[role] = int(m.group(1))
+    if not votes:
+        return None, []
+    asked = sorted(set(votes.values()))
+    read = ", ".join(f"{r.replace('adc_', '').upper()} on {adc_pins[r]}: ADC{n}"
+                     for r, n in sorted(votes.items()))
+    if len(asked) > 1:
+        return None, [
+            f"the sheet asks for more than one ADC instance ({read}). One "
+            "instance serves every ADC pin - adcInit() takes ADC_INSTANCE and "
+            "adcVerifyPin() drops the pins that instance cannot read - so "
+            "these cannot all be honoured. Left to the pins to decide"]
+    return asked[0], [f"the sheet asks for ADC{asked[0]} ({read})"]
+
+
 def choose_adc(caps: dict, pins: Sequence[str], claimed: Set[str],
-               mux_next: int = 0) -> Tuple[Optional[str], Optional[int], List[str]]:
+               mux_next: int = 0, only: Optional[str] = None
+               ) -> Tuple[Optional[str], Optional[int], List[str]]:
     """
     Pick an ADC instance that can read every ADC pin, plus a DMA option that
     nothing else has taken.
@@ -1090,6 +1172,11 @@ def choose_adc(caps: dict, pins: Sequence[str], claimed: Set[str],
     common = set.intersection(*sets)
     if not common:
         return None, None, notes + ["no single ADC instance covers all ADC pins"]
+    if only:
+        # The sheet named the instance and the caller has already checked every
+        # pin can be read by it; this only narrows the DMA option to that
+        # device's own list.
+        common &= {only[-1]}
 
     # An ADC row is a peripheral row, so its ceiling is MAX_PERIPHERAL_DMA_OPTIONS
     # rather than the timers' MAX_TIMER_DMA_OPTIONS - the two are different
@@ -1534,8 +1621,37 @@ def trace_cs_bus(words: Sequence[Word], mcu_labels: Sequence[Word], cs_net: str,
     near, bus, runner, ws, h = best
     radius = max(near * 5, pitch * 3)
     own = sorted(gap(h, w) for w in ws if w.page == h.page)
+    band = pitch * 4
+
+    def with_the_chip_select(w: Word) -> bool:
+        """
+        Is this bus line drawn on the same part as the chip select?
+
+        Radius alone cannot say. A flash chip is drawn as a wide symbol with
+        its chip select and one data line entering on the left and the clock
+        and the other data line leaving 200pt away on the right - while a
+        different part's bus, on another row of the same sheet, sits closer to
+        the chip select than that part's own far side does.
+
+        What separates them is the row. A symbol's pins fan out left and right
+        along its own rows, so a line belonging to this part shares the chip
+        select's band, and one belonging to another part does not. The span
+        between them has to be clear of any other bus's labels, which is what
+        stops a row that happens to run past a second part from collecting it.
+        """
+        if w.page != h.page:
+            return False
+        if gap(h, w) <= radius:
+            return True
+        if abs(w.yc - h.yc) > band:
+            return False
+        lo, hi = sorted((h.x0, w.x0))
+        return not any(lo < v.x0 < hi and abs(v.yc - h.yc) <= band
+                       for other, vs in lines.items() if other != bus
+                       for v in vs if v.page == h.page)
+
     roles = {SPI_LINE_RE.fullmatch(w.text).group(2).lower()
-             for w in ws if w.page == h.page and gap(h, w) <= radius}
+             for w in ws if with_the_chip_select(w)}
     # Either the bus's lines cluster tightly around the chip select, or - when
     # the part is drawn as a large symbol with its pins spread around it - every
     # one of them is still nearer than anything belonging to another bus. A
@@ -2234,13 +2350,43 @@ def _hand_placed(overrides: Dict[str, str], caps: dict) -> Tuple[List[Link], set
     return out, keys
 
 
+def _hand_dropped(drops: Sequence[str]) -> set:
+    """
+    Turn `--drop NAME` into the role keys to leave out.
+
+    A schematic outlives the board it describes. A revision can move a function
+    off a pin and leave the old label drawn, or keep a net the assembled board
+    does not fit - and the reader cannot tell, because a label with a wire under
+    it is all the evidence there is either way. So this is not a way to correct
+    the tool; it is a way to state something the sheet does not carry.
+
+    It matters beyond the missing define. One board's RSSI sat on the only ADC
+    pin its MCU could not reach from ADC3, which was the instance the rest of
+    the sheet asked for - so keeping a function nobody fits forced the whole ADC
+    onto a different device. Dropping it lets the sheet's own annotation stand.
+
+    Routed through `classify`, like `--set`, so both understand the same names.
+    """
+    keys = set()
+    for raw in drops:
+        net = re.sub(r"_PIN$", "", raw.strip().upper())
+        role, idx, sub = classify(net)
+        if role is None or role == "ignore":
+            raise SystemExit(
+                f"--drop {raw}: not a function this tool knows. Name it as the "
+                "sheet would, e.g. ADC_RSSI, MOTOR6, LED_STRIP")
+        keys.add((role, idx, sub))
+    return keys
+
+
 def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
           gyro_align: str, args_trust: bool = False,
           reference: Optional[str] = None,
           version: Optional[str] = None,
           hse_mhz: Optional[int] = None,
           page: Optional[int] = None,
-          overrides: Optional[Dict[str, str]] = None) -> Tuple[Config, dict]:
+          overrides: Optional[Dict[str, str]] = None,
+          drops: Optional[Sequence[str]] = None) -> Tuple[Config, dict]:
     fw = json.loads((DATA_DIR / "firmware.json").read_text())
     aliases = json.loads(ALIAS_FILE.read_text())
 
@@ -2365,6 +2511,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     for l in hand:
         cfg.notes.append(f"{l.net} = {l.pin} supplied by hand, not read "
                          "from the sheet")
+    dropped_keys = _hand_dropped(drops or [])
     for l in list(res.links) + hand:
         # Anything the firmware map rejected, or that landed on a supply pin, is
         # left out rather than emitted as a define that cannot work. Each one is
@@ -2383,6 +2530,11 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             continue
         role, idx, sub = classify(l.net)
         if role == "ignore":
+            continue
+        if (role, idx, sub) in dropped_keys:
+            cfg.notes.append(f"{l.net} on {l.pin} is drawn on the sheet and was "
+                             "dropped as asked; the board does not fit it")
+            net_of[l.pin] = l.net
             continue
         net_of[l.pin] = l.net
         if role and role.startswith("gyro") and role.split("_")[0] not in GYRO_OWNERS:
@@ -2882,7 +3034,17 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         picks.append(TimerPick(pin, label, got[0], got[1], -1, got[2]))
     timed_io = [("led_strip", "LED_STRIP_PIN", 0),
                 ("camera_control", "CAMERA_CONTROL_PIN", -1),
-                ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1)]
+                ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1),
+                # The beeper's row is the half a passive buzzer cannot do
+                # without: beeperPwmInit() calls timerAllocate(), which only
+                # searches timerIOConfig - the TIMER_PIN_MAPPING - so a board
+                # that sets BEEPER_PWM_HZ and omits the row gets no timer, no
+                # PWM and, because beeperInit() skips the GPIO path whenever
+                # the frequency is non-zero, no beeper at all. 16 shipped
+                # targets are in exactly that state. Emitting the row costs
+                # nothing when the buzzer is active - it is never allocated -
+                # and is what makes the other case possible.
+                ("beeper", "BEEPER_PIN", -1)]
     if gyro2:
         timed_io.append(("gyro2_clkin", "GYRO_2_CLKIN_PIN", -1))
     for role, label, dmaopt in timed_io:
@@ -2891,10 +3053,37 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             continue
         hint = hints.get(role.replace("_", "-").upper()) or hints.get(
             {"led_strip": "LED-STRIP", "camera_control": "CAM-CONTROLL",
-             "gyro_clkin": "GYRO-CLOCK", "gyro2_clkin": "GYRO2-CLOCK"}[role])
+             "gyro_clkin": "GYRO-CLOCK", "gyro2_clkin": "GYRO2-CLOCK",
+             "beeper": "BEEPER"}[role])
         got = pick_timer(caps, pin, hint, prefer_advanced=False)
+        if got and role == "beeper":
+            # The row is a convenience, so it may not cost anything. A beeper
+            # pin often shares a timer channel with a motor - one compare
+            # register, one waveform - and while an unallocated channel does no
+            # harm, a row that would collide the moment it were used is worse
+            # than no row: the reader cannot tell it is inert. Take another of
+            # the pin's channels if it has a free one, and otherwise say why
+            # there is no row rather than emitting a trap.
+            taken = {p.channel for p in picks}
+            if got[1] in taken:
+                alts = [(i, ch) for i, ch in
+                        enumerate(caps["timers"].get(pin) or [], start=1)
+                        if ch not in taken]
+                if alts:
+                    got = (alts[0][0], alts[0][1], "inferred")
+                else:
+                    cfg.notes.append(
+                        f"BEEPER_PIN on {pin} has no TIMER_PIN_MAP row: every "
+                        f"timer channel it has is already driving something "
+                        f"else ({got[1]}). An active buzzer does not need one; "
+                        "a passive one would need a different pin")
+                    continue
         if got:
             picks.append(TimerPick(pin, label, got[0], got[1], dmaopt, got[2]))
+        elif role == "beeper":
+            # Most beeper pins have no timer at all, and an active buzzer does
+            # not want one. Nothing to report.
+            pass
         else:
             cfg.warnings.append(f"{label} on {pin} has no timer; LED strip needs one"
                                 if role == "led_strip" else
@@ -2908,7 +3097,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     # This runs before the DMA numbering below, not after: a dropped row must
     # not take a DMA channel with it, and must not appear in the reasoning for
     # why another row was moved.
-    cfg.notes.extend(avoid_rate_clashes(picks, caps))
+    cfg.notes.extend(avoid_rate_clashes(picks, caps,
+                                        "BEEPER_PWM_HZ" in cfg.emitted))
 
     defined = {m.group(1) for m in re.finditer(r"^#define\s+([A-Z][A-Z0-9_]+)",
                                                "\n".join(cfg.lines), re.M)}
@@ -2972,14 +3162,35 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 cfg.notes.append(f"{p.label} -> {p.channel} inferred (no annotation)")
         for line in timer_channel_collisions(picks):
             cfg.warnings.append(line)
-        for line in inert_beeper_timer_row(picks, cfg):
-            cfg.warnings.append(line)
-        for line in timer_rate_clashes(picks, caps):
+        # A note, not a warning: the row is emitted deliberately and the
+        # board it is wrong for does not exist - it is inert, not broken.
+        cfg.notes.extend(inert_beeper_timer_row(picks, cfg))
+        for line in timer_rate_clashes(picks, caps,
+                                       "BEEPER_PWM_HZ" in cfg.emitted):
             cfg.warnings.append(line)
 
     # ---- DMA and instances ----------------------------------------------
     adc_dev, adc_opt, notes = choose_adc(caps, adc_pins, claimed, mux_next)
     cfg.notes.extend(notes)
+    wanted, why = read_adc_instance(
+        words, {k: simple[k] for k in ("adc_vbat", "adc_curr", "adc_rssi")
+                if k in simple}, sym.pitch)
+    cfg.notes.extend(why)
+    if wanted is not None and adc_dev:
+        blocked = [p for p in adc_pins
+                   if str(wanted) not in (caps["adc"].get(p) or {}).get("devices", "")]
+        if blocked:
+            cfg.warnings.append(
+                f"the sheet asks for ADC{wanted}, but {', '.join(sorted(blocked))} "
+                f"cannot be read by it (adcTagMap gives ADC"
+                f"{'/ADC'.join((caps['adc'].get(blocked[0]) or {}).get('devices', '?'))}"
+                f" for {blocked[0]}). {adc_dev} is emitted instead, which reads "
+                "every one of them; honouring the sheet means dropping whatever "
+                "sits on the pins it cannot reach")
+        elif f"ADC{wanted}" != adc_dev:
+            adc_dev, adc_opt, notes = choose_adc(caps, adc_pins, claimed, mux_next,
+                                                 only=f"ADC{wanted}")
+            cfg.notes.extend(notes)
     if adc_dev and adc_opt is not None:
         cfg.define(f"{adc_dev}_DMA_OPT", str(adc_opt), width=29)
         cfg.add()
@@ -3359,6 +3570,13 @@ def main() -> int:
                          "anything read for the same role. The report lists "
                          "what a target normally has and this sheet did not "
                          "produce.")
+    ap.add_argument("--drop", dest="drops", action="append", default=[],
+                    metavar="NAME",
+                    help="leave out a function the sheet draws but the board "
+                         "does not fit, e.g. --drop ADC_RSSI. Repeatable. A "
+                         "revision can move a function and leave the old label "
+                         "drawn, and nothing on the sheet distinguishes that "
+                         "from a live net.")
     ap.add_argument("--reference",
                     help="the sha256_... REFERENCE token issued by the Betaflight "
                          "team for a reviewed target. Cannot be computed locally; "
@@ -3396,7 +3614,7 @@ def main() -> int:
     cfg, meta = build(args.pdf, args.board, args.manufacturer,
                       args.target, args.gyro_align, args.trust_symbol,
                       args.reference, args.fw_version, args.hse_mhz,
-                      args.page, overrides)
+                      args.page, overrides, args.drops)
     text = "\n".join(cfg.lines).rstrip() + "\n"
 
     if args.as_json:

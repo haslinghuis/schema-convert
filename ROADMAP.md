@@ -60,6 +60,8 @@ is in each section below.
 | §4.9 | Pin-editor suggestions: 136 offered on 59 boards; the rest have nothing on the sheet to offer | — |
 | §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
 | §4.11 | DMA contention against DShot bitbang: investigated, modelled, and dropped - the model flagged 151 of 467 shipped configs (FINDINGS §4.11) | — |
+| §4.12 | The beeper's `TIMER_PIN_MAP` row is never emitted, so a passive buzzer cannot be enabled by CLI at all — DONE | 26 boards |
+| §4.13 | A sheet that names its ADC instance is not read, and a function the board does not fit cannot be left out — DONE | 1 board |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -262,6 +264,32 @@ data line together and the other two coming off the far side, 130pt away. That
 is still a third of the way to the next bus, so a second sufficient condition
 now applies: *every* one of the winning bus's lines is nearer than anything
 belonging to another bus. Where a rival's lines interleave it still declines.
+
+#### Round four: distance was still the wrong measure for a wide part
+
+The "every line nearer than the next bus" condition holds only while the sheet
+is drawn loosely. A revision of one F722 sheet put the flash's CS and SDI at the
+left of the symbol and its SCK and SDO **206pt away** at the right — and the OSD,
+on another row entirely, has its bus 198pt from that same CS. This part's own far
+side is *further* than the neighbouring part's lines, so both tests fail and a
+board whose sheet states the bus three times over gets left to a reviewer.
+
+What separates them is not distance but **the row**. A symbol's pins fan out left
+and right along its own rows, so every label belonging to this part shares the
+chip-select's band and the neighbouring part's are two hundred points up the page.
+`trace_cs_bus()` now counts a line as clustered when it is within the radius *or*
+on the chip-select's row with no other bus's labels in the span between them — the
+clear-span test being what stops a row that happens to run past a second part from
+collecting it.
+
+| | before | after |
+|---|---|---|
+| CS-only devices left to a human | 34 | **29** |
+| `*_SPI_INSTANCE` emitted | 186 | **191** |
+| `DEFAULT_BLACKBOX_DEVICE` emitted | 43 | **47** |
+
+Four of the five gained boards get their blackbox default for free, since §4.10
+already ties that to a device the config can actually reach.
 
 | | before | after |
 |---|---|---|
@@ -684,6 +712,57 @@ BLACKBOX_DEVICE_SDCARD` where the tool produced nothing, because the card's chip
 select was named after its bus (§3.3b) - so the device was never placed and the
 default silently became `NONE`. That is the shape of it: an upstream miss, and
 then a functional loss with no warning attached.
+
+### 4.12 The beeper row is the half that cannot be added later — DONE
+
+`BEEPER_PWM_HZ` is a CLI-settable value; the `TIMER_PIN_MAP` row is not. And
+`beeperPwmInit()` calls `timerAllocate()`, which searches **only**
+`timerIOConfig` — the mapping compiled into the target. So a config that omits
+the row has decided permanently that the board cannot drive a passive buzzer:
+setting the frequency then gets no timer, and because `beeperInit()` takes the
+GPIO path only while the frequency is zero, the beeper stops working altogether
+rather than falling back to it.
+
+**16 shipped targets are in exactly that state** — `BEEPER_PWM_HZ` set with no
+row — against 28 that carry the row and 3 with both. Those beepers are silent,
+which is worth an issue on the config repo.
+
+So the row is emitted wherever the beeper pin has a timer: 26 of the corpus's
+boards. It costs nothing on the active buzzer nearly every board fits, since an
+unallocated channel takes no period from anyone — which is also why the rate
+clash and channel collision checks now ignore it unless `BEEPER_PWM_HZ` is
+present. Reporting a clash that exists only after a CLI change would put a
+warning on most configs and teach a reader to skip them.
+
+10 boards get **no** row, because every timer channel their beeper pin has is
+already driving something else. There the note says so: an inert row that would
+collide the moment it were used is worse than no row, since a reader cannot see
+that it is inert.
+
+### 4.13 The sheet can name the ADC instance, and a drawn net can be wrong — DONE
+
+Two halves of one board's problem, and neither is a parse failure.
+
+**The instance.** `PC0` and `PC1` can be sampled by any of ADC1/2/3, so the pin
+map does not prefer one and `choose_adc()` takes the lowest. A vendor sheet
+revised during review said `ADC Voltage (VBAT)  ADC3  PC1` in its summary table
+— an intent the pins cannot express. `read_adc_instance()` reads it, validated
+like any other vendor annotation: the instance has to be one *every* emitted ADC
+pin can be read by, because `adcInit()` uses a single device and
+`adcVerifyPin()` silently drops the pins it cannot reach. **None** of the 104
+readable corpus sheets carries such an annotation; this one acquired it in a
+revision, which is the argument for reading it rather than for expecting it.
+
+**The net the board does not fit.** That same sheet still draws `ADC_RSSI` on
+`PC4`, wire and all, unchanged from the previous revision — while the board has
+dropped RSSI. Nothing distinguishes a live net from a stale one: a label with a
+wire under it is all the evidence there is either way. `--drop NAME` states it,
+routed through `classify` like `--set` so both understand the same spellings.
+
+The two interact, which is why they are one entry. `PC4` is the one ADC pin on
+that MCU that ADC3 cannot read, so keeping a function nobody fits forced the
+whole ADC onto ADC1 and made the sheet's own annotation unhonourable. With
+`--drop ADC_RSSI` the annotation validates and `ADC_INSTANCE ADC3` follows.
 
 ---
 

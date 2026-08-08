@@ -135,6 +135,15 @@ python3 mcu-parser/genconfig.py board.pdf --board NAME --manufacturer ID \
         --set MOTOR6=PE11 --set ADC_RSSI=PC5
 ```
 
+The reverse happens too — a revision moves a function and leaves the old label
+drawn, or the sheet shows a net the assembled board does not fit — and nothing
+on the drawing tells that from a live one, so it can be stated:
+
+```bash
+python3 mcu-parser/genconfig.py board.pdf --board NAME --manufacturer ID \
+        --drop ADC_RSSI
+```
+
 `NAME` is the function as the sheet would name it — the `_PIN` belongs to
 `config.h` and is added on the way out, though typing it does no harm. It goes
 through the same reader the sheet's own nets do, so every spelling it

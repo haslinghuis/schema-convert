@@ -794,9 +794,20 @@ class BeeperTimerRowTests(unittest.TestCase):
     def test_a_pwm_beeper_clashes_with_another_class_on_one_unit(self):
         out = genconfig.timer_rate_clashes(
             [self.pick("BEEPER_PIN", "TIM4_CH4"),
-             self.pick("CAMERA_CONTROL_PIN", "TIM4_CH3")], {"family": "STM32F7"})
+             self.pick("CAMERA_CONTROL_PIN", "TIM4_CH3")], {"family": "STM32F7"},
+            pwm_beeper=True)
         self.assertEqual(len(out), 1)
         self.assertIn("PWM beeper", out[0])
+
+    def test_an_inert_beeper_row_clashes_with_nothing(self):
+        # The row is emitted on every board that has a beeper pin with a timer,
+        # so reporting this would put a clash on most configs that exists only
+        # if someone later sets the frequency. An unallocated channel takes no
+        # period from anyone.
+        self.assertEqual(genconfig.timer_rate_clashes(
+            [self.pick("BEEPER_PIN", "TIM4_CH4"),
+             self.pick("CAMERA_CONTROL_PIN", "TIM4_CH3")],
+            {"family": "STM32F7"}), [])
 
     def test_separate_units_do_not_clash(self):
         self.assertEqual(genconfig.timer_rate_clashes(
@@ -1500,6 +1511,38 @@ class TraceCsBusTests(unittest.TestCase):
                  + [Word("SPI2-SCK", 101, 500, 121, 502, 2)])
         bus, _ = genconfig.trace_cs_bus(words, [], "GYRO_CS", self.BUSES, self.PITCH)
         self.assertEqual(bus, "SPI1")
+
+    def test_a_wide_part_keeps_its_own_row_when_another_bus_is_nearer(self):
+        # The case radius alone gets wrong, measured off a real F722 sheet: the
+        # flash's CS and SDI enter the left of the symbol, its SCK and SDO leave
+        # the right 206pt away - and the OSD's bus, two hundred points up the
+        # page, is 198pt from the CS. Distance ranks the wrong part's lines
+        # closer than this part's own far side. The row does not: all four of
+        # the flash's labels share a band, and the OSD's are nowhere near it.
+        words = [Word("FLASH_CS", 543, 509, 573, 511),
+                 Word("SPI1-MISO", 543, 516, 573, 518),
+                 Word("SPI1-SCK", 749, 523, 779, 525),
+                 Word("SPI1-MOSI", 748, 530, 778, 532),
+                 Word("SPI2-MOSI", 536, 296, 566, 298),
+                 Word("SPI2-SCK", 536, 304, 566, 306),
+                 Word("SPI2-MISO", 536, 311, 566, 313)]
+        bus, note = genconfig.trace_cs_bus(words, [], "FLASH_CS", self.BUSES,
+                                           self.PITCH)
+        self.assertEqual(bus, "SPI1")
+
+    def test_the_row_does_not_reach_past_another_buss_labels(self):
+        # Same row, but the rival's lines are drawn between the chip select and
+        # the far ones. Then the far ones may belong to either part, and the
+        # span being clear is what made the case above readable.
+        words = [Word("FLASH_CS", 543, 509, 573, 511),
+                 Word("SPI1-MISO", 543, 516, 573, 518),
+                 Word("SPI1-SCK", 749, 523, 779, 525),
+                 Word("SPI1-MOSI", 748, 530, 778, 532),
+                 Word("SPI2-SCK", 650, 512, 680, 514),
+                 Word("SPI2-MISO", 655, 519, 685, 521)]
+        bus, note = genconfig.trace_cs_bus(words, [], "FLASH_CS", self.BUSES,
+                                           self.PITCH)
+        self.assertIsNone(bus)
 
 
 class I2cTests(unittest.TestCase):
