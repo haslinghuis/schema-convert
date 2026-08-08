@@ -261,10 +261,15 @@ def _mk_var(body: str, var: str) -> Optional[str]:
 def target_defs(info: Dict[str, str]) -> set:
     """The macro set a build of this target would have for guard evaluation."""
     defs = {info["mcu"], info["family"]}
-    # STM32F722xx also implies the coarser STM32F7 / STM32 tokens.
+    # STM32F722xx also implies the coarser STM32F7 / STM32 tokens, and an
+    # AT32F435 build implies AT32F4 and the driver switch its tables are
+    # guarded by - USE_ATBSP_DRIVER is not a board option there, it is what
+    # selects the vendor BSP the whole port is built on.
     fam = info["family"]
     if fam.startswith("STM32"):
         defs.add("STM32")
+    if fam.startswith("AT32"):
+        defs |= {"AT32", "USE_ATBSP_DRIVER"}
     defs.discard("")
     return defs
 
@@ -279,7 +284,7 @@ def parse_timers(fw: Path, family: str, defs: set) -> Dict[str, List[str]]:
     `occurrence` argument of TIMER_PIN_MAP (see src/main/pg/timerio.c and
     timerGetByTagAndIndex() in src/main/drivers/timer_common.c).
     """
-    src = _platform_file(fw, family, "timer_stm32{lower}.c")
+    src = _platform_file(fw, family, "timer_{lower}.c")
     if not src:
         return {}
     order: Dict[str, List[str]] = OrderedDict()
@@ -292,7 +297,10 @@ def parse_timers(fw: Path, family: str, defs: set) -> Dict[str, List[str]]:
             break
         if not inside:
             continue
-        m = re.search(rf"DEF_TIM\(\s*(TIM\d+)\s*,\s*(\w+)\s*,\s*({PIN_RE})\s*,", line)
+        # AT32 spells its timers TMR. The name only labels the channel
+        # here - what a config.h carries is the occurrence index - so both
+        # are kept as written rather than normalised to one.
+        m = re.search(rf"DEF_TIM\(\s*((?:TIM|TMR)\d+)\s*,\s*(\w+)\s*,\s*({PIN_RE})\s*,", line)
         if not m:
             continue
         holds, _ = guards_hold(guards, defs)
@@ -312,7 +320,8 @@ def parse_dma(fw: Path, family: str, defs: set) -> Dict[str, object]:
     one flat dmaChannelSpec[] table, so any index up to its length is valid for
     any resource.
     """
-    src = fw / "src/platform/STM32/dma_reqmap_mcu.c"
+    spec = platform_of(family)
+    src = fw / "src/platform" / (spec["dir"] if spec else "STM32") / "dma_reqmap_mcu.c"
     if not src.exists():
         return {}
 
@@ -399,7 +408,7 @@ def _periph_key(periph: str, dev: str) -> Optional[str]:
 
 def parse_uart(fw: Path, family: str, defs: set) -> Dict[str, List[Dict[str, str]]]:
     """pin -> [{dev: 'UART1', dir: 'tx'|'rx'}, ...]"""
-    src = _platform_file(fw, family, "serial_uart_stm32{lower}.c")
+    src = _platform_file(fw, family, "serial_uart_{lower}.c")
     if not src:
         return {}
     out: Dict[str, List[Dict[str, str]]] = {}
@@ -468,7 +477,8 @@ def parse_i2c(fw: Path, family: str, defs: set) -> Dict[str, List[Dict[str, str]
     by #if, so its table would look reachable to every MCU. Pick the file the way
     the makefiles do instead of merging both.
     """
-    rel = ("src/platform/STM32/bus_i2c_stm32f4xx.c" if family == "STM32F4"
+    rel = ("src/platform/AT32/bus_i2c_atbsp_init.c" if family.startswith("AT32")
+           else "src/platform/STM32/bus_i2c_stm32f4xx.c" if family == "STM32F4"
            else "src/platform/STM32/bus_i2c_ll_init.c")
     src = fw / rel
     if not src.exists():
@@ -499,7 +509,7 @@ def parse_i2c(fw: Path, family: str, defs: set) -> Dict[str, List[Dict[str, str]
 
 def parse_adc(fw: Path, family: str, defs: set) -> Dict[str, Dict[str, str]]:
     """pin -> {devices: '123', channel: '11'}"""
-    src = _platform_file(fw, family, "adc_stm32{lower}.c")
+    src = _platform_file(fw, family, "adc_{lower}.c")
     if not src:
         return {}
     out: Dict[str, Dict[str, str]] = {}
@@ -520,13 +530,42 @@ def parse_adc(fw: Path, family: str, defs: set) -> Dict[str, Dict[str, str]]:
     return out
 
 
+# Where each vendor's tables live and what they are called. The shapes are the
+# same - a table of DEFIO_TAG_E(pin) grouped by device - because AT32's port of
+# Betaflight kept them; only the directory, the file names and the timer's
+# spelling differ. That is the whole reason a second platform is a matter of
+# pointing the parsers rather than writing new ones.
+PLATFORMS = {
+    "STM32": {"dir": "STM32", "stem": "stm32{lower}",
+              "families": ("STM32",)},
+    "AT32":  {"dir": "AT32",  "stem": "at32{lower}",
+              "families": ("AT32",)},
+}
+
+
+def platform_of(family: str) -> Optional[dict]:
+    for spec in PLATFORMS.values():
+        if family.startswith(spec["families"]):
+            return spec
+    return None
+
+
 def _platform_file(fw: Path, family: str, pattern: str) -> Optional[Path]:
-    """timer_stm32{lower}.c + STM32F7 -> src/platform/STM32/timer_stm32f7xx.c"""
-    if not family.startswith("STM32"):
+    """
+    timer_{stem}.c + STM32F7 -> src/platform/STM32/timer_stm32f7xx.c
+                  + AT32F4   -> src/platform/AT32/timer_at32f43x.c
+
+    The AT32 files are named after the part rather than the family - f43x, not
+    f4xx - so the candidates are tried in the order a build would find them.
+    """
+    spec = platform_of(family)
+    if not spec:
         return None
-    suffix = family[len("STM32"):].lower()  # F7, G4, H7 -> f7, g4, h7
-    for cand in (f"{suffix}xx", suffix):
-        p = fw / "src/platform/STM32" / pattern.format(lower=cand)
+    prefix = next(f for f in spec["families"] if family.startswith(f))
+    suffix = family[len(prefix):].lower()          # F7 -> f7, F4 -> f4
+    for cand in (f"{suffix}xx", f"{suffix}3x", suffix):
+        p = fw / "src/platform" / spec["dir"] / pattern.format(
+            lower=spec["stem"].format(lower=cand))
         if p.exists():
             return p
     return None
@@ -544,15 +583,19 @@ def _platform_file(fw: Path, family: str, pattern: str) -> Optional[Path]:
 # limit means the parser is reading rows the build cannot use.
 #
 # Keyed by the macro's own name so a value can be traced back to its #define.
+# {platform} is filled in per target: AT32 carries its own copies of these and
+# they do not agree with STM32's - MAX_TIMER_DMA_OPTIONS is 22 there against 3
+# on F7 - so reading STM32's for an AT32 build would bound the tables by a
+# number that part never had.
 LIMIT_SOURCES = (
     ("UARTHARDWARE_MAX_PINS",
-     "src/platform/STM32/include/platform/platform.h"),
+     "src/platform/{platform}/include/platform/platform.h"),
     ("I2C_PIN_SEL_MAX",
      "src/main/drivers/bus_i2c_impl.h"),
     ("MAX_TIMER_DMA_OPTIONS",
-     "src/platform/STM32/dma_reqmap_mcu.h"),
+     "src/platform/{platform}/dma_reqmap_mcu.h"),
     ("MAX_PERIPHERAL_DMA_OPTIONS",
-     "src/platform/STM32/dma_reqmap_mcu.h"),
+     "src/platform/{platform}/dma_reqmap_mcu.h"),
 )
 
 
@@ -582,7 +625,8 @@ def parse_sdio(fw: Path, name: str, info: dict) -> Dict[str, bool]:
     return {"pin_config": pin_config, "driver": driver}
 
 
-def parse_limits(fw: Path, defs: set) -> Dict[str, Optional[int]]:
+def parse_limits(fw: Path, defs: set, platform: str = "STM32"
+                 ) -> Dict[str, Optional[int]]:
     """
     macro -> int, or None when this family's build does not define it.
 
@@ -591,7 +635,8 @@ def parse_limits(fw: Path, defs: set) -> Dict[str, Optional[int]]:
     """
     out: Dict[str, Optional[int]] = {}
     texts: Dict[str, Optional[str]] = {}
-    for macro, rel in LIMIT_SOURCES:
+    for macro, template in LIMIT_SOURCES:
+        rel = template.format(platform=platform)
         if rel not in texts:
             src = fw / rel
             texts[rel] = src.read_text(errors="replace") if src.exists() else None
@@ -716,8 +761,9 @@ def build(fw: Path, quiet: bool = False) -> dict:
     cache: Dict[str, dict] = {}
     for name, info in sorted(targets.items()):
         family = info["family"]
-        if not family.startswith("STM32"):
-            continue  # AT32/APM32/PICO tables have a different shape; not yet harvested
+        spec = platform_of(family)
+        if not spec:
+            continue  # APM32 and PICO are not harvested yet
         defs = target_defs(info)
         key = f"{family}|{info['mcu']}"
         if key not in cache:
@@ -728,7 +774,7 @@ def build(fw: Path, quiet: bool = False) -> dict:
                 "spi": parse_spi(fw, family, defs),
                 "i2c": parse_i2c(fw, family, defs),
                 "adc": parse_adc(fw, family, defs),
-                "limits": parse_limits(fw, defs),
+                "limits": parse_limits(fw, defs, spec["dir"]),
             }
             if not quiet:
                 c = cache[key]

@@ -1,9 +1,9 @@
 {
  "schema": 1,
- "generated": "2026-08-04T18:10:07Z",
+ "generated": "2026-08-08T15:44:28Z",
  "firmware": {
-  "rev": "c18421eb5",
-  "date": "2026-08-04",
+  "rev": "c4f9092c5",
+  "date": "2026-08-06",
   "branch": "master"
  },
  "drivers": {
@@ -284,6 +284,2158 @@
   }
  },
  "targets": {
+  "AT32F435G": {
+   "mcu": "AT32F435",
+   "family": "AT32F4",
+   "platform": "AT32",
+   "timers": {
+    "PA0": [
+     "TMR2_CH1",
+     "TMR5_CH1"
+    ],
+    "PA1": [
+     "TMR2_CH2",
+     "TMR5_CH2"
+    ],
+    "PA2": [
+     "TMR2_CH3",
+     "TMR5_CH3",
+     "TMR9_CH1"
+    ],
+    "PA3": [
+     "TMR2_CH4",
+     "TMR5_CH4",
+     "TMR9_CH2"
+    ],
+    "PA5": [
+     "TMR2_CH1",
+     "TMR8_CH1N"
+    ],
+    "PA15": [
+     "TMR2_CH1"
+    ],
+    "PA6": [
+     "TMR3_CH1",
+     "TMR13_CH1"
+    ],
+    "PA7": [
+     "TMR3_CH2",
+     "TMR8_CH1N",
+     "TMR1_CH1N",
+     "TMR14_CH1"
+    ],
+    "PA8": [
+     "TMR1_CH1"
+    ],
+    "PA9": [
+     "TMR1_CH2"
+    ],
+    "PA10": [
+     "TMR1_CH3"
+    ],
+    "PA11": [
+     "TMR1_CH4"
+    ],
+    "PB0": [
+     "TMR1_CH2N",
+     "TMR3_CH3",
+     "TMR8_CH2N"
+    ],
+    "PB1": [
+     "TMR1_CH3N",
+     "TMR3_CH4",
+     "TMR8_CH3N"
+    ],
+    "PB2": [
+     "TMR2_CH4",
+     "TMR20_CH1"
+    ],
+    "PB3": [
+     "TMR2_CH2"
+    ],
+    "PB8": [
+     "TMR2_CH1",
+     "TMR4_CH3",
+     "TMR10_CH1"
+    ],
+    "PB9": [
+     "TMR2_CH2",
+     "TMR4_CH4",
+     "TMR11_CH1"
+    ],
+    "PB10": [
+     "TMR2_CH3"
+    ],
+    "PB11": [
+     "TMR2_CH4",
+     "TMR5_CH4"
+    ],
+    "PB13": [
+     "TMR1_CH1N"
+    ],
+    "PB14": [
+     "TMR1_CH2N",
+     "TMR8_CH2N",
+     "TMR12_CH1"
+    ],
+    "PB15": [
+     "TMR1_CH3N",
+     "TMR8_CH3N",
+     "TMR12_CH2"
+    ],
+    "PB4": [
+     "TMR3_CH1"
+    ],
+    "PB5": [
+     "TMR3_CH2"
+    ],
+    "PB6": [
+     "TMR4_CH1"
+    ],
+    "PB7": [
+     "TMR4_CH2"
+    ],
+    "PB12": [
+     "TMR5_CH1"
+    ],
+    "PC2": [
+     "TMR20_CH2"
+    ],
+    "PC6": [
+     "TMR3_CH1",
+     "TMR8_CH1"
+    ],
+    "PC7": [
+     "TMR3_CH2",
+     "TMR8_CH2"
+    ],
+    "PC8": [
+     "TMR3_CH3",
+     "TMR8_CH3"
+    ],
+    "PC9": [
+     "TMR3_CH4",
+     "TMR8_CH4"
+    ],
+    "PC10": [
+     "TMR5_CH2"
+    ],
+    "PC11": [
+     "TMR5_CH3"
+    ],
+    "PC4": [
+     "TMR9_CH1"
+    ],
+    "PC5": [
+     "TMR9_CH2"
+    ],
+    "PC12": [
+     "TMR11_CH1N"
+    ],
+    "PD12": [
+     "TMR4_CH1"
+    ],
+    "PD13": [
+     "TMR4_CH2"
+    ],
+    "PD14": [
+     "TMR4_CH3"
+    ],
+    "PD15": [
+     "TMR4_CH4"
+    ],
+    "PE1": [
+     "TMR1_CH2N",
+     "TMR20_CH4"
+    ],
+    "PE8": [
+     "TMR1_CH1N"
+    ],
+    "PE9": [
+     "TMR1_CH1"
+    ],
+    "PE10": [
+     "TMR1_CH2N"
+    ],
+    "PE11": [
+     "TMR1_CH2"
+    ],
+    "PE12": [
+     "TMR1_CH3N"
+    ],
+    "PE13": [
+     "TMR1_CH3"
+    ],
+    "PE14": [
+     "TMR1_CH4"
+    ],
+    "PE3": [
+     "TMR3_CH1",
+     "TMR20_CH2"
+    ],
+    "PE4": [
+     "TMR3_CH2",
+     "TMR20_CH1N"
+    ],
+    "PE5": [
+     "TMR3_CH3",
+     "TMR9_CH1",
+     "TMR20_CH2N"
+    ],
+    "PE6": [
+     "TMR3_CH4",
+     "TMR9_CH2",
+     "TMR20_CH3N"
+    ],
+    "PE2": [
+     "TMR20_CH1"
+    ],
+    "PF2": [
+     "TMR20_CH3"
+    ],
+    "PF3": [
+     "TMR20_CH4"
+    ],
+    "PF4": [
+     "TMR20_CH1N"
+    ],
+    "PF5": [
+     "TMR20_CH2N"
+    ],
+    "PF6": [
+     "TMR20_CH4",
+     "TMR10_CH1"
+    ],
+    "PF12": [
+     "TMR20_CH1"
+    ],
+    "PF13": [
+     "TMR20_CH2"
+    ],
+    "PF14": [
+     "TMR20_CH3"
+    ],
+    "PF15": [
+     "TMR20_CH4"
+    ],
+    "PF7": [
+     "TMR11_CH1"
+    ],
+    "PF8": [
+     "TMR13_CH1"
+    ],
+    "PF9": [
+     "TMR14_CH1"
+    ],
+    "PG0": [
+     "TMR20_CH1N"
+    ],
+    "PG1": [
+     "TMR20_CH2N"
+    ],
+    "PG2": [
+     "TMR20_CH3N"
+    ],
+    "PH2": [
+     "TMR5_CH1"
+    ],
+    "PH3": [
+     "TMR5_CH2"
+    ]
+   },
+   "dma": {
+    "style": "mux",
+    "mux_options": 14,
+    "timer": {},
+    "peripheral": {}
+   },
+   "uart": {
+    "PA10": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     },
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PA9": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PA3": [
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PB0": [
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PA2": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PA14": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PB11": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     }
+    ],
+    "PC5": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     }
+    ],
+    "PC11": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     },
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     }
+    ],
+    "PC4": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     }
+    ],
+    "PC10": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PH2": [
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PA0": [
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PH3": [
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PD2": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PE11": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PE10": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PA5": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PG9": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PA4": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PC6": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PG4": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PE7": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PF6": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PC0": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PE8": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PF7": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PC3": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PC9": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PD14": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PE0": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PC2": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PC8": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PE1": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ]
+   },
+   "spi": {
+    "PA5": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PE13": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     }
+    ],
+    "PA6": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sdi"
+     }
+    ],
+    "PE14": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     }
+    ],
+    "PA7": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PE15": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     },
+     {
+      "dev": "SPI4",
+      "role": "sck"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PB14": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PC2": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PD3": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PB15": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PC3": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PD4": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PC10": [
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PC11": [
+     {
+      "dev": "SPI3",
+      "role": "sdi"
+     }
+    ],
+    "PB0": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PB2": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     },
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "SPI4",
+      "role": "sck"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "SPI4",
+      "role": "sdo"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "SPI4",
+      "role": "sdo"
+     }
+    ]
+   },
+   "i2c": {
+    "PA9": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PC6": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PA10": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     },
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PA0": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PH2": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PB11": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PH3": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB15": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PC0": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PD14": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PB14": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PC9": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PD15": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ]
+   },
+   "adc": {
+    "PA0": {
+     "devices": "123",
+     "channel": "0"
+    },
+    "PA1": {
+     "devices": "123",
+     "channel": "1"
+    },
+    "PA2": {
+     "devices": "123",
+     "channel": "2"
+    },
+    "PA3": {
+     "devices": "123",
+     "channel": "3"
+    },
+    "PA4": {
+     "devices": "12",
+     "channel": "4"
+    },
+    "PA5": {
+     "devices": "12",
+     "channel": "5"
+    },
+    "PA6": {
+     "devices": "12",
+     "channel": "6"
+    },
+    "PA7": {
+     "devices": "12",
+     "channel": "7"
+    },
+    "PB0": {
+     "devices": "12",
+     "channel": "8"
+    },
+    "PB1": {
+     "devices": "12",
+     "channel": "9"
+    },
+    "PC0": {
+     "devices": "123",
+     "channel": "10"
+    },
+    "PC1": {
+     "devices": "123",
+     "channel": "11"
+    },
+    "PC2": {
+     "devices": "123",
+     "channel": "12"
+    },
+    "PC3": {
+     "devices": "123",
+     "channel": "13"
+    },
+    "PC4": {
+     "devices": "12",
+     "channel": "14"
+    },
+    "PC5": {
+     "devices": "12",
+     "channel": "15"
+    }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 5,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 22,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 14
+   },
+   "sdio": {
+    "pin_config": false,
+    "driver": false
+   }
+  },
+  "AT32F435M": {
+   "mcu": "AT32F435",
+   "family": "AT32F4",
+   "platform": "AT32",
+   "timers": {
+    "PA0": [
+     "TMR2_CH1",
+     "TMR5_CH1"
+    ],
+    "PA1": [
+     "TMR2_CH2",
+     "TMR5_CH2"
+    ],
+    "PA2": [
+     "TMR2_CH3",
+     "TMR5_CH3",
+     "TMR9_CH1"
+    ],
+    "PA3": [
+     "TMR2_CH4",
+     "TMR5_CH4",
+     "TMR9_CH2"
+    ],
+    "PA5": [
+     "TMR2_CH1",
+     "TMR8_CH1N"
+    ],
+    "PA15": [
+     "TMR2_CH1"
+    ],
+    "PA6": [
+     "TMR3_CH1",
+     "TMR13_CH1"
+    ],
+    "PA7": [
+     "TMR3_CH2",
+     "TMR8_CH1N",
+     "TMR1_CH1N",
+     "TMR14_CH1"
+    ],
+    "PA8": [
+     "TMR1_CH1"
+    ],
+    "PA9": [
+     "TMR1_CH2"
+    ],
+    "PA10": [
+     "TMR1_CH3"
+    ],
+    "PA11": [
+     "TMR1_CH4"
+    ],
+    "PB0": [
+     "TMR1_CH2N",
+     "TMR3_CH3",
+     "TMR8_CH2N"
+    ],
+    "PB1": [
+     "TMR1_CH3N",
+     "TMR3_CH4",
+     "TMR8_CH3N"
+    ],
+    "PB2": [
+     "TMR2_CH4",
+     "TMR20_CH1"
+    ],
+    "PB3": [
+     "TMR2_CH2"
+    ],
+    "PB8": [
+     "TMR2_CH1",
+     "TMR4_CH3",
+     "TMR10_CH1"
+    ],
+    "PB9": [
+     "TMR2_CH2",
+     "TMR4_CH4",
+     "TMR11_CH1"
+    ],
+    "PB10": [
+     "TMR2_CH3"
+    ],
+    "PB11": [
+     "TMR2_CH4",
+     "TMR5_CH4"
+    ],
+    "PB13": [
+     "TMR1_CH1N"
+    ],
+    "PB14": [
+     "TMR1_CH2N",
+     "TMR8_CH2N",
+     "TMR12_CH1"
+    ],
+    "PB15": [
+     "TMR1_CH3N",
+     "TMR8_CH3N",
+     "TMR12_CH2"
+    ],
+    "PB4": [
+     "TMR3_CH1"
+    ],
+    "PB5": [
+     "TMR3_CH2"
+    ],
+    "PB6": [
+     "TMR4_CH1"
+    ],
+    "PB7": [
+     "TMR4_CH2"
+    ],
+    "PB12": [
+     "TMR5_CH1"
+    ],
+    "PC2": [
+     "TMR20_CH2"
+    ],
+    "PC6": [
+     "TMR3_CH1",
+     "TMR8_CH1"
+    ],
+    "PC7": [
+     "TMR3_CH2",
+     "TMR8_CH2"
+    ],
+    "PC8": [
+     "TMR3_CH3",
+     "TMR8_CH3"
+    ],
+    "PC9": [
+     "TMR3_CH4",
+     "TMR8_CH4"
+    ],
+    "PC10": [
+     "TMR5_CH2"
+    ],
+    "PC11": [
+     "TMR5_CH3"
+    ],
+    "PC4": [
+     "TMR9_CH1"
+    ],
+    "PC5": [
+     "TMR9_CH2"
+    ],
+    "PC12": [
+     "TMR11_CH1N"
+    ],
+    "PD12": [
+     "TMR4_CH1"
+    ],
+    "PD13": [
+     "TMR4_CH2"
+    ],
+    "PD14": [
+     "TMR4_CH3"
+    ],
+    "PD15": [
+     "TMR4_CH4"
+    ],
+    "PE1": [
+     "TMR1_CH2N",
+     "TMR20_CH4"
+    ],
+    "PE8": [
+     "TMR1_CH1N"
+    ],
+    "PE9": [
+     "TMR1_CH1"
+    ],
+    "PE10": [
+     "TMR1_CH2N"
+    ],
+    "PE11": [
+     "TMR1_CH2"
+    ],
+    "PE12": [
+     "TMR1_CH3N"
+    ],
+    "PE13": [
+     "TMR1_CH3"
+    ],
+    "PE14": [
+     "TMR1_CH4"
+    ],
+    "PE3": [
+     "TMR3_CH1",
+     "TMR20_CH2"
+    ],
+    "PE4": [
+     "TMR3_CH2",
+     "TMR20_CH1N"
+    ],
+    "PE5": [
+     "TMR3_CH3",
+     "TMR9_CH1",
+     "TMR20_CH2N"
+    ],
+    "PE6": [
+     "TMR3_CH4",
+     "TMR9_CH2",
+     "TMR20_CH3N"
+    ],
+    "PE2": [
+     "TMR20_CH1"
+    ],
+    "PF2": [
+     "TMR20_CH3"
+    ],
+    "PF3": [
+     "TMR20_CH4"
+    ],
+    "PF4": [
+     "TMR20_CH1N"
+    ],
+    "PF5": [
+     "TMR20_CH2N"
+    ],
+    "PF6": [
+     "TMR20_CH4",
+     "TMR10_CH1"
+    ],
+    "PF12": [
+     "TMR20_CH1"
+    ],
+    "PF13": [
+     "TMR20_CH2"
+    ],
+    "PF14": [
+     "TMR20_CH3"
+    ],
+    "PF15": [
+     "TMR20_CH4"
+    ],
+    "PF7": [
+     "TMR11_CH1"
+    ],
+    "PF8": [
+     "TMR13_CH1"
+    ],
+    "PF9": [
+     "TMR14_CH1"
+    ],
+    "PG0": [
+     "TMR20_CH1N"
+    ],
+    "PG1": [
+     "TMR20_CH2N"
+    ],
+    "PG2": [
+     "TMR20_CH3N"
+    ],
+    "PH2": [
+     "TMR5_CH1"
+    ],
+    "PH3": [
+     "TMR5_CH2"
+    ]
+   },
+   "dma": {
+    "style": "mux",
+    "mux_options": 14,
+    "timer": {},
+    "peripheral": {}
+   },
+   "uart": {
+    "PA10": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "UART1",
+      "dir": "rx"
+     },
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PA9": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "UART1",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PA3": [
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PB0": [
+     {
+      "dev": "UART2",
+      "dir": "rx"
+     }
+    ],
+    "PA2": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PA14": [
+     {
+      "dev": "UART2",
+      "dir": "tx"
+     }
+    ],
+    "PB11": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     }
+    ],
+    "PC5": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     }
+    ],
+    "PC11": [
+     {
+      "dev": "UART3",
+      "dir": "rx"
+     },
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     }
+    ],
+    "PC4": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     }
+    ],
+    "PC10": [
+     {
+      "dev": "UART3",
+      "dir": "tx"
+     },
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PH2": [
+     {
+      "dev": "UART4",
+      "dir": "rx"
+     }
+    ],
+    "PA0": [
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PH3": [
+     {
+      "dev": "UART4",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PD2": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PE11": [
+     {
+      "dev": "UART5",
+      "dir": "rx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PE10": [
+     {
+      "dev": "UART5",
+      "dir": "tx"
+     }
+    ],
+    "PA5": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PG9": [
+     {
+      "dev": "UART6",
+      "dir": "rx"
+     }
+    ],
+    "PA4": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PC6": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PG4": [
+     {
+      "dev": "UART6",
+      "dir": "tx"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PE7": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PF6": [
+     {
+      "dev": "UART7",
+      "dir": "rx"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PC0": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PE8": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PF7": [
+     {
+      "dev": "UART7",
+      "dir": "tx"
+     }
+    ],
+    "PC3": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PC9": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PD14": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PE0": [
+     {
+      "dev": "UART8",
+      "dir": "rx"
+     }
+    ],
+    "PC2": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PC8": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ],
+    "PE1": [
+     {
+      "dev": "UART8",
+      "dir": "tx"
+     }
+    ]
+   },
+   "spi": {
+    "PA5": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PE13": [
+     {
+      "dev": "SPI1",
+      "role": "sck"
+     }
+    ],
+    "PA6": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sdi"
+     }
+    ],
+    "PE14": [
+     {
+      "dev": "SPI1",
+      "role": "sdi"
+     }
+    ],
+    "PA7": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     },
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PE15": [
+     {
+      "dev": "SPI1",
+      "role": "sdo"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     },
+     {
+      "dev": "SPI4",
+      "role": "sck"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "SPI2",
+      "role": "sck"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PB14": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PC2": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PD3": [
+     {
+      "dev": "SPI2",
+      "role": "sdi"
+     }
+    ],
+    "PB15": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PC3": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PD4": [
+     {
+      "dev": "SPI2",
+      "role": "sdo"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PC10": [
+     {
+      "dev": "SPI3",
+      "role": "sck"
+     }
+    ],
+    "PC11": [
+     {
+      "dev": "SPI3",
+      "role": "sdi"
+     }
+    ],
+    "PB0": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PB2": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "SPI3",
+      "role": "sdo"
+     },
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "SPI4",
+      "role": "sck"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "SPI4",
+      "role": "sdi"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "SPI4",
+      "role": "sdo"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "SPI4",
+      "role": "sdo"
+     }
+    ]
+   },
+   "i2c": {
+    "PA9": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PC6": [
+     {
+      "dev": "I2C1",
+      "role": "scl"
+     }
+    ],
+    "PA10": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     },
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PC7": [
+     {
+      "dev": "I2C1",
+      "role": "sda"
+     }
+    ],
+    "PA0": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PB10": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PH2": [
+     {
+      "dev": "I2C2",
+      "role": "scl"
+     }
+    ],
+    "PA1": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PA12": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PB11": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PC12": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PH3": [
+     {
+      "dev": "I2C2",
+      "role": "sda"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB15": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PC0": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PD14": [
+     {
+      "dev": "I2C3",
+      "role": "scl"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PB14": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PC1": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PC9": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ],
+    "PD15": [
+     {
+      "dev": "I2C3",
+      "role": "sda"
+     }
+    ]
+   },
+   "adc": {
+    "PA0": {
+     "devices": "123",
+     "channel": "0"
+    },
+    "PA1": {
+     "devices": "123",
+     "channel": "1"
+    },
+    "PA2": {
+     "devices": "123",
+     "channel": "2"
+    },
+    "PA3": {
+     "devices": "123",
+     "channel": "3"
+    },
+    "PA4": {
+     "devices": "12",
+     "channel": "4"
+    },
+    "PA5": {
+     "devices": "12",
+     "channel": "5"
+    },
+    "PA6": {
+     "devices": "12",
+     "channel": "6"
+    },
+    "PA7": {
+     "devices": "12",
+     "channel": "7"
+    },
+    "PB0": {
+     "devices": "12",
+     "channel": "8"
+    },
+    "PB1": {
+     "devices": "12",
+     "channel": "9"
+    },
+    "PC0": {
+     "devices": "123",
+     "channel": "10"
+    },
+    "PC1": {
+     "devices": "123",
+     "channel": "11"
+    },
+    "PC2": {
+     "devices": "123",
+     "channel": "12"
+    },
+    "PC3": {
+     "devices": "123",
+     "channel": "13"
+    },
+    "PC4": {
+     "devices": "12",
+     "channel": "14"
+    },
+    "PC5": {
+     "devices": "12",
+     "channel": "15"
+    }
+   },
+   "limits": {
+    "UARTHARDWARE_MAX_PINS": 5,
+    "I2C_PIN_SEL_MAX": 8,
+    "MAX_TIMER_DMA_OPTIONS": 22,
+    "MAX_PERIPHERAL_DMA_OPTIONS": 14
+   },
+   "sdio": {
+    "pin_config": false,
+    "driver": false
+   }
+  },
   "STM32C562": {
    "mcu": "STM32C562xx",
    "family": "STM32C5",

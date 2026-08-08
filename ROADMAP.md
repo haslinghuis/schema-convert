@@ -441,14 +441,49 @@ the net is checkable, which is why this has not surfaced as a wrong pin. Fixing
 it properly means matching labels to rows as an assignment problem rather than
 independently, which is not worth it for two boards.
 
-### 3.4 Only STM32 families are harvested — 14 boards blocked
+### 3.4 Only STM32 families were harvested — AT32 is now DONE
 
 AT32, APM32, PICO and X32 keep their peripheral tables in a different shape.
-`seed_firmware.py` skips them, so those boards cannot be converted at all.
+`seed_firmware.py` skipped them, so those boards could not be converted at all.
 
 **AT32F435 is 14 of the 168 schematics** — the third-largest family in the
 corpus after H7 (64) and F7 (20), ahead of G4 and F4. It is the only non-STM32
-part that appears at all, so the whole of §3.4 is really just AT32.
+part that appears at all, so the whole of §3.4 was really just AT32.
+
+"A different shape" turned out to be wrong, which is why this was cheaper than
+it looked. AT32's port kept Betaflight's own table layouts: `fullTimerHardware[]`
+with `DEF_TIM`, `.rxPins`/`.txPins` of `DEFIO_TAG_E`, `adcTagMap[]`,
+`i2cHardware[]` with `I2CPINDEF` — and its SPI pins are in the *same file* the
+seeder already read, behind `#ifdef AT32F4`. What differs is the directory, the
+file names (`at32f43x` rather than `stm32f7xx`) and the timer's spelling: AT32
+calls them `TMR2`, not `TIM2`. So the parsers did not need rewriting, only
+pointing.
+
+Kept as written rather than normalised to `TIM`. The name only labels the
+channel here; what a `config.h` carries is the occurrence index.
+
+The array limits are per platform and had to become so: `MAX_TIMER_DMA_OPTIONS`
+is **22** on AT32 against 3 on F7, so reading STM32's copy would have bounded the
+tables by a number that part never had.
+
+**Detection needed one rule.** Betaflight names its AT32 targets after the flash
+size, not the package: `AT32F435CGU7` (48-pin, 1024K), `AT32F435RGT7` (64-pin,
+1024K) and `AT32F435ZMT7` (144-pin, 4032K) build as `AT32F435G`, `AT32F435G` and
+`AT32F435M`. So the letter that selects the target is the *second* after the
+family, and the first says only how many pins are bonded out - which the sheet
+settles by what it draws.
+
+| | |
+|---|---|
+| boards that produced nothing and now convert | **12** |
+| their agreement | 90–100% |
+| defines each | 31–71 |
+| built against betaflight master | **3 of 3** (`AT32F435G` ×2, `AT32F435M`) |
+
+No STM32 target's tables changed - the seed diff is two added targets and
+nothing else - and the corpus is unmoved at 5841 defines and 919 warnings.
+
+APM32, PICO and X32 remain unharvested, and none of them appears in the corpus.
 
 ### 3.5 The MCU is often not named on the sheet
 

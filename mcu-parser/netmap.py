@@ -1603,6 +1603,18 @@ def detect_target(words: Sequence[Word], data: dict) -> Optional[str]:
             continue
         if len(siblings) == 1:
             return siblings[0]
+
+    # AT32 names its targets after the flash size, not the package. An
+    # AT32F435CGU7 is a 48-pin part with 1024K, an AT32F435RGT7 a 64-pin part
+    # with the same 1024K, and Betaflight builds both as AT32F435G - the M
+    # target is the 4032K die (ZMT7). So the letter that selects the target is
+    # the second one after the family, and the first says only how many of the
+    # pins are bonded out, which the sheet settles by what it draws.
+    for m in re.finditer(r"AT32F(\d{3})([A-Z])([CGM])", blob):
+        line, _package, flash = m.groups()
+        exact = names.get(f"AT32F{line}{flash}")
+        if exact:
+            return exact
     return None
 
 

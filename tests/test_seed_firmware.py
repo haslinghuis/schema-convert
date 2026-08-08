@@ -37,7 +37,10 @@ import support
 import seed_firmware
 
 PIN = re.compile(r"^P[A-K](?:[0-9]|1[0-5])$")
-TIMER_CHANNEL = re.compile(r"^TIM\d+_CH\d+N?$")
+# AT32 spells its timers TMR, and the seeder keeps each vendor's own
+# spelling rather than normalising - the name only labels the channel,
+# and what a config.h carries is the occurrence index.
+TIMER_CHANNEL = re.compile(r"^(?:TIM|TMR)\d+_CH\d+N?$")
 DMA_OPTION = re.compile(r"^DMA\d_S\d+_C\d+$")
 UART_DEV = re.compile(r"^(?:LP)?UART\d+$")
 
@@ -207,7 +210,7 @@ class CapabilityDataMixin:
     """Shape checks applied to whichever capability map is under test."""
 
     def check_target(self, name, caps):
-        self.assertTrue(caps["family"].startswith("STM32"), name)
+        self.assertTrue(caps["family"].startswith(("STM32", "AT32")), name)
         self.assertTrue(caps["mcu"], name)
 
         for table in ("timers", "uart", "spi", "i2c", "adc"):
@@ -360,12 +363,18 @@ class LiveSeedTests(CapabilityDataMixin, unittest.TestCase):
         builds.
         """
         tree = support.firmware_tree()
+        # Every platform the seeder harvests, not only STM32: an AT32 target
+        # directory is named the same way and is just as capable of being
+        # renamed out from under a config.
         on_disk = {mk.parent.name
-                   for mk in (tree / "src/platform/STM32/target").glob("*/target.mk")}
-        self.assertTrue(on_disk, "no STM32 target directories found")
+                   for mk in tree.glob("src/platform/*/target/*/target.mk")}
+        self.assertTrue(on_disk, "no target directories found")
         self.assertEqual(set(self.data["targets"]) & on_disk, set(self.data["targets"]))
         for name in self.data["targets"]:
-            self.assertRegex(name, r"^STM32[A-Z]\d[A-Z0-9]{2}$")
+            # STM32F722, and AT32F435G - the AT32 name carries the flash-size
+            # letter after the three digits, which is what selects the target.
+            self.assertRegex(
+                name, r"^(?:STM32[A-Z]\d[A-Z0-9]{2}|AT32[A-Z]\d{3}[A-Z])$")
 
     def test_the_array_limits_are_harvested_per_family(self):
         """
