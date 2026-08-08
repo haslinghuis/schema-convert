@@ -901,6 +901,45 @@ class TargetMissTests(unittest.TestCase):
         self.assertNotIn("--target STM32", msg)
 
 
+class CandidateFitTests(unittest.TestCase):
+    """
+    netmap._fit_against: when the sheet names a part that does not exist, how
+    much of the wiring each near-match accounts for.
+
+    Three sheets from one vendor read STM32F743 - VIH6 is an LQFP100 H743 and
+    the F7 line has no 743 - and the old message listed the one-character
+    neighbours without choosing, because nothing on the *sheet* chooses. The
+    tables do: resolving against each candidate scores the same pin map against
+    different capabilities, and the part that describes this board agrees with
+    more of it. H743 accounts for 22 of 22 there and F745 for 20.
+    """
+
+    def test_the_better_fit_is_ranked_first(self):
+        # Non-empty, because a target with no tables is skipped as unusable.
+        data = {"targets": {"A": {"mcu": "A"}, "B": {"mcu": "B"}}}
+        scores = {"A": (2, 5), "B": (5, 5)}
+        real = netmap.read_symbol
+        netmap.read_symbol = lambda w, caps, page=None: (
+            None, [], type("R", (), {"score": scores[
+                next(k for k, v in data["targets"].items() if v is caps)]})())
+        try:
+            out = netmap._fit_against([], data, ["A", "B"])
+        finally:
+            netmap.read_symbol = real
+        self.assertEqual([r[0] for r in out], ["B", "A"])
+
+    def test_a_candidate_that_checks_nothing_is_not_shown(self):
+        # 0/0 reads as a failure and is only an absence of evidence.
+        data = {"targets": {"A": {"mcu": "A"}}}
+        real = netmap.read_symbol
+        netmap.read_symbol = lambda w, caps, page=None: (
+            None, [], type("R", (), {"score": (0, 0)})())
+        try:
+            self.assertEqual(netmap._fit_against([], data, ["A"]), [])
+        finally:
+            netmap.read_symbol = real
+
+
 class DoubleStruckNameTests(unittest.TestCase):
     """
     netmap._drop_double_struck: a pin name the exporter drew twice.

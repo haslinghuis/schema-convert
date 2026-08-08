@@ -466,6 +466,25 @@ source of truth, and the MCU identity is what selects the tables), so the
 options are to take a hint from the filename or to keep asking for `--target`.
 Whichever, the error should say what it looked for.
 
+**The near-miss half is now decided by evidence, and the no-marking half is
+not - which the evidence itself settled.** Where the sheet names a part one
+character from a seeded one, each candidate is resolved and the message carries
+how much of the wiring it accounts for:
+
+> The sheet names STM32F743 ... this is how much of the wiring each one accounts
+> for: **STM32H743 22/22, STM32F745 20/22**.
+
+Still reported rather than chosen: H743 and H750 are pin-compatible and fit
+identically while differing in flash size, and picking on a tie would be
+alphabetical order dressed as evidence.
+
+Ranking *all* seeded targets for the 32 sheets that name nothing was tried and
+does not work. It reaches a strong fit on 12 of them - and with **9 to 19
+candidates tied at the same score**, because the STM32 families share pin
+functions extensively. `AXISFLYINGF745AIO` fits F722 at 45/45, along with ten
+others. That narrows the answer to a family group and cannot pick within it, so
+nothing is offered: a short list would be honest, a choice would not.
+
 ### 3.7 Reading the drawn wires — PROTOTYPED, and it does not do what I claimed
 
 The standing weakness is that connectivity is inferred from proximity: "GYRO_1_CS

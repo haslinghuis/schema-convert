@@ -1590,6 +1590,33 @@ def detect_target(words: Sequence[Word], data: dict) -> Optional[str]:
     return None
 
 
+def _fit_against(words: Sequence[Word], data: dict,
+                 candidates: Sequence[str]) -> List[Tuple[str, int, int]]:
+    """
+    How much of the wiring each candidate part accounts for, best first.
+
+    The pin map is recovered the same way for each: the tables differ, so the
+    label-to-row fit is scored against different capabilities and the one that
+    describes this board agrees with more of it. Candidates that check nothing
+    are dropped rather than shown as 0/0, which reads like a failure and is
+    only an absence of evidence.
+    """
+    out: List[Tuple[str, int, int]] = []
+    for name in candidates:
+        caps = data["targets"].get(name)
+        if not caps:
+            continue
+        try:
+            _sym, _labels, res = read_symbol(words, caps)
+        except Exception:
+            continue
+        if res is None or res.score[1] == 0:
+            continue
+        out.append((name, res.score[0], res.score[1]))
+    out.sort(key=lambda r: (-(r[1] / r[2]), -r[2], r[0]))
+    return out
+
+
 def describe_target_miss(words: Sequence[Word], data: dict) -> Optional[str]:
     """
     Why detection failed, when the sheet *does* name a part.
@@ -1620,10 +1647,27 @@ def describe_target_miss(words: Sequence[Word], data: dict) -> Optional[str]:
                     f"{near[0]}. Worth telling the vendor either way, since the "
                     "marking on the sheet is then wrong")
         if near:
-            # More than one candidate and nothing here can choose between them:
-            # naming the first would be alphabetical order dressed up as
-            # evidence, and the wrong pin tables produce a config that looks
-            # fine and is not.
+            # More than one candidate - but the sheet is not the only witness.
+            # Each candidate brings its own pin tables, so resolving against
+            # each and comparing how much of the wiring it agrees with is
+            # exactly the check that decides every other question here. On the
+            # F743 sheets it separates them cleanly: H743 agrees with all 22
+            # checkable nets and F745 with 20.
+            #
+            # Still reported rather than chosen. A tie is real - H743 and H750
+            # are pin-compatible and fit identically, while differing in flash
+            # size - and picking one on the strength of a tie would be the
+            # alphabetical order this used to fall back on, dressed up as
+            # evidence.
+            ranked = _fit_against(words, data, near)
+            if ranked:
+                shown = ", ".join(f"{k} {s}/{n}" for k, s, n in ranked)
+                return (f"The sheet names {marking}, which is not a part this "
+                        f"tool has tables for. These differ from it by one "
+                        f"character, and this is how much of the wiring each "
+                        f"one accounts for: {shown}. Pass --target with the one "
+                        "you intend - and tell the vendor, since the marking is "
+                        "wrong either way")
             return (f"The sheet names {marking}, which is not a part this tool "
                     f"has tables for. These differ from it by one character: "
                     f"{', '.join(near)}. Nothing on the sheet says which is "
