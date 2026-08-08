@@ -1430,3 +1430,51 @@ on that one board, which had been emitting none of them.
 The lesson is the one §4.11 and §4.14 keep circling. A rule that fixes the board
 in front of you is a hypothesis, and the corpus is what tells you whether it is
 a rule. Here the counter-example was one board away.
+
+
+### 1.26 The gate that decides what is checkable had drifted the furthest
+
+Chasing the second 40% board. Its pin map was a whole row out - `SWDIO` on
+PA12, `USB_N` on PA10, `SPI_SCK_1` on PA4 - and the offset scorer had settled
+there because it had **5 checkable nets out of 43 bound**.
+
+The sheet writes every bus line as `SPI_MISO_1`, `SPI_SCK_1`, `SPI_MOSI_2` -
+the index after the role, which `classify()` has read since §3.3 round three.
+`netmap.net_requirement()` had not learned it. That gate decides which nets can
+be *checked against the firmware map*, and `resolve()` scores candidate row
+offsets on exactly those - so a spelling missing there does not merely drop a
+net, it starves the mechanism that keeps every other pairing honest. This is the
+fourth gate in the same series as §1.18, and the most expensive one to get
+wrong.
+
+Teaching it the spelling fixed the board: `SWDIO` on PA13, `SPI_SCK_1` on PA5,
+`SPI_MISO_2` on PB14 - all `ok` against the tables.
+
+**The test written for it then found eight more**: `USART6_RX` (the S in USART),
+`TXD6`, `RXD6` (the D), `IIC_SCL`, `SCK3`, `SPI3MISO`, `FLASH_DO`, `FLASH_DI`.
+Every one a net emitted unchecked, and contributing nothing to the fit.
+
+#### And closing it exposed a rule that had been right by accident
+
+Making more nets checkable made a second rule bite. `resolve()` refuses an axis
+that "does not satisfy every net it checks", written when an axis checked two or
+three nets - a bottom edge reaching 2 of its 3 at *every* offset, which is not a
+fit at all. With nine checkable nets, one mislabelled vendor net was enough:
+a G473 sheet draws `USART4_TX` on PC11, which is UART4's **RX**, and that single
+error threw away an axis agreeing on the other eight - 19 links and 21 defines.
+
+Now one in five may disagree. On the original case that still allows none, so it
+is still refused.
+
+| | before | after |
+|---|---|---|
+| `043_CHOSD_BREAKOUTBOARD` | 0% | **100%** |
+| `D2FCAP_B3` | 40% | **67%**, and the pin map corrected |
+| corpus defines | 5843 | 5841 |
+
+The define count going *down* is the point. Five of the six lost are UART pins
+the firmware map says those parts do not have - `TXD4`/`RXD4` on PD0/PD1 of an
+F722, which has no UART there at all - emitted for years because nothing could
+check them. The sixth is the G473's mislabelled `UART4_TX`. A config that claims
+a UART the silicon does not have is worse than one that says it could not read
+it.

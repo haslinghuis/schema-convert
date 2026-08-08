@@ -670,6 +670,7 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
     rows = [PinRow(pin, w.y0, "L", afs, gpio) for w, pin, afs, gpio in left]
     rows += [PinRow(pin, w.y0, "R", afs, gpio) for w, pin, afs, gpio in right]
     rows.sort(key=lambda r: r.pos)
+    rows = _drop_double_struck(rows)
 
     both = left + right
     part = SymbolPart(
@@ -680,6 +681,31 @@ def _part_from_tagged(tagged: Sequence[Tagged], page: int, min_pins: int,
         bottom_edge=max(w.y1 for w, *_ in both),
     )
     return part, _pitch(rows), {id(t) for t in both}
+
+
+def _drop_double_struck(rows: List[PinRow]) -> List[PinRow]:
+    """
+    Collapse a pin name the sheet draws twice, a fraction of a point apart.
+
+    Some exporters emboldened text by drawing it twice with a tiny offset, so
+    the same name arrives as two words 0.3-0.9pt apart. Each becomes a row, the
+    median gap between adjacent rows halves, and `_pitch` - which everything
+    downstream is scaled by - comes back at a tenth of the truth. On one H743
+    that made three of the symbol's four columns look like they had a different
+    pitch from the fourth, so `_is_split_half` refused them and the board was
+    read from a quarter of its own pins.
+
+    Only an identical name at practically the same place is collapsed. A symbol
+    legitimately repeats VSS and VDD many times, and those are rows apart, not
+    a fraction of one.
+    """
+    out: List[PinRow] = []
+    for r in rows:
+        if any(o.pin == r.pin and o.side == r.side and abs(o.pos - r.pos) <= 1.5
+               for o in out):
+            continue
+        out.append(r)
+    return out
 
 
 def _pitch(rows: Sequence[PinRow]) -> float:
@@ -1083,18 +1109,47 @@ NET_VOCAB = re.compile(
 
 # (regex on the upper-cased net name) -> (kind, detail)
 NET_RULES: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r"^(?:.*[-_])?I2C(\d)[-_]SCL$"), "i2c_scl"),
-    (re.compile(r"^(?:.*[-_])?I2C(\d)[-_]SDA$"), "i2c_sda"),
+    # Every spelling on this side of the gate has a twin in classify(), and the
+    # test that says so is what found most of them: IIC for I2C, the S in
+    # USART, the D in TXD, the index after the role rather than before it. A
+    # net whose requirement is unknown is emitted unchecked *and* contributes
+    # nothing to the row-offset fit, which is the expensive half.
+    (re.compile(r"^(?:.*[-_])?I{1,2}2?C(\d)?[-_]SCL$"), "i2c_scl"),
+    (re.compile(r"^(?:.*[-_])?I{1,2}2?C(\d)?[-_]SDA$"), "i2c_sda"),
     (re.compile(r"^(?:.*[-_])?T(?:X)(\d)(?:[-_]?R)?$"), "uart_tx"),
     (re.compile(r"^(?:.*[-_])?R(?:X)(\d)(?:[-_]?R)?$"), "uart_rx"),
-    (re.compile(r"^(?:.*[-_])?U(?:ART)?(\d)[-_]TX$"), "uart_tx"),
-    (re.compile(r"^(?:.*[-_])?U(?:ART)?(\d)[-_]RX$"), "uart_rx"),
-    (re.compile(r"^.*[-_]SCK$|^.*[-_]SCLK$"), "spi_sck"),
+    (re.compile(r"^(?:.*[-_])?TXD(\d)$"), "uart_tx"),
+    (re.compile(r"^(?:.*[-_])?RXD(\d)$"), "uart_rx"),
+    (re.compile(r"^(?:.*[-_])?U(?:S?ART)?(\d)[-_]TX$"), "uart_tx"),
+    (re.compile(r"^(?:.*[-_])?U(?:S?ART)?(\d)[-_]RX$"), "uart_rx"),
+    # The index sits on either side of the role, exactly as it does for the
+    # chip selects and the UARTs: SPI1_SCK and SPI_SCK_1 are one board's two
+    # ways of writing the same thing, and classify() has read both since the
+    # bus rules were widened. This gate had only the first, and that costs more
+    # than a dropped net - `resolve` scores candidate row offsets on precisely
+    # the nets this function calls checkable, so a spelling missing here starves
+    # the scorer. One H743 sheet writes every bus line as SPI_MISO_1, left 5
+    # checkable nets out of 43 bound, and the offset it settled on was a whole
+    # row out: SWDIO on PA12, USB_N on PA10, SPI_SCK_1 on PA4.
+    (re.compile(r"^.*[-_](?:SCK|SCLK)(?:[-_]?\d)?$|^(?:SCK|SCLK)\d$"), "spi_sck"),
+    # CLK only after something that names an SPI bus or an SPI device. Bare
+    # `.*_CLK` swallows SW_CLK (the debug port), SD_CLK (the SDMMC card clock,
+    # which the sdio rules read as CK) and GYRO_CLK (the gyro's 32kHz clock
+    # *input*, a timer) - and this gate deciding those are SPI clocks while
+    # classify() calls them something else is the drift this whole comment
+    # block exists to prevent.
+    (re.compile(r"^(?:.*[-_])?(?:SPI\d?|FLASH|OSD|MAX7456|AT7456|BARO)[-_]?CLK"
+                r"(?:[-_]?\d)?$"), "spi_sck"),
     # MISO/MOSI name a direction from somebody's point of view, and vendors
     # disagree about whose - one sheet puts SPI1_MOSI on the MCU's SDI pin and
     # SPI1_MISO on its SDO pin. So a data line is only checked for being a data
     # line; which one it is comes from the firmware map, in genconfig.
-    (re.compile(r"^.*[-_](?:MISO|MOSI|SDI|SDO(?:UT)?)$"), "spi_data"),
+    (re.compile(r"^.*[-_](?:MISO|MOSI|SDI|SDO(?:UT)?)(?:[-_]?\d)?$"
+                r"|^SPI\d[-_]?(?:MISO|MOSI|SDI|SDO)$"
+                # A chip's own data pins, which vendors copy onto the net. Only
+                # after a device prefix: a bare DO or SI is anybody's.
+                r"|^(?:FLASH|OSD|MAX7456|AT7456|BARO|SDCARD|GYRO|IMU|MPU|ICM)"
+                r"[-_]?\d?[-_](?:DO|DI|DOUT|DIN)$"), "spi_data"),
     (re.compile(r"^MOTOR(\d+)$|^M(\d)$"), "timer"),
     (re.compile(r"^.*LED[-_]?STRIP.*$"), "timer"),
     (re.compile(r"^.*(?:CLOCK|CLKIN)$"), "timer"),
@@ -1412,8 +1467,19 @@ def resolve(sym: Symbol, labels: Sequence[Word], caps: dict) -> Result:
         #
         # So a contradicted axis keeps its rows, which is how those pins get
         # reported as unconnected, and loses its links.
+        # Contradicted, not merely imperfect. The rule was "satisfies every
+        # net it checks", which was right while an axis checked two or three
+        # nets and became wrong the moment more spellings became checkable: one
+        # G473 sheet mislabels a single UART - USART4_TX drawn on PC11, which
+        # is UART4's *RX* - and that one vendor error threw away an axis that
+        # agreed on the other eight, taking 19 links and 21 defines with it.
+        #
+        # One in five may disagree. On the original case - a bottom edge
+        # reaching 2 of its 3 nets at every offset, which is not a fit at all -
+        # that still allows none, so it is still refused.
         refused = [a for a, r in per_axis.items()
-                   if r.score[1] >= 2 and r.score[0] < r.score[1]]
+                   if r.score[1] >= 2
+                   and r.score[0] < r.score[1] - r.score[1] // 5]
         for axis in refused:
             per_axis[axis] = Result([], per_axis[axis].offset, (0, 0), sym, [],
                                     per_axis[axis].orphans

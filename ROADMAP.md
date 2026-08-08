@@ -64,6 +64,7 @@ is in each section below.
 | §4.13 | A sheet that names its ADC instance is not read, and a function the board does not fit cannot be left out — DONE | 1 board |
 | §4.14 | (FINDINGS) A scan matched `TIMER_PIN_MAP` rows by macro name where firmware matches by pin tag, inventing 16 defects | — |
 | §1.25 | (FINDINGS) A one-column part's side was an artefact of which cluster won; one board read at 40% — DONE | 1 board |
+| §1.26 | (FINDINGS) `net_requirement` knew fewer spellings than `classify`, starving the offset scorer — DONE | 2 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:

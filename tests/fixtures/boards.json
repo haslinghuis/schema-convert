@@ -28,7 +28,7 @@
  "recorded_with": {
   "frozen_firmware_rev": "2d0f789d1",
   "frozen_firmware_branch": "master",
-  "tool_rev": "17b673a5f"
+  "tool_rev": "351b3dc39"
  },
  "boards": [
   {
@@ -146,8 +146,8 @@
    "net_labels": 39,
    "offset": 0.5983,
    "agreement": [
-    22,
-    22
+    24,
+    24
    ],
    "orphan_labels": 0,
    "nets_on_power_pins": 0,
@@ -159,7 +159,7 @@
    "timer_rows": 2,
    "warnings": 8,
    "notes": 17,
-   "netmap_digest": "8803587587c11eb296428a07f04d0f26a0e531c19686f2780defcfce54b59d5c",
+   "netmap_digest": "33d41fb4e1987eb12f0af46ab01994a5cd6ef07c11e183b3f8f87a5421a0bd00",
    "config_digest": "d2c175639eeccf8ecf9ddefda1f253a7f3342f3854e3350fb9b6fa83da5bcb17",
    "known_defects": {
     "dangling_timer_labels": [],
@@ -220,8 +220,8 @@
    "net_labels": 82,
    "offset": 0.6,
    "agreement": [
-    24,
-    24
+    32,
+    32
    ],
    "orphan_labels": 1,
    "nets_on_power_pins": 2,
@@ -233,7 +233,7 @@
    "timer_rows": 11,
    "warnings": 13,
    "notes": 19,
-   "netmap_digest": "2833f0f8a9a09d346f96126de30f080f048fbfd0b49e2f67ee7e54c0d61dcb0a",
+   "netmap_digest": "6b845f6686bb3a1f86afe18ca5679d5e35277676aa9213983a2992189d2048dc",
    "config_digest": "ff0d8fc08faa1ca2367de91b90ab1923b3b46d94b13995b7f8ad92a5092c1daa",
    "known_defects": {
     "dangling_timer_labels": [],
@@ -257,8 +257,8 @@
    "net_labels": 40,
    "offset": 0.0,
    "agreement": [
-    20,
-    20
+    22,
+    22
    ],
    "orphan_labels": 0,
    "nets_on_power_pins": 0,
@@ -270,7 +270,7 @@
    "timer_rows": 12,
    "warnings": 8,
    "notes": 23,
-   "netmap_digest": "ec80cfba90bf497f61ffcc32e0b5a1441ed9b58e5da8fe00436f4b5cb96431e0",
+   "netmap_digest": "c9e02b250482e1453073d861fe83f092a46d1fa5f39bdc2183d08f5c49a1b6af",
    "config_digest": "01e6c9135caee10db5732dba4ffe42db4018f5fb329f7b3484cdc583178c0206",
    "known_defects": {
     "dangling_timer_labels": [],

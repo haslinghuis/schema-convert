@@ -901,6 +901,38 @@ class TargetMissTests(unittest.TestCase):
         self.assertNotIn("--target STM32", msg)
 
 
+class DoubleStruckNameTests(unittest.TestCase):
+    """
+    netmap._drop_double_struck: a pin name the exporter drew twice.
+
+    Some sheets embolden text by drawing it again a fraction of a point away.
+    Each copy becomes a row, the median gap between adjacent rows halves, and
+    the pitch - which everything downstream is scaled by - comes back at a
+    tenth of the truth.
+    """
+
+    def rows(self, *spec):
+        return [netmap.PinRow(pin, pos, side) for pin, pos, side in spec]
+
+    def test_the_second_strike_is_dropped(self):
+        out = netmap._drop_double_struck(
+            self.rows(("PC0", 184.32, "L"), ("PC0", 184.72, "L"),
+                      ("PC1", 189.32, "L"), ("PC1", 189.99, "L")))
+        self.assertEqual([r.pin for r in out], ["PC0", "PC1"])
+
+    def test_a_pin_repeated_rows_apart_is_kept(self):
+        # A symbol legitimately carries VSS many times, and those are rows
+        # apart rather than a fraction of one.
+        out = netmap._drop_double_struck(
+            self.rows(("VSS", 100.0, "L"), ("VSS", 140.0, "L")))
+        self.assertEqual(len(out), 2)
+
+    def test_the_same_name_on_the_other_edge_is_kept(self):
+        out = netmap._drop_double_struck(
+            self.rows(("PC0", 184.32, "L"), ("PC0", 184.72, "R")))
+        self.assertEqual(len(out), 2)
+
+
 class OneSidedPartTests(unittest.TestCase):
     """
     netmap._flip_one_sided / read_symbol: which side a lone column of pin names
@@ -987,6 +1019,38 @@ class VocabularyAgreementTests(unittest.TestCase):
                     "recognise it, so a label spelled that way outside the "
                     "strongest column is dropped before it ever reaches "
                     "classify")
+
+    def test_the_firmware_check_reads_the_same_spellings(self):
+        # The fourth gate, and the one that costs most when it drifts.
+        # netmap.net_requirement decides which nets are *checkable* against the
+        # firmware map, and resolve() scores candidate row offsets on exactly
+        # those - so a spelling missing here does not just drop a net, it
+        # starves the mechanism that keeps every other pairing honest. One H743
+        # writes every bus line as SPI_MISO_1: 5 checkable nets out of 43
+        # bound, and the offset it settled on was a whole row out, with SWDIO
+        # on PA12 and USB_N on PA10.
+        want = {"spi_bus": {"spi_sck", "spi_data"},
+                "flash_spi": {"spi_sck", "spi_data"},
+                "osd_spi": {"spi_sck", "spi_data"},
+                "baro_spi": {"spi_sck", "spi_data"},
+                "gyro_spi": {"spi_sck", "spi_data"},
+                "gyro_clkin": {"timer"},
+                "uart_tx": {"uart_tx"}, "uart_rx": {"uart_rx"},
+                "i2c_scl": {"i2c_scl"}, "i2c_sda": {"i2c_sda"}}
+        for text in self.SPELLINGS:
+            role = genconfig.classify(text)[0]
+            if role not in want:
+                continue
+            with self.subTest(net=text):
+                req = netmap.net_requirement(text)
+                self.assertIsNotNone(
+                    req, f"classify reads {text!r} as {role}, but "
+                    "net_requirement finds nothing to check it against - so it "
+                    "is emitted unchecked and cannot help fit the row offset")
+                self.assertIn(
+                    req[0], want[role],
+                    f"classify reads {text!r} as {role} but net_requirement "
+                    f"checks it as {req[0]}")
 
     def test_the_bus_tracer_reads_the_same_spellings(self):
         # A third gate in the same series, and it had drifted too: the tracer
