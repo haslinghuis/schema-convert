@@ -325,6 +325,42 @@ none: comparing every emitted instance value across the corpus before and
 after, **26 added, 0 changed, 0 removed.** Recognising more labels moved no
 board's existing decision.
 
+#### Round six: the last four are refusals worth keeping
+
+Of the five left, one was resolvable and not by tracing. A G473 sheet names its
+flash bus after the device — `FLASH_CLK`, `FLASH_DO`, `FLASH_DI` on PA5/6/7 —
+and `classify()` knew `FLASH_SCK`/`FLASH_MISO`/`FLASH_MOSI` but neither the bare
+`CLK` nor a chip's own `DO`/`DI`. The three nets fell out as "no config.h role",
+so the flash had nothing but a chip select and the *gyro* took SPI1 by
+elimination.
+
+Widening the device-named rules to `CLK`, `DO`/`DOUT`, `DI`/`DIN` reads them.
+`DO` is the device's output and so the MCU's input, which is a direction worth
+getting right and not worth trusting: the pin still has to support the role in
+the firmware map, the same guard that stops a vendor's `SPI1_MOSI` label putting
+two SDIs on one bus.
+
+Deliberately **not** on the SD card. `SD_CLK` is the SDMMC card clock, and a
+card is the one device on these sheets commonly wired either way — the existing
+test for that caught the widened alternation the moment it was made.
+
+That board now emits `FLASH_SPI_INSTANCE SPI1`, and its gyro moves to **SPI3**,
+where its own `Gyro_SCK`/`Gyro_MISO`/`Gyro_MOSI` on PB3/4/5 have been all along.
+It is the one changed instance in the corpus and it is a correction.
+
+The remaining **4** are refusals that should stay refusals. Their device end
+names the net differently from the MCU end — `MPU_CS` at the pin and `MPU_CS1`
+/ `MPU_CS2` at two IMUs, or `IMU1_CS` against `IMU_CS` — so there is no
+identity to follow, only a resemblance. One is a baro whose chip select is drawn
+exactly once on the whole sheet. Guessing there would buy four boards and cost
+the property that makes the other 220 instances worth having.
+
+| | round three | now |
+|---|---|---|
+| CS-only devices left to a human | 77 | **4** |
+| `*_SPI_INSTANCE` emitted | 69 | **221** |
+| `DEFAULT_BLACKBOX_DEVICE` emitted | — | **57** |
+
 | | before | after |
 |---|---|---|
 | CS-only devices left to a human | 77 | **27** |

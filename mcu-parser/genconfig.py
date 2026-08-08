@@ -161,17 +161,23 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?(\d)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)[-_]?(\d)?$"),
      "gyro_spi"),
     (re.compile(r"^(?:OSD|MAX7456|AT7456)(?:[-_]SPI)?[-_]?CS$"), "osd_cs"),
-    (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "osd_spi"),
+    (re.compile(r"^(?:OSD|MAX7456|AT7456)[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO|DOUT|DIN|DO|DI)$"), "osd_spi"),
     (re.compile(r"^FLASH(?:[-_]SPI)?[-_]?CS$"), "flash_cs"),
-    (re.compile(r"^FLASH[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "flash_spi"),
+    (re.compile(r"^FLASH[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO|DOUT|DIN|DO|DI)$"), "flash_spi"),
     (re.compile(r"^BARO(?:[-_]SPI)?[-_]?CS$"), "baro_cs"),
-    (re.compile(r"^BARO[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "baro_spi"),
+    (re.compile(r"^BARO[-_](SCK|SCLK|CLK|MISO|MOSI|SDI|SDO|DOUT|DIN|DO|DI)$"), "baro_spi"),
     # The _SPI infix that FLASH, OSD and BARO above already allow - vendors copy
     # Betaflight's own SDCARD_SPI_CS_PIN onto the net.
     (re.compile(r"^SD(?:CARD)?(?:[-_]SPI)?[-_]?CS$"), "sdcard_cs"),
     # Without the data nets the card is a CS with nowhere to go, so
     # SDCARD_SPI_INSTANCE - and with it USE_SDCARD_SPI - can never be resolved.
-    (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO)$"), "sdcard_spi"),
+    # CLK is deliberately absent here and present on the others: SD_CLK is the
+    # SDMMC card clock (the sdio rule below reads it as "ck"), and a card is
+    # the one device on these sheets that is commonly wired either way. The
+    # existing test for that caught this the moment the alternation was
+    # widened, which is what it is for.
+    (re.compile(r"^SD(?:CARD)?[-_](SCK|SCLK|MISO|MOSI|SDI|SDO|DOUT|DIN|DO|DI)$"),
+     "sdcard_spi"),
     # The other way a card is wired, and the one these boards actually use: the
     # MCU's SDMMC peripheral rather than a SPI bus. Every spelling in the corpus
     # - SDMMC1-CK, SDMMC2_D3, SDIO_CMD, SD_SDIO_CK, SD_CLK. The digit is the
@@ -283,6 +289,16 @@ def classify(net: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         if sub in ("miso",):
             sub = "sdi"
         if sub in ("mosi",):
+            sub = "sdo"
+        # A flash chip's own pin names, which vendors copy onto the net: DO is
+        # the device's output and therefore the MCU's input. Getting the
+        # direction backwards is caught rather than believed - the pin has to
+        # support the role in the firmware map, and PA6 is MISO-only on SPI1 -
+        # which is the same guard that stops a vendor's SPI1_MOSI label putting
+        # two SDIs on one bus.
+        if sub in ("do", "dout"):
+            sub = "sdi"
+        if sub in ("di", "din"):
             sub = "sdo"
         if role.startswith("gyro"):
             if idx and idx != "1":
