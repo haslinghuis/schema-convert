@@ -769,8 +769,9 @@ class BeeperTimerRowTests(unittest.TestCase):
     """
     A TIMER_PIN_MAP row for the beeper does nothing without BEEPER_PWM_HZ.
     beeperInit() reads the frequency from it, defaults to 0, and only then calls
-    beeperPwmInit(). 25 shipped targets carry a beeper row; exactly one sets the
-    frequency.
+    beeperPwmInit(). Of 592 shipped targets with a beeper, 50 carry the row and
+    14 of those set the frequency too - counted by pin tag, the way firmware
+    matches it, not by macro name (FINDINGS 4.14).
     """
 
     def pick(self, label, channel):

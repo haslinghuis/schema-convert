@@ -60,8 +60,9 @@ is in each section below.
 | §4.9 | Pin-editor suggestions: 136 offered on 59 boards; the rest have nothing on the sheet to offer | — |
 | §4.10 | No statement of what a complete target contains: three `DEFAULT_*` defaults mean *nothing works* when absent, and absence is silent | 31 boards |
 | §4.11 | DMA contention against DShot bitbang: investigated, modelled, and dropped - the model flagged 151 of 467 shipped configs (FINDINGS §4.11) | — |
-| §4.12 | The beeper's `TIMER_PIN_MAP` row is never emitted, so a passive buzzer cannot be enabled by CLI at all — DONE | 26 boards |
+| §4.12 | The beeper's `TIMER_PIN_MAP` row is never emitted, so a passive buzzer cannot be enabled by CLI at all — DONE (and a claimed 16 broken targets was my own miscount) | 26 boards |
 | §4.13 | A sheet that names its ADC instance is not read, and a function the board does not fit cannot be left out — DONE | 1 board |
+| §4.14 | (FINDINGS) A scan matched `TIMER_PIN_MAP` rows by macro name where firmware matches by pin tag, inventing 16 defects | — |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 
 Not worth prioritising, and the reason matters:
@@ -723,9 +724,27 @@ setting the frequency then gets no timer, and because `beeperInit()` takes the
 GPIO path only while the frequency is zero, the beeper stops working altogether
 rather than falling back to it.
 
-**16 shipped targets are in exactly that state** — `BEEPER_PWM_HZ` set with no
-row — against 28 that carry the row and 3 with both. Those beepers are silent,
-which is worth an issue on the config repo.
+~~**16 shipped targets are in exactly that state**~~ — **wrong, and worth
+recording.** Sixteen targets do set `BEEPER_PWM_HZ`, and my scan found no
+`TIMER_PIN_MAP` row for `BEEPER_PIN` in them, so it looked like sixteen silent
+beepers to report. Both halves of that were a matching error:
+
+- 14 of them **do** have the row. They write the pin directly —
+  `TIMER_PIN_MAP( 7, PB4, 1, -1)` — and the scan matched only the macro name.
+  Firmware matches by `ioTag`, so both spellings work and only one of them was
+  being counted. The corrected figures: **50** of 592 targets with a beeper
+  carry the row, 16 set the frequency, **14 have both**, 36 have a row and no
+  frequency.
+- The remaining 2 are RP2350B, and `pwm_beeper_pico.c` does not call
+  `timerAllocate()` at all — it takes a PWM slice straight from the GPIO
+  number. The row is an STM32 requirement and those targets are correct
+  without it.
+
+So the defect count is **zero** and nothing was filed. The firmware fact the
+section rests on is unchanged — on STM32 `timerAllocate()` searches only
+`timerIOConfig`, so the row cannot be added later by CLI — but "16 boards are
+broken" was a claim about the world, and the world was not asked properly. Same
+shape as FINDINGS §4.11, one file earlier in the same session.
 
 So the row is emitted wherever the beeper pin has a timer: 26 of the corpus's
 boards. It costs nothing on the active buzzer nearly every board fits, since an

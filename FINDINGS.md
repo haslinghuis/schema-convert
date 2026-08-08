@@ -1344,3 +1344,43 @@ For the PR itself the answer is: change nothing on the DMA line. If a change is
 wanted anyway, `ADC1_DMA_OPT 1` is the harmless one - it leaves DMA2_S0 to
 SPI1's receive side instead of pushing it to its second option - and 101 of the
 150 F7 configs in the repo write exactly that. `ADC3` must not be used at all.
+
+
+### 4.14 Counting a config.h by macro name when firmware counts by pin
+
+Straight after §4.11, and the same lesson from a different direction.
+
+Emitting the beeper's `TIMER_PIN_MAP` row was justified by a scan: 16 shipped
+targets set `BEEPER_PWM_HZ` and none of them had a row for `BEEPER_PIN`, so 16
+boards had a beeper that could not sound. That was going onto betaflight/config
+#1176.
+
+It was wrong twice over.
+
+**Macro name against `ioTag`.** The scan looked for `BEEPER_PIN` inside
+`TIMER_PIN_MAP(...)`. Configs write the pin either way - `TIMER_PIN_MAP( 7,
+BEEPER_PIN, 1, -1)` and `TIMER_PIN_MAP( 7, PB4, 1, -1)` are both common - and
+`timerAllocate()` compares `timerIOConfig(i)->ioTag` against the tag, so the two
+spellings are identical to firmware and only one of them was identical to my
+regex. 14 of the 16 have the row.
+
+**One platform, not all of them.** The other 2 are RP2350B, and
+`pwm_beeper_pico.c` never calls `timerAllocate()` - it takes a PWM slice from
+the GPIO number directly. The row is an STM32 requirement, read from the STM32
+driver, and applied to a corpus that is no longer only STM32.
+
+Corrected: of 592 targets with a beeper, **50** carry the row, 16 set the
+frequency, **14 have both** and 36 have a row with no frequency. Nothing is
+broken and nothing was filed.
+
+The rule from §4.11 was "a checker is a claim about the world, so measure it
+against the world". This adds the sharper half: **measure it the way the
+consumer does.** Firmware resolves that row by pin tag, so a scan that resolves
+it by macro name is not measuring the same thing, however many boards it runs
+over - and the corpus does not object, because a wrong question gets a
+confident answer.
+
+The feature it was justifying stands on its own: `BEEPER_PWM_HZ` is settable
+from the CLI and the row is not, so a config without one has decided the board
+cannot drive a passive buzzer. That is still worth emitting. It just does not
+fix anything that was broken.

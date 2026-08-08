@@ -959,8 +959,8 @@ def inert_beeper_timer_row(picks: Sequence["TimerPick"], cfg: "Config") -> List[
     - which is what almost every board has - is driven as plain GPIO and never
     allocates the timer, so the row does nothing at all.
 
-    It is a widespread copy-paste: 25 of the 619 shipped targets carry a beeper
-    row and exactly *one* of them sets `BEEPER_PWM_HZ`. Worth saying rather than
+    A widespread copy-paste: of 592 shipped targets with a beeper, 50 carry the
+    row and only 14 set `BEEPER_PWM_HZ` as well. Worth saying rather than
     silently accepting, because a reviewer adding the row expects it to have an
     effect, and a passive buzzer needs both halves.
     """
@@ -3037,13 +3037,17 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
                 ("gyro_clkin", "GYRO_1_CLKIN_PIN", -1),
                 # The beeper's row is the half a passive buzzer cannot do
                 # without: beeperPwmInit() calls timerAllocate(), which only
-                # searches timerIOConfig - the TIMER_PIN_MAPPING - so a board
-                # that sets BEEPER_PWM_HZ and omits the row gets no timer, no
-                # PWM and, because beeperInit() skips the GPIO path whenever
-                # the frequency is non-zero, no beeper at all. 16 shipped
-                # targets are in exactly that state. Emitting the row costs
-                # nothing when the buzzer is active - it is never allocated -
-                # and is what makes the other case possible.
+                # searches timerIOConfig - the TIMER_PIN_MAPPING - so a config
+                # without the row has decided the board cannot drive one, and
+                # BEEPER_PWM_HZ alone would then get no timer and, since
+                # beeperInit() skips the GPIO path whenever the frequency is
+                # non-zero, no beeper at all. 50 of the 592 shipped targets
+                # with a beeper carry the row and 14 pair it with a frequency.
+                # Emitting it costs nothing on the active buzzer nearly every
+                # board fits - the channel is never allocated - and is what
+                # makes the other case reachable from the CLI. (This was
+                # briefly justified by "16 targets are broken by its absence",
+                # which was a miscount - see FINDINGS 4.14.)
                 ("beeper", "BEEPER_PIN", -1)]
     if gyro2:
         timed_io.append(("gyro2_clkin", "GYRO_2_CLKIN_PIN", -1))
