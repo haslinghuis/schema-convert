@@ -631,6 +631,36 @@ of these were found by running the corpus, not the suite.
 
 ---
 
+### 3.9 One net can name two functions, and only one of them is emitted
+
+A pad that serves two purposes is labelled with both: `RX_PPM_UART6_RX` is a
+single pin wired to a single MCU pin, and the vendor has written what it can be
+used for either way. `classify` returns one role per net, so the config gets one
+of them.
+
+Until §1.29 it got *neither* — the PPM rule is anchored at the end of the name
+and the UART rule at the start, so a label carrying both matched nothing at all
+and the board's UART6 was emitted with a TX and no RX. That half is now read,
+which is the part that was a defect.
+
+The PPM half is a genuine gap, and the config repo says how large: of its 626
+targets, **337 emit `RX_PPM_PIN`**, and **211 of those put it on the same pin as
+a `UARTn_RX_PIN`** — which is precisely this pad. So the dominant convention for
+a dual-function receiver pad is to emit both defines, and this tool emits one.
+
+Not free to fix. `RX_PPM_PIN` is a timer input capture, so the second role needs
+a timer channel, a `TIMER_PIN_MAPPING` row and `dmaopt -1` (§4.12's machinery),
+all allocated *after* the motors have taken theirs — and the pin may not have a
+free channel, in which case the right answer is to emit the UART alone and say
+why. That is the same shape as the beeper row, and it is why this is a section
+rather than a patch: it needs a net to yield an ordered list of roles, with the
+second one droppable, rather than the single role every rule returns today.
+
+Worth doing — a receiver pad is not a marginal function — but as its own change,
+measured against the corpus like the rest.
+
+---
+
 ---
 
 ## 4. Engineering

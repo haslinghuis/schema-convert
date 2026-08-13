@@ -16,15 +16,19 @@ Stated once, so the entries below can be evidence rather than repetition.
 1. **Silence is the failure mode.** Almost none of these announced themselves.
    Input was dropped while every diagnostic stayed clean — and agreement stayed
    at 100%, because it measures what was read against the firmware, not what was
-   on the sheet. A board reading 64 of its 98 pins reported nothing wrong.
-   *(§1.1, §1.5, §1.9, §1.17, §1.20)*
+   on the sheet. A board reading 64 of its 98 pins reported nothing wrong. Its
+   sharpest form is §1.27, where the tool did not drop an input but silently
+   *chose* between two rival nets and emitted the wrong one.
+   *(§1.1, §1.5, §1.9, §1.17, §1.20, §1.27)*
 
 2. **A rule describes one spelling — the one on the boards you had.** `TX4` but
    not `UART4_TX`. `MOTOR1` but not `MOTOR_1`. `I2C` but not `IIC`. A separator
    that is a dash or an underscore but never a dot. None of it was findable by
    reading the code; what finds it is counting what came out *unclassified*
    across the whole corpus, which takes five minutes and should be run whenever
-   a submission arrives. *(§1.8, §1.11, §1.15, §1.16, §1.18, §1.19)*
+   a submission arrives. Order counts as a spelling: `LED-STATUS` was read and
+   `STATUS_LED0` was not (§1.28).
+   *(§1.8, §1.11, §1.15, §1.16, §1.18, §1.19, §1.28, §1.29)*
 
 3. **Wherever a rule matches an indexed name, the index may carry a separator —
    in any position.** `GYRO_1_CS`, `GYRO-CS2`, `GYRO_CS_1`, `SPI_MISO_2`.
@@ -48,7 +52,7 @@ Stated once, so the entries below can be evidence rather than repetition.
 
 7. **Refuse rather than guess.** A wrong answer is worse than a gap, because
    nothing downstream can tell. Where the evidence is not decisive the tool says
-   so and names what it did find. *(§3.2, §3.3b, §1.14)*
+   so and names what it did find. *(§3.2, §3.3b, §1.14, §1.27)*
 
 ---
 
@@ -1492,3 +1496,122 @@ F722, which has no UART there at all - emitted for years because nothing could
 check them. The sixth is the G473's mislabelled `UART4_TX`. A config that claims
 a UART the silicon does not have is worse than one that says it could not read
 it.
+
+---
+
+## Found by converting one new board
+
+The three below came out of a single submission, an H743 that parsed at 100%
+agreement on the first run. They are §1.27, §1.28 and §1.29 — one of shape 1
+(silence), two of shape 2 (a rule describes one spelling). All three were in the
+tool for as long as the rules they belong to.
+
+### 1.27 Two nets asking for one define, and the loser vanished — FIXED
+
+The board senses current in two places: `ADC_CURR1` on PC1 and `ADC_CURR2` on
+PA7. Both classify as `adc_curr`, and `config.h` has exactly one `ADC_CURR_PIN`,
+so one of them cannot be emitted. That much is correct and unavoidable.
+
+What was wrong is *which*, and that nothing said so. The assignment was
+`simple[role] = l.pin` — last write wins, ordered by whatever the sheet drew
+last. The delivered config carried `ADC_CURR_PIN PA7`: the **second** sensor,
+read as the battery current. No warning, no note. It compiled at 31.48% flash
+and the header read as complete.
+
+This is shape 1 in its purest form, and worse than the usual case — the tool
+did not drop an input, it silently *chose* between two and had no reason for
+its choice. A missing define is visible in a review. A plausible wrong one is
+not.
+
+Fixed by making the collision explicit. The sheet's own numbering decides it, an
+unnumbered net counting as the first, and either way the reader is told which
+wire stopped existing:
+
+```
+note: ADC_CURR1 on PC1 and ADC_CURR2 on PA7 both ask for ADC_CURR_PIN, which
+config.h has one of; the lower index is used, so ADC_CURR1 on PC1 is emitted
+and ADC_CURR2 on PA7 is left out
+```
+
+Where there is no numbering there is nothing to choose by, so it is a warning
+rather than a note and the first read is kept — shape 7, refuse rather than
+guess.
+
+The rival index is deliberately **not** returned by `classify`. The 1 in
+`ADC_CURR1` does not select an instance the way the 4 in `UART4_TX` does; there
+is one `ADC_CURR_PIN`. Folding it into the role key would also break
+`--set ADC_CURR=PC1`, which has to keep matching whatever the sheet called it.
+
+**Across the corpus it found three more, all previously silent**, and none of
+them an ADC:
+
+| board | rival nets | was |
+|---|---|---|
+| two H743 boards | `CLOCK` on PE5 *and* PE6 | PE6 dropped silently |
+| an H7 | `GYRO_1_INT1` on PA4 *and* PE13 | PE13 dropped silently |
+
+A gyro clock input and a gyro interrupt, each drawn on two pins with one name.
+Neither is decidable from the sheet, and now neither is decided.
+
+### 1.28 STATUS_LED is the same net as LED_STATUS — FIXED
+
+`LED-STATUS` was read; `STATUS_LED0` matched nothing. Same two words, same
+board function, opposite order. The board carried `STATUS_LED0`, `STATUS_LED1`
+and `STATUS_LED2` and the config got none of them — reported not as an
+unreadable spelling but as a sheet with no status LED, which is shape 2 with the
+diagnostic actively pointing away from the cause.
+
+`LED-STATUS` is the commoner spelling by a distance — 32 nets in the corpus
+against 5 — which is exactly why this survived: the rule was written from the
+boards that had it.
+
+Gains 5 defines over two boards.
+
+### 1.29 A pad labelled with both its functions matched neither rule — FIXED, PARTLY
+
+`RX_PPM_UART6_RX` is one pad, one MCU pin, and the vendor has written both
+things it can be. The PPM rule is anchored at the end of the name and the UART
+rule at the start, so a label carrying both matched **neither**, and UART6 was
+emitted with a TX and no RX.
+
+The same optional prefix fixes a second and commoner shape: a vendor who copies
+the pin name onto the net. One board writes every one of its ten UART nets as
+`PD5_UART2_TX`, and reached the config with no serial ports at all. It now
+gains all ten — and the two it should not have, `PD14_UART9_TX` and
+`PD15_UART9_RX`, stay refused, because netmap checks each against the firmware
+tables and those pins have no UART9. Geometry proposes, firmware validates.
+
+**Partly**: the config gets the UART half and not the PPM half. That is a gap,
+not a decision, and the config repo sizes it — 337 of its 626 targets emit
+`RX_PPM_PIN`, and 211 of those put it on the same pin as a `UARTn_RX_PIN`,
+which is precisely this pad. Emitting both needs a net to yield an ordered list
+of roles rather than one. ROADMAP §3.9.
+
+The claim that made this look finished was checked and was false. The first
+version of this entry said no shipped target emits `RX_PPM_PIN` — measured with
+a glob against the wrong directory layout, which matched no files and returned
+zero. **A count of zero from a search is the one result that should never be
+believed without checking the search found anything at all.**
+
+### What the corpus said
+
+Measured over 169 schematics, before and after, per shape 6:
+
+| | before | after |
+|---|---|---|
+| schematics converted | 126 | 126 |
+| defines emitted | 7102 | **7118** |
+| warnings | 1102 | 1103 |
+| boards whose output moved | — | **6** |
+
+Six boards moved and every one of them was inspected: +11 UART defines, +5 LED
+defines, one `ADC_CURR_PIN` corrected from the wrong sensor, three new warnings
+where something had been dropped in silence. The other 120 are byte-identical.
+All six were rebuilt.
+
+Do not compare those absolutes with ROADMAP's corpus table. This sweep counts
+every `#define` in a file generated for each of 169 PDFs, including the three
+test fixtures and the non-schematic PDFs that yield nothing; the ROADMAP's
+instrument counts a narrower set. **The delta is the measurement** — both
+columns here were produced by the same script minutes apart, which is the only
+property shape 6 needs.

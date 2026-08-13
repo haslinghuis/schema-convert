@@ -259,6 +259,62 @@ class ClassifyTests(unittest.TestCase):
                 role, idx, _ = genconfig.classify(net)
                 self.assertEqual((role, idx), want)
 
+    def test_a_pad_labelled_with_both_its_functions_still_names_the_uart(self):
+        # A pad that serves two purposes carries both names, qualifier first:
+        # RX_PPM_UART6_RX is one pin. Neither the PPM rule (anchored at the
+        # end) nor the UART rule (anchored at the start) matched it, so the
+        # board's UART6 was emitted with a TX and no RX.
+        #
+        # The UART half is what is asserted here. The PPM half is a known gap,
+        # not a decision - 211 of the config repo's 626 targets carry
+        # RX_PPM_PIN and a UARTn_RX_PIN on the same pin. ROADMAP 3.9.
+        for net, want in (("RX_PPM_UART6_RX", ("uart_rx", "6")),
+                          ("PPM_UART3_RX", ("uart_rx", "3")),
+                          ("SBUS_UART3_RX", ("uart_rx", "3")),
+                          ("DJI_UART1_TX", ("uart_tx", "1"))):
+            with self.subTest(net=net):
+                role, idx, _ = genconfig.classify(net)
+                self.assertEqual((role, idx), want)
+
+    def test_a_qualifier_before_a_uart_does_not_invent_an_index(self):
+        # The prefix is allowed to be anything, so the digit must still come
+        # from the UART itself. ESC1_SERIAL_TX names no port number and must
+        # not be read as UART1.
+        for net in ("ESC1_SERIAL_TX", "ESC1_SERIAL_RX"):
+            with self.subTest(net=net):
+                self.assertNotIn(genconfig.classify(net)[0],
+                                 ("uart_tx", "uart_rx"))
+
+    def test_status_led_is_read_with_the_word_on_either_side(self):
+        # LED-STATUS is the common spelling and was read; STATUS_LED0/1/2 is
+        # the same thing the other way round and matched nothing, so a board
+        # carrying all three lost all three and the report called it a sheet
+        # with no status LED.
+        for net, want in (("LED-STATUS", "led0"), ("STATUS_LED", "led0"),
+                          ("STATUS_LED0", "led0"), ("STATUS-LED1", "led1"),
+                          ("STATUSLED2", "led2"), ("LED0", "led0"),
+                          ("LED2", "led2")):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], want)
+
+    def test_a_status_led_is_not_the_led_strip(self):
+        for net in ("LED_STRIP", "LED-STRIP", "WS2812"):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.classify(net)[0], "led_strip")
+
+    def test_a_rival_index_is_read_but_is_not_the_roles_index(self):
+        # config.h has one ADC_CURR_PIN, so the 1 in ADC_CURR1 does not select
+        # an instance the way the 4 in UART4_TX does - it only says which of
+        # two rival nets the vendor calls the first. It must stay out of the
+        # role key, or --set ADC_CURR=PC1 stops matching what the sheet wrote.
+        for net in ("ADC_CURR1", "ADC_CURR2", "ADC_VBAT1"):
+            with self.subTest(net=net):
+                self.assertIsNone(genconfig.classify(net)[1])
+        for net, want in (("ADC_CURR1", 1), ("ADC_CURR2", 2), ("ADC_CURR", None),
+                          ("CURR2_ADC", 2), ("ADC_VBAT1", 1), ("RSSI", None)):
+            with self.subTest(net=net):
+                self.assertEqual(genconfig.rival_index(net), want)
+
     def test_betaflights_own_define_names_are_accepted_as_net_names(self):
         # Vendors copy the config.h names onto their nets, which puts the index
         # between separators. The older patterns allowed GYRO1-CS but not
@@ -2597,6 +2653,65 @@ def spi2_for(device):
 
 def board(extra_rows=(), parts=PARTS, style="fixed"):
     return SyntheticBoard(BASE_LEFT, BASE_RIGHT + list(extra_rows), parts, style)
+
+
+class RivalNetTests(unittest.TestCase):
+    """
+    Two nets asking for one define.
+
+    config.h has a single ADC_CURR_PIN, so a board that senses current in two
+    places has one net that cannot be emitted. That was true before this and is
+    true after it; what changed is that the loser used to be chosen by which
+    pin the sheet drew last and to vanish without a word. A real board with
+    ADC_CURR1 on PC1 and ADC_CURR2 on PA7 was converted with the *second*
+    sensor as its battery current - a wrong pin, in a file that compiled
+    cleanly and read as complete.
+
+    So: the sheet's own numbering decides it, and either way the reader is
+    told which wire stopped existing.
+    """
+
+    def test_the_lower_numbered_net_wins_and_the_other_is_named(self):
+        text, cfg, _ = generate(board([("PC1/ADC1_IN11", "ADC_CURR1"),
+                                       ("PC2/ADC1_IN12", "ADC_CURR2")]))
+        self.assertEqual(support.defines(text).get("ADC_CURR_PIN"), "PC1")
+        self.assertTrue(any("ADC_CURR2" in n and "ADC_CURR_PIN" in n
+                            for n in cfg.notes), cfg.notes)
+
+    def test_the_order_they_are_drawn_in_does_not_decide_it(self):
+        """The defect exactly: the winner must not depend on the row order."""
+        text, _, _ = generate(board([("PC2/ADC1_IN12", "ADC_CURR2"),
+                                     ("PC1/ADC1_IN11", "ADC_CURR1")]))
+        self.assertEqual(support.defines(text).get("ADC_CURR_PIN"), "PC1")
+
+    def test_an_unnumbered_net_is_the_first_one(self):
+        text, _, _ = generate(board([("PC2/ADC1_IN12", "ADC_CURR2"),
+                                     ("PC1/ADC1_IN11", "ADC_CURR")]))
+        self.assertEqual(support.defines(text).get("ADC_CURR_PIN"), "PC1")
+
+    def test_with_nothing_to_choose_by_it_is_a_warning_not_a_guess(self):
+        # Same name twice. There is no evidence here, so the tool keeps what it
+        # read first and says so - it does not invent a reason to prefer one.
+        text, cfg, _ = generate(board([("PC1/ADC1_IN11", "ADC_CURR"),
+                                       ("PC2/ADC1_IN12", "ADC_CURR")]))
+        self.assertEqual(support.defines(text).get("ADC_CURR_PIN"), "PC1")
+        self.assertTrue(any("ADC_CURR_PIN" in w and "PC2" in w
+                            for w in cfg.warnings), cfg.warnings)
+
+    def test_the_losing_net_is_never_silent(self):
+        # What the regression suite checks corpus-wide, asserted directly: a
+        # net that reaches neither a define nor a diagnostic is the failure.
+        for rows in ([("PC1/ADC1_IN11", "ADC_CURR1"),
+                      ("PC2/ADC1_IN12", "ADC_CURR2")],
+                     [("PC1/ADC1_IN11", "ADC_CURR"),
+                      ("PC2/ADC1_IN12", "ADC_CURR")]):
+            with self.subTest(rows=rows):
+                text, cfg, _ = generate(board(rows))
+                said = " ".join(cfg.warnings + cfg.notes)
+                emitted = set(support.defines(text).values())
+                for _, net in rows:
+                    self.assertTrue(net in said or "PC1" in emitted, said)
+                self.assertIn("PC2", said)
 
 
 class CaptureInputTests(unittest.TestCase):

@@ -192,8 +192,25 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     # thing on a flight controller - reached the config as unclassified.
     (re.compile(r"^(?:.*[-_])?TX(\d)(?:[-_]?R)?$"), "uart_tx"),
     (re.compile(r"^(?:.*[-_])?RX(\d)(?:[-_]?R)?$"), "uart_rx"),
-    (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?TX(?:[-_]?R)?$"), "uart_tx"),
-    (re.compile(r"^(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?RX(?:[-_]?R)?$"), "uart_rx"),
+    # The prefix is optional for the same reason it is on TX(\d) above: sheets
+    # put a qualifier in front of the port. Two shapes need it, and only the
+    # second is fully served here.
+    #
+    # A pin name copied onto the net - PD5_UART2_TX - is the vendor stating the
+    # pin and the function together. One board wrote all ten of its UART nets
+    # that way and reached the config with no serial ports at all.
+    #
+    # A dual-function pad carries both its functions - RX_PPM_UART6_RX is one
+    # pad on one pin - and matched neither rule, so UART6 was emitted with a TX
+    # and no RX. It gets the UART half. It does *not* yet get the PPM half, and
+    # that is a gap rather than a decision: 211 of the config repo's 626 targets
+    # put RX_PPM_PIN and a UARTn_RX_PIN on one pin, which is exactly this pad.
+    # Emitting both needs a net to yield two roles, which classify() cannot do -
+    # see ROADMAP 3.9.
+    (re.compile(r"^(?:.*[-_])?(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?TX(?:[-_]?R)?$"),
+     "uart_tx"),
+    (re.compile(r"^(?:.*[-_])?(?:U?S?ART|SERIAL)[-_]?(\d)[-_]?RX(?:[-_]?R)?$"),
+     "uart_rx"),
     # TXD6/RXD6 - the D is for "data", and it is between the direction and the
     # index where nothing above allows anything. 19 nets over 4 boards.
     (re.compile(r"^(?:.*[-_])?TXD[-_]?(\d)$"), "uart_tx"),
@@ -212,9 +229,15 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
      "adc_curr"),
     (re.compile(r"^(?:ADC[-_])?BATT?\d?[-_](?:CURRENT|CURR|I)$"), "adc_curr"),
     (re.compile(r"^(?:ADC[-_])?RSSI\d?(?:[-_]ADC)?\d?$"), "adc_rssi"),
-    (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^LED[-_]?0$"), "led0"),
-    (re.compile(r"^LED[-_]?1$"), "led1"),
-    (re.compile(r"^LED[-_]?2$"), "led2"),
+    # STATUS sits on either side of the word. LED-STATUS is the common spelling
+    # - 32 nets in the corpus - and STATUS_LED0/1/2 is the same thing written
+    # the other way round, which matched nothing: a board carrying all three
+    # lost all three, and the report called it a sheet with no status LED
+    # rather than a spelling the rules did not cover.
+    (re.compile(r"^LED[-_]?(?:STATUS|STAT)$|^(?:STATUS[-_]?)?LED[-_]?0$"
+                r"|^STAT(?:US)?[-_]?LED$"), "led0"),
+    (re.compile(r"^(?:STATUS[-_]?)?LED[-_]?1$"), "led1"),
+    (re.compile(r"^(?:STATUS[-_]?)?LED[-_]?2$"), "led2"),
     (re.compile(r"^LED[-_]?STRIP$|^WS2812$|^LED[-_]?DATA$"), "led_strip"),
     (re.compile(r"^(?:BEEPER|BUZZER|BUZZ|BEEP|BZ)[-_]?(?:PIN)?$"), "beeper"),
     # CTRL as well as CONTROL, and CAM as well as CAMERA. A board submitted as
@@ -2296,6 +2319,41 @@ EXPECTED_FUNCTIONS = (
     "ADC_VBAT", "ADC_CURR",
 )
 
+# The define each single-valued role ends up as. Used only to say what was lost
+# when two nets ask for one of them - "ADC_CURR_PIN" tells the reader which
+# wire on their sheet stopped existing, and "adc_curr" does not. The emission
+# order lives with the code that writes each block; this is a name table.
+SIMPLE_DEFINE = {
+    "led0": "LED0_PIN", "led1": "LED1_PIN", "led2": "LED2_PIN",
+    "beeper": "BEEPER_PIN", "led_strip": "LED_STRIP_PIN",
+    "camera_control": "CAMERA_CONTROL_PIN",
+    "usb_detect": "USB_DETECT_PIN", "sdcard_detect": "SDCARD_DETECT_PIN",
+    "adc_vbat": "ADC_VBAT_PIN", "adc_curr": "ADC_CURR_PIN",
+    "adc_rssi": "ADC_RSSI_PIN",
+    "gyro_exti": "GYRO_1_EXTI_PIN", "gyro2_exti": "GYRO_2_EXTI_PIN",
+    "gyro_clkin": "GYRO_1_CLKIN_PIN", "gyro2_clkin": "GYRO_2_CLKIN_PIN",
+    "rx_ppm": "RX_PPM_PIN", "escserial": "ESCSERIAL_PIN",
+}
+
+
+def rival_index(net: str) -> Optional[int]:
+    """
+    The digit a sheet writes to tell two nets of one kind apart.
+
+    This is deliberately *not* the role's index and is not returned by
+    `classify`. config.h has exactly one ADC_CURR_PIN, so the 1 in ADC_CURR1
+    does not select an instance the way the 4 in UART4_TX does - it only says
+    which of two rival nets the vendor considers the first. Putting it in the
+    role key would also break `--set ADC_CURR=PC1`, which has to keep matching
+    whatever the sheet called it.
+
+    A trailing ADC is a qualifier, not the number: CURR2_ADC is the second.
+    """
+    n = re.sub(r"[-_]?ADC$", "", net.upper().strip())
+    m = re.search(r"(\d+)$", n)
+    return int(m.group(1)) if m else None
+
+
 # What an absence actually costs, where firmware falls back to *nothing* rather
 # than to something sensible. battery.c defaults the voltage source to
 # VOLTAGE_METER_NONE and blackbox.c the device to BLACKBOX_DEVICE_NONE, so a
@@ -2522,6 +2580,9 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     bus_cs: List[Tuple[str, str, str]] = []
     spi_named: Dict[str, Dict[str, str]] = defaultdict(dict)   # bus stated on the sheet
     simple: Dict[str, str] = {}
+    # role -> the net that won it, so a second net asking for the same define
+    # can say which wire it is losing to rather than just which pin.
+    simple_net: Dict[str, str] = {}
     pinios: List[Tuple[str, str]] = []
     unknown: List[Link] = []
     # pin -> the net drawn on it. A diagnostic that explains why something was
@@ -2591,8 +2652,44 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             spi_groups[role[:-3]]["cs"] = l.pin
         elif role == "pinio":
             pinios.append((l.net, l.pin))
-        else:
+        elif role not in simple:
             simple[role] = l.pin
+            simple_net[role] = l.net
+        elif simple[role] != l.pin:
+            # Two nets asking for one define. config.h has a single
+            # ADC_CURR_PIN, so one of these is not going to exist - and until
+            # this was written it did not exist silently, the loser decided by
+            # whichever pin the sheet happened to draw last. A board with
+            # ADC_CURR1 on PC1 and ADC_CURR2 on PA7 shipped the *second*
+            # sensor as the battery current, with nothing in the report about
+            # it: the build was clean and the header looked complete.
+            #
+            # The sheet's own numbering settles it where it has one, an
+            # unnumbered net counting as the first. Where it does not, there is
+            # nothing here to choose with, so the first read is kept and the
+            # question is handed to the reader rather than answered.
+            name = SIMPLE_DEFINE.get(role, role)
+            old = (simple_net[role], simple[role])
+            new = (l.net, l.pin)
+            i_old = rival_index(old[0])
+            i_new = rival_index(new[0])
+            i_old = 1 if i_old is None else i_old
+            i_new = 1 if i_new is None else i_new
+            if i_new != i_old:
+                keep, lost = (new, old) if i_new < i_old else (old, new)
+                simple[role] = keep[1]
+                simple_net[role] = keep[0]
+                cfg.notes.append(
+                    f"{old[0]} on {old[1]} and {new[0]} on {new[1]} both ask "
+                    f"for {name}, which config.h has one of; the lower index "
+                    f"is used, so {keep[0]} on {keep[1]} is emitted and "
+                    f"{lost[0]} on {lost[1]} is left out")
+            else:
+                cfg.warnings.append(
+                    f"{old[0]} on {old[1]} and {new[0]} on {new[1]} both ask "
+                    f"for {name} and the sheet does not number them, so there "
+                    f"is nothing to choose by: {old[1]} is emitted and "
+                    f"{new[1]} is left out. Check which one the board uses")
 
     # ---- header ----------------------------------------------------------
     #
