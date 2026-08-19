@@ -1826,6 +1826,27 @@ has one, so `PB5`/`PB6`/`PB12`/`PB13` are FDCAN2 lines on the first and FDCAN1
 lines on the second, and one family-wide list would bind four pins to the wrong
 instance. betaflight/betaflight#15588.
 
+That PR grew while it was open, and the growth is worth recording because each
+step needed a document rather than an inference. `STM32C5A3` — a target in tree
+with two FDCANs — was initially left disabled for want of a datasheet; with
+DS15137 to hand its AF map turns out to be **identical to the C593's**, so the
+existing row already served it and only the enable gate changed. C562 remains
+the odd one out. "Same family" was never the argument: C562 and C593 disagree
+about which instance owns `PB5`/`PB6`/`PB12`/`PB13`, which is why the table is
+split by variant in the first place.
+
+One mistake in it is worth keeping, because it is a provenance failure of the
+kind CLAUDE.md §6 is about and it slipped past every check here. Two datasheet
+numbers — `DS15154` and `DS14994` — were written into source comments and
+commit messages **from memory rather than read off the PDFs**, and neither
+document exists. A reviewer caught one; the second only surfaced because the
+first prompted a re-check. The pin data was genuinely extracted from the right
+documents, so nothing functional was wrong — which is precisely what makes it
+insidious: a citation is the one part of a provenance note that nobody
+re-derives, and an invented one is worse than none because it looks checkable.
+The real numbers are DS14927 (C562), DS15136 (C591/C593) and DS15137 (C5A3),
+each printed on every page footer of its own file.
+
 **Camera control does not link on C5 or N6.** `STM32_COMMON.mk` builds
 `common/stm32/camera_control.c` for every STM32, and that file calls
 `cameraControlHardwarePwmInit()`, which lives in a per-family file that F4, F7,

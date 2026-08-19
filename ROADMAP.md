@@ -72,6 +72,7 @@ is in each section below.
 | §1.26 | (FINDINGS) `net_requirement` knew fewer spellings than `classify`, starving the offset scorer — DONE | 2 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
 | §3.10 | **The capability data is seeded from an unmerged branch**, so CAN support is real here and not yet upstream | — |
+| §3.11 | Next round: reseed when #15588 merges, and AT32 is still the one family with no datasheet | 12 boards |
 
 Not worth prioritising, and the reason matters:
 
@@ -635,6 +636,57 @@ build would ignore.
 The same applies to #15589 (camera control on C5/N6), with one difference: that
 one is a makefile change, nothing is harvested from it, so no seeded data
 depends on it. It only decides whether the emitted `CAMERA_CONTROL_PIN` links.
+
+---
+
+### 3.11 What the next round picks up
+
+Written at the end of the C562 session so the next one does not have to
+re-derive any of it.
+
+**1. Reseed when betaflight/betaflight#15588 merges.** This is the only item
+that is *owed* rather than optional, and §3.10 has the procedure. Until then
+every generated config carries the branch name in its header and says so.
+
+The PR grew past the C562 while it was open, and all of it is datasheet-backed:
+
+| part | FDCAN | state after #15588 | datasheet |
+|---|---|---|---|
+| STM32C562 | 1 | enabled, own pin row (its map differs) | DS14927 |
+| STM32C591 | 0 | `#error` if `ENABLE_CAN` is forced | DS15136 |
+| STM32C593 | 2 | enabled, shared row; no target in tree | DS15136 |
+| STM32C5A3 | 2 | enabled, shared row; builds | DS15137 |
+
+C5A3 and C593 have pin-for-pin identical FDCAN maps; **C562 is the odd one
+out**, and that is the whole reason the table is split by variant rather than by
+family — `PB5`/`PB6`/`PB12`/`PB13` are FDCAN2 lines on the two-instance parts
+and FDCAN1 lines on the one-instance one.
+
+`../manufacturers/datasheets/` now holds all four C5 documents, so the
+datasheet → audit → firmware PR → reseed loop closes for C5. **`afaudit.py` has
+never been run against a C5**, which is now possible and was not before; it is
+the obvious first thing to try, and the expectation is nothing, since the tables
+were just built from those datasheets.
+
+**2. AT32 is the last family with no datasheet at all.** CLAUDE.md has said
+this since AT32 was harvested and it is still true: 12 corpus boards convert
+from tables that `afaudit.py` cannot check against anything, because there is no
+Artery document in `../manufacturers/datasheets/`. Every STM32 family now has
+one. This is the single biggest remaining hole in the audit story, and it is
+a *sourcing* problem rather than a code one — an AT32F435 datasheet closes it.
+
+APM32 is a step behind that again: neither harvested nor auditable.
+
+**3. What CAN did not answer.** `CANn_*_PIN` is emitted and the bitrate is not.
+`canConfig_t.bitrate_khz` resets to 1000 in `pg/can.c`, which is the common
+choice, and no schematic states a bus bitrate — so this is closed as
+underivable in the §3.2 sense rather than open. Worth knowing before someone
+goes looking for it.
+
+H5 is a real gap of a different kind: the H563 has FDCAN silicon and Betaflight
+has no `can_stm32h5xx.c`, so `parse_can` correctly returns nothing for it. That
+is a firmware feature to write, not data to harvest, and the H5 datasheets are
+already here if anyone does.
 
 ---
 

@@ -117,14 +117,25 @@ revert or switch branches in a tree you did not create.
 Datasheets are in `../manufacturers/datasheets/`. Every STM32 family the seeder
 harvests now has one: F4 (`stm32f405-407.pdf`, DS8626), F7, G4, H5, H7, C5, N6.
 
+C5 is now covered part by part, which matters because its variants genuinely
+differ: `stm32c562ce.pdf` (DS14927), `DS_stm32c591ce.pdf` / `stm32c591zg.pdf`
+(DS15136, covering C591 *and* C593) and `stm32c5a3cg.pdf` (DS15137). **Cite
+these by the number printed in the document, not from memory** - two invented
+DS numbers reached a firmware PR and a reviewer caught one of them. The number
+is on every page footer; `pdftotext` and `grep -oE "DS[0-9]{4,5}"` settles it in
+seconds.
+
 F4 was the blocking gap and is closed. Its audit now comes back **0 defects**:
 `TIM1_CH1N` on `PA11` was the one finding, it merged as #15510, and the loop
 closed the way it was meant to — datasheet → audit → firmware PR → reseed.
 #15512 (N657 timer options) and #15513 (H5/H7 `PF8`/`PF9`) came from the same
 pass.
 
-**AT32 is now harvested and cannot be audited**, which is a different state from
-the rest and worth keeping straight. Its tables are in `data/firmware.json` and
+**AT32 is now harvested and cannot be audited**, and it is the *only* family
+left in that state - every STM32 family, C5 variant included, now has its
+document. So the one datasheet worth chasing is an AT32F435; it is a sourcing
+problem, not a code one. This is a different state from the rest and worth
+keeping straight. Its tables are in `data/firmware.json` and
 12 corpus boards convert from them, but there is no Artery datasheet in
 `../manufacturers/datasheets/` - so the datasheet → audit → firmware PR → reseed
 loop does not close for AT32, and `afaudit.py` has nothing to check it against.
