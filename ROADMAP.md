@@ -668,7 +668,52 @@ never been run against a C5**, which is now possible and was not before; it is
 the obvious first thing to try, and the expectation is nothing, since the tables
 were just built from those datasheets.
 
-**2. AT32 is the last family with no datasheet at all.** CLAUDE.md has said
+**2. Two measured leads on the C562's own missing items.** Both were dug out
+after the session's commits, so the numbers are here rather than in the code.
+
+*`ADC_CURR` is not a cross-sheet problem at all.* The label is on the MCU sheet
+at `y=224.3`, which is `PC2`'s row exactly - and `PC2` is currently reported as
+an unconnected pin. It sits in a label column at `x1=219.0`, **59.2pt** outside
+the gutter the other labels use (`x1~278.2`), with the net's RC filter caps
+(C11/C16, 12pF) drawn between the two. `_label_zone()` walks outward through
+label-bearing columns and stops at the first break wider than `pitch*6` =
+31.6pt, so that column never comes in.
+
+The firmware corroborates it about as hard as this ever gets: `PC2` is ADC
+channel 12 on ADC1/2, and its neighbours `PC1` (ch11) and `PC3` (ch13) are the
+`ADC_VBAT` and `ADC_RSSI` that *did* bind. VBAT/CURR/RSSI on three adjacent
+channels is the ordinary way to lay this out.
+
+**Do not just raise the tolerance.** §1.30 chose `pitch*6` on the corpus and
+recorded that `pitch*7` is where it turns over - nets start falling again and
+orphans jump by a fifth as columns displace each other. The interesting question
+is whether a column separated from the gutter by a *component block* rather than
+by empty sheet is still a label column, which is a different test from distance.
+Whatever is tried needs the before/after corpus sweep.
+
+*`GYRO_1_CS` is the cross-sheet one, and the mechanism already exists.*
+`identify_bus_cs()` reads the far end of a bus-named select, and on this very
+board it resolved `SPI1_CS` to the flash and `SPI2_CS` to the OSD that way.
+`SPI3_CS` fails for two independent reasons, both measured on page 5:
+
+- **Reach.** R45 pulls the line up, which pushes the label out to the sheet
+  edge. The nearest of the chip's own pin names, `AP_CS`, is **106.9pt** away
+  and `DEVICE_REACH` is **80**. `LSM6DSK320X` itself is at 194.2pt. Nothing
+  distinctive is inside the radius - only the pull-up and the decoupling.
+- **Vocabulary.** Even at reach, nothing would match. `DEVICE_PINS` is
+  fullmatch-anchored and this symbol writes compound names:
+  `INT2/FSYNC/CLKIN`, `INT1/INT`, `AP_SD0/AP_AD0`. Splitting on `/` before
+  matching - which is exactly how netmap already treats an MCU pin's AF list -
+  turns those into FSYNC, CLKIN, INT1 and AD0.
+
+The vocabulary half is small and safe and fixes nothing on its own, because the
+reach blocks it first; the pair is needed. And the reach half has a trap worth
+knowing before starting: at **204.1pt** sits `CSB`, which is a *baro* token, so
+a naively widened radius introduces a competing category rather than just more
+evidence. Scoring it as gyro 5 - baro 1 works on this board and is precisely the
+kind of one-board tuning §"The corpus is the instrument" exists to catch.
+
+**3. AT32 is the last family with no datasheet at all.** CLAUDE.md has said
 this since AT32 was harvested and it is still true: 12 corpus boards convert
 from tables that `afaudit.py` cannot check against anything, because there is no
 Artery document in `../manufacturers/datasheets/`. Every STM32 family now has
@@ -677,7 +722,7 @@ a *sourcing* problem rather than a code one — an AT32F435 datasheet closes it.
 
 APM32 is a step behind that again: neither harvested nor auditable.
 
-**3. What CAN did not answer.** `CANn_*_PIN` is emitted and the bitrate is not.
+**4. What CAN did not answer.** `CANn_*_PIN` is emitted and the bitrate is not.
 `canConfig_t.bitrate_khz` resets to 1000 in `pg/can.c`, which is the common
 choice, and no schematic states a bus bitrate — so this is closed as
 underivable in the §3.2 sense rather than open. Worth knowing before someone
