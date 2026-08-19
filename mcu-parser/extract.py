@@ -68,7 +68,11 @@ PATTERNS: Dict[str, List[str]] = {
         r"ICM[-_]?(?:42688|42605|20602|20689|20948|426\d\d)[A-Z0-9]*",
         r"MPU[-_]?(?:6000|6050|6500|9250)",
         r"BMI[-_]?(?:270|160|088|085)",
-        r"LSM6DS[A-Z]{1,2}",              # LSM6DSK / LSM6DSR / LSM6DSO (letters only)
+        # LSM6DSO / LSM6DSR, and the variants that carry a full-scale digit
+        # group: LSM6DSV16X, LSM6DSV320KXTR. The letters-only form missed every
+        # one of the latter, so a board fitted with an LSM6DSV320K reported "no
+        # gyro part recognised" and emitted no driver at all.
+        r"LSM6DS[A-Z]{1,2}(?:\d+[A-Z0-9]*)?",
         r"IIM[-_]?42652",
     ],
     "BARO": [
