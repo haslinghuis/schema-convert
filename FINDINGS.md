@@ -1884,3 +1884,147 @@ a row, a checked net or an agreement.
 The new board is golden number ten, `c5-can`, at 26/26 agreement and 63 symbol
 rows. It is the first C5 golden, which closes half of ROADMAP §3.8 — that gap
 listed C5, N6 and AT32 as having no golden board at all.
+
+---
+
+## Getting one target to clean
+
+The C562 came out of §2.6 converting correctly and still carrying 22
+diagnostics. Working them down to the three that no schematic can answer found
+four more defects. None of them lowered the agreement score - it was 100% at
+every step, and 27/27 by the end.
+
+### 1.32 A label pushed out of the gutter by its own filter — FIXED
+
+`_labels_for_part` has a pass for labels that are in no column at all, and its
+comment already describes this board exactly: *"how far it sits from the symbol
+is decided by whatever components share that row - a pull-up on one, a series
+resistor on the next"*. But that pass is bounded by `_label_zone()`, which is
+derived from the columns - so a label pushed outside every column by the
+components on its row is excluded by the very thing that explains it. The
+reasoning and the bound contradict each other.
+
+`ADC_CURR` sits 59.2pt outside a gutter whose tolerance is 31.6, with the net's
+own 12pF filter caps drawn in the gap. It was dropped in silence: no orphan, no
+warning, `PC2` reported as an unconnected pin and `ADC_CURR` as a function the
+sheet did not produce. Firmware agrees it is an ADC pin, channel 12, sitting
+between the `PC1` (ch11) and `PC3` (ch13) that carry `ADC_VBAT` and `ADC_RSSI`.
+
+**Simply lifting the bound is catastrophic, and the corpus said so before any of
+this was committed**: 47 boards worse, orphans 393 → 1104, disagreements 39 →
+163. Distance is doing real work out there. What replaced it is not a bigger
+number but evidence — three conditions, each of which the measurements forced:
+
+- **The firmware map must vouch for it.** The label has to claim something
+  checkable and the row it would land on has to support exactly that. A stray
+  name from another component has no reason to clear that bar.
+- **The row must not already be claimed.** Without this, four boards each gained
+  a contradiction from a name that had a better claimant.
+- **A name already bound inside the zone is never re-adopted from outside it.**
+  That is §1.24's echo, and on a sheet carrying *two* MCU symbols it is the
+  other symbol's copy: one H743 acquired a duplicate `MOTOR1..4` and an
+  `ADC_RSSI` on `VCAP2` that way.
+
+With all three in place the reach barely matters - every bounded value scores
+identically on disagreements, and even unbounded costs one board - which is the
+sign that the guards, not the radius, are what make it safe. The constant is a
+backstop sitting mid-plateau rather than a tuned threshold, and the table in the
+source records the curve.
+
+An implementation detail worth keeping: the corroboration must be checked
+against the row the label will *actually* pair with, not the nearest routable
+one. Vetting against the nearest GPIO row while `_pair()` puts the label on the
+`VCAP2` beside it corroborates the wrong thing, which is how that H743 got an
+`ADC_RSSI` onto a supply pin.
+
+### 2.7 A device that names itself three times and was not recognised — FIXED, PARTLY
+
+`identify_bus_cs()` reads the far end of a bus-named chip select and decides
+what the device is from the chip's own pin names. It works: on this very board
+it resolved `SPI1_CS` to the flash and `SPI2_CS` to the OSD. `SPI3_CS` came back
+undecided, and for two unrelated reasons.
+
+The first is a spelling, and it is fixed. The patterns are anchored, and this
+symbol prints several functions per pin in one string - `INT2/FSYNC/CLKIN`,
+`INT1/INT`, `AP_SD0/AP_AD0`. Not one matched, so a gyro that names itself three
+times over scored zero. Each slash-separated piece is now read as well as the
+whole, which is how netmap has always treated an MCU pin's AF list. Across the
+corpus that alone resolves one more select and changes nothing else.
+
+The second is **not** fixed, deliberately. A pull-up on the select pushes its
+label to the sheet edge, so the nearest of the gyro's own pin names is 106.9pt
+away against a `DEVICE_REACH` of 80. Raising the radius reaches it and costs
+more than it gains:
+
+| reach | gained | lost | changed |
+|---|---|---|---|
+| 80 | +1 | 0 | 0 |
+| 140 | +3 | 1 | 1 |
+| 150 | +4 | 3 | 1 |
+
+What breaks are the dual-IMU boards - three revisions of one H743 - where a
+wider circle takes in both gyros and the tie rule then decides nothing or the
+wrong index wins. The two requirements are in direct conflict: 137 is needed,
+140 is already too far. Trading three boards for one is the wrong way round, so
+the radius stays at 80 and this board's select is hand-placed.
+
+The real fix is a *dominance* rule - nearest device wins only if it is several
+times nearer than the runner-up - which is what `trace_cs_bus()` already does
+for buses, and is exactly why this function's docstring says proximity alone has
+no honest cutoff. ROADMAP §3.11 carries it.
+
+### 4.17 Two smaller ones on the way down
+
+**The divider was two points out of reach.** `read_vbat_divider` already looks
+on every sheet - the C562 draws its divider on page 2 and its MCU on page 3 -
+but the radius was 45pt and the resistors sit at 47 and 50. Widened to 65 on the
+corpus's evidence: 25 boards resolve a scale at 45, 29 at 65, and **not one
+board's scale changes value at any radius**. The structural rules decide the
+answer; the radius only decides whether they get to see it, so the risk of
+widening is ambiguity rather than error. One AT32 board is the cost - it finds a
+second candidate pair and declines, which is the guard reporting instead of
+choosing - against five gains including one H7 board at **210**, which was
+silently taking the 110 default and reading about half its true battery voltage.
+
+**The tool asked for something it would not accept.** A bus-named select whose
+device cannot be read prints *"Add the device's `_CS_PIN` and `_SPI_INSTANCE` by
+hand, or `--set <DEVICE>_CS=<pin>`"* - and then, given exactly that, ignored it
+and warned that the device *"has only a CS net on this sheet"*. The sheet states
+the bus and the operator states the device; between them the pair is complete. A
+device carrying nothing but a chip select on that same pin is now taken as the
+answer. The instance still comes from the pins through the firmware map, so this
+grants no new authority to a label or to an operator.
+
+### What the corpus said
+
+154 schematics, 123 of which yield a bound pin map:
+
+| | before | after |
+|---|---|---|
+| MCU pins read | 9435 | **9442** |
+| rows bound to a net | 5374 | **5455** |
+| nets checked against firmware | 2827 | **2910** |
+| of those, agreeing | 2788 | **2871** |
+| disagreeing | 39 | 39 |
+| orphaned labels | 393 | **387** |
+
+**35 boards improved and none moved the other way.** Every one of the 83 newly
+checked nets agrees, and the disagreement count does not move at all.
+
+### What was deliberately not fixed
+
+The sheet labels two of its SPI1 lines `SPII_SCK` and `SPII_MOSI` - capital I,
+character 73 - while spelling the chip select and MISO on the same bus with a
+real digit. Those two classified as nothing, so the bus was one line short and
+was refused, taking `FLASH_SPI_INSTANCE` and `DEFAULT_BLACKBOX_DEVICE` with it.
+
+A three-line repair in `classify` reads it, and it is **not** in the tree: it is
+a one-off in 154 schematics, the manufacturer has been told, and a corrected
+sheet is the right fix. Adapting to it would leave the tool carrying a
+workaround for a document that no longer exists. The two pins are hand-placed
+instead, which is what `--set` is for.
+
+The three diagnostics that remain on this target cannot be answered by any tool:
+PINIO polarity, gyro orientation, and `DEFAULT_CURRENT_METER_SCALE`, which
+depends on the ESC rather than on the flight controller. ROADMAP §3.2 closed
+those as impossible rather than open, and they are what "clean" means here.

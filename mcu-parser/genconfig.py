@@ -1529,7 +1529,32 @@ def read_vbat_divider(words: Sequence[Word], mcu_labels: Sequence[Word],
         return None, (f"DEFAULT_VOLTAGE_METER_SCALE omitted: {net} is not drawn "
                       "anywhere but the MCU, so its divider is not on this sheet")
 
-    reach = max(pitch * 8, 45.0)
+    # How far around the net's far end to look for the divider. 45 was too
+    # tight by a couple of points on more than one board: a C562 draws its pair
+    # at 47 and 50pt and got nothing, and the firmware default of 110 would have
+    # been left in place.
+    #
+    # Widening this is safe in the way that matters, and the corpus says so
+    # rather than the argument. Over 154 schematics, against the 25 boards that
+    # resolve a divider at 45:
+    #
+    #   reach   resolved  gained  lost  *changed*
+    #     45       25        -      -       -
+    #     55       26       +2      1       0
+    #     65       29       +5      1       0
+    #
+    # Not one board's scale *changes* value at any reach - the structural rules
+    # below (a pair on one vertical leg, one either side of the node, exactly
+    # one such pair, anchored by ground or the battery, and a plausible ratio)
+    # are what decide the answer, and the radius only decides whether they get
+    # to see it. So the risk of widening is ambiguity, not error.
+    #
+    # The one loss is real and is named rather than buried: an F435 board that
+    # resolved 110 at 45 finds a second candidate pair at 55 and declines. That
+    # is the guard working - it reports instead of choosing - and it is worth
+    # 5 gains, one of which is an H7 board at 210. That board was silently
+    # taking the 110 default and reading about half its true battery voltage.
+    reach = max(pitch * 8, 65.0)
     for h in sorted(occ, key=lambda w: (w.page, w.y0)):
         local = [w for w in words if w.page == h.page
                  and abs(w.x0 - h.x0) <= reach and abs(w.y0 - h.y0) <= reach]
@@ -1600,7 +1625,39 @@ DEVICE_PINS = {
 IMU_INDEX_RE = re.compile(r"^IMU(\d)", re.I)
 # How far from the net's far end to read. A chip's own pin names are printed on
 # its symbol, so this is the size of a symbol, not of the sheet.
+#
+# It stays at 80 despite a board that needs 137, and the measurement is the
+# reason. A select with a pull-up on it has its label pushed out to the sheet
+# edge: on one C562 the nearest of the gyro's own pin names is 106.9pt away and
+# the part marking is at 194.2, so nothing identifying is inside the radius and
+# a gyro whose symbol names it three times over comes back undecided.
+#
+# Raising the radius to reach it costs more than it gains. Measured over 154
+# schematics, against the chip selects this resolves today:
+#
+#   reach   gained  lost  changed
+#     80      +1      0      0
+#    140      +3      1      1
+#    150      +4      3      1
+#
+# What breaks are the dual-IMU boards - three revisions of one H743 - where a
+# wider circle takes in both gyros at once and the tie rule then decides
+# nothing, or the wrong index wins. Trading three boards for one is the wrong
+# way round, and the two requirements are in direct conflict: 137 is needed and
+# 140 is already too far.
+#
+# So the honest fix is not a bigger radius but a dominance rule - nearest device
+# wins only if it is several times nearer than the runner-up - which is what
+# trace_cs_bus() already does for buses, and is why the docstring below says
+# proximity alone has no honest cutoff. Until then a pulled-up select is
+# hand-placed. ROADMAP §3.11 carries the numbers.
 DEVICE_REACH = 80.0
+
+
+def _device_tokens(text: str) -> List[str]:
+    """The whole pin name and each slash-separated function within it."""
+    parts = [p for p in text.split("/") if p]
+    return [text] + parts if len(parts) > 1 else [text]
 
 
 def identify_bus_cs(net: str, words: Sequence[Word], mcu_labels: Sequence[Word],
@@ -1636,9 +1693,17 @@ def identify_bus_cs(net: str, words: Sequence[Word], mcu_labels: Sequence[Word],
                 continue
             if math.hypot(v.x0 - w.x0, v.y0 - w.y0) > DEVICE_REACH:
                 continue
-            for cat, rx in DEVICE_PINS.items():
-                if rx.match(v.text):
-                    score[cat].add(v.text.upper())
+            # A symbol may print several of a pin's functions in one string -
+            # INT2/FSYNC/CLKIN, INT1/INT, AP_SD0/AP_AD0 - and the patterns are
+            # anchored, so none of those matched and a part identified by three
+            # of its own names scored zero. Read each slash-separated piece as
+            # well as the whole, which is how netmap already treats the AF list
+            # on an MCU pin. The whole is still tried first because two flash
+            # patterns (/WP, /HOLD) are themselves written with the slash.
+            for token in _device_tokens(v.text):
+                for cat, rx in DEVICE_PINS.items():
+                    if rx.match(token):
+                        score[cat].add(token.upper())
             if (m := IMU_INDEX_RE.match(v.text)):
                 seen_index[m.group(1)] = seen_index.get(m.group(1), 0) + 1
         # The part marking counts for one token - corroboration, not the case.
@@ -3042,6 +3107,24 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cat, index, evidence = identify_bus_cs(net, words, labels, parts)
         bus = f"SPI{bus_index}"
         if not cat:
+            # The far end did not say which device this is - but the caller may
+            # have, with the very --set the warning below recommends. A device
+            # carrying nothing but a chip select on this exact pin is that
+            # answer: the sheet states the bus, the operator states the device,
+            # and between them the pair is complete. Without this the tool asks
+            # for something it then refuses to use, and the board is left
+            # needing a GYRO_1_SPI_INSTANCE it has no way to accept.
+            placed = next((o for o, g in spi_groups.items()
+                           if g.get("cs") == pin and set(g) == {"cs"}), None)
+            if placed:
+                for role, p in spi_named.get(bus, {}).items():
+                    spi_groups[placed].setdefault(role, p)
+                cfg.notes.append(
+                    f"{net} on {pin} names its bus but not its device, and "
+                    f"{placed} was placed on {pin} by hand - so {placed} is "
+                    f"taken to be the device on {bus}. The instance still comes "
+                    "from the pins through the firmware map")
+                continue
             cfg.warnings.append(
                 f"{net} on {pin} is a chip select on {bus}, but which device it "
                 "selects is not readable at the far end of the net"

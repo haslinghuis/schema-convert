@@ -668,8 +668,31 @@ never been run against a C5**, which is now possible and was not before; it is
 the obvious first thing to try, and the expectation is nothing, since the tables
 were just built from those datasheets.
 
-**2. Two measured leads on the C562's own missing items.** Both were dug out
-after the session's commits, so the numbers are here rather than in the code.
+**2. One lead left, and it needs a different shape of fix.** Both of the C562's
+missing items were chased down; FINDINGS §1.32 and §2.7 have the outcome. The
+half that is *not* done is the one worth stating carefully, because the obvious
+fix is measurably wrong.
+
+A chip select with a pull-up on it has its label pushed to the sheet edge, so
+the device's own pin names fall outside `DEVICE_REACH`. Raising the radius
+reaches them and breaks the dual-IMU boards, where a wider circle takes in both
+gyros at once:
+
+| reach | gained | lost | changed |
+|---|---|---|---|
+| 80 (today) | +1 | 0 | 0 |
+| 140 | +3 | 1 | 1 |
+| 150 | +4 | 3 | 1 |
+
+137 is needed and 140 is already too far, so the two requirements are in direct
+conflict and no radius satisfies both. **The fix is a dominance rule, not a
+bigger number** - nearest device wins only if it is several times nearer than
+the runner-up - which is what `trace_cs_bus()` already does for buses and why
+`identify_bus_cs()`'s own docstring says proximity alone has no honest cutoff.
+Until then a pulled-up select is hand-placed.
+
+The stale version of this section follows, kept because the measurements in it
+are still the evidence:
 
 *`ADC_CURR` is not a cross-sheet problem at all.* The label is on the MCU sheet
 at `y=224.3`, which is `PC2`'s row exactly - and `PC2` is currently reported as
@@ -713,7 +736,35 @@ a naively widened radius introduces a competing category rather than just more
 evidence. Scoring it as gyro 5 - baro 1 works on this board and is precisely the
 kind of one-board tuning §"The corpus is the instrument" exists to catch.
 
-**3. AT32 is the last family with no datasheet at all.** CLAUDE.md has said
+**3. The C562 target, reproducibly.** It converts clean - three diagnostics,
+all of them things no schematic states - with:
+
+```bash
+python3 mcu-parser/genconfig.py <sheet>.pdf \
+    --board EXAMPLEC562 --manufacturer CUST --hse-mhz 8 \
+    --set SPI1_SCK=PA5 --set SPI1_MOSI=PA7 --set GYRO_1_CS=PA15 -o out
+```
+
+Each hand-placed value is there for a stated reason, and two of the three should
+disappear:
+
+- `SPI1_SCK` / `SPI1_MOSI` - the sheet types those two labels `SPII_` with a
+  capital I. The manufacturer has been told; a corrected sheet removes both,
+  and the tool deliberately does **not** adapt to the typo (FINDINGS §2.7's
+  closing section).
+- `GYRO_1_CS` - the pulled-up select above. A dominance rule removes this one.
+- `--hse-mhz 8` - the crystal is `Y1`, an `X32258MOB4SI` on `PH0`/`PH1`, and it
+  carries no frequency text; the 27 MHz on the sheet is `Y2`, the OSD's. 8 MHz
+  is what the one hand-written C562 config in the config repo states for
+  the same board family, citing an earlier revision of this schematic. Confirmed to reach the build as
+  `-DHSE_VALUE=8000000`.
+
+The same crystal part appears on four corpus boards, none of which print a
+frequency, so decoding it would pay for itself more than once - but it is a
+vendor part-number scheme and reading it is guessing until someone confirms the
+mapping.
+
+**4. AT32 is the last family with no datasheet at all.** CLAUDE.md has said
 this since AT32 was harvested and it is still true: 12 corpus boards convert
 from tables that `afaudit.py` cannot check against anything, because there is no
 Artery document in `../manufacturers/datasheets/`. Every STM32 family now has
@@ -722,7 +773,7 @@ a *sourcing* problem rather than a code one — an AT32F435 datasheet closes it.
 
 APM32 is a step behind that again: neither harvested nor auditable.
 
-**4. What CAN did not answer.** `CANn_*_PIN` is emitted and the bitrate is not.
+**5. What CAN did not answer.** `CANn_*_PIN` is emitted and the bitrate is not.
 `canConfig_t.bitrate_khz` resets to 1000 in `pg/can.c`, which is the common
 choice, and no schematic states a bus bitrate — so this is closed as
 underivable in the §3.2 sense rather than open. Worth knowing before someone

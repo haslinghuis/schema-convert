@@ -145,6 +145,10 @@ class Word:
     def yc(self) -> float:
         return (self.y0 + self.y1) / 2
 
+    @property
+    def xc(self) -> float:
+        return (self.x0 + self.x1) / 2
+
 
 PAGE_RE = re.compile(r"<page\b[^>]*>(.*?)</page>", re.S)
 WORD_RE = re.compile(
@@ -1021,7 +1025,8 @@ POWER_RE = re.compile(
 )
 
 
-def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
+def find_net_labels(words: Sequence[Word], sym: Symbol,
+                    caps: Optional[dict] = None) -> List[Word]:
     """
     Text in the gutters either side of the symbol, level with its rows.
 
@@ -1041,11 +1046,37 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
     seen: set = set()
     out: List[Word] = []
     for part in sym.parts:
-        for w in _labels_for_part(words, part, sym.pitch):
+        for w in _labels_for_part(words, part, sym.pitch, caps):
             if id(w) not in seen:
                 seen.add(id(w))
                 out.append(w)
     return drop_annotations(out, words)
+
+
+# How far past the label zone the corroborated pass of _labels_for_part() will
+# look, in row pitches. Measured over 154 schematics against a baseline of 2827
+# checked nets, 2788 agreeing, 39 disagreeing and 393 orphans:
+#
+#   reach   checked  agreeing  disagreeing  orphans  boards worse
+#     10      2875     2836        39         389        0
+#     12      2893     2854        39         385        0
+#     16      2910     2871        39         387        0
+#     20      2911     2872        39         388        0
+#     30      2916     2877        39         392        0
+#   none      2926     2886        40         397        1
+#
+# The striking part is how flat that is, and it is worth saying why: the reach
+# is *not* what makes this safe. The firmware corroboration is, together with
+# the two guards beside it - a row already claimed is never taken, and a name
+# already bound inside the zone is never re-adopted from outside. With those in
+# place every bounded reach behaves identically on the disagreement count, and
+# even removing the bound costs only one board.
+#
+# So this is a backstop rather than a tuned constant, and 16 is chosen for
+# sitting in the middle of a band where nothing changes. An earlier version
+# without those guards had a real cliff here; if the guards are ever weakened,
+# re-measure before trusting this number.
+OUT_OF_ZONE_REACH = 16
 
 
 def _label_zone(cols: Sequence[Tuple[int, float, List[Word]]],
@@ -1094,8 +1125,8 @@ def _label_zone(cols: Sequence[Tuple[int, float, List[Word]]],
     return zone
 
 
-def _labels_for_part(words: Sequence[Word], part: SymbolPart,
-                     pitch: float) -> List[Word]:
+def _labels_for_part(words: Sequence[Word], part: SymbolPart, pitch: float,
+                     caps: Optional[dict] = None) -> List[Word]:
     pad = pitch * 2
 
     # Only a side this part actually has pin names on can have a net-label
@@ -1195,6 +1226,66 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
             if id(w) not in keep and NET_VOCAB.search(w.text) \
                     and near([w]) > zone_edge:
                 keep[id(w)] = w
+
+        # A label further out than the zone, admitted only where the firmware
+        # map vouches for it.
+        #
+        # The paragraph above says how far a lone label sits is decided by the
+        # components sharing its row, and a row carrying more of them puts its
+        # label outside any column. Bounding that by the columns is circular -
+        # but simply lifting the bound is catastrophic, and measurably so: on
+        # the 154-schematic corpus it adopts far-end names wholesale, 47 boards
+        # get worse, orphans go 393 -> 1104 and mismatches 39 -> 163. Distance
+        # is doing real work out there and cannot just be dropped.
+        #
+        # So replace it with evidence rather than with a bigger number. Take the
+        # label only if it *claims* something checkable - net_requirement() -
+        # and the row it would land on can actually do that, per the same
+        # firmware tables everything else here is judged against. A stray name
+        # from another component has to clear a bar it has no reason to clear:
+        # landing on a pin that supports exactly the function its own name
+        # states. That is the §1 rule used as a filter instead of as a check.
+        #
+        # One board's ADC_CURR is 59pt outside a gutter whose tolerance is 32,
+        # with the net's own 12pF filter caps drawn in the gap. It came back as
+        # an unconnected pin and a missing function; PC2 is an ADC pin sitting
+        # between the two ADC nets that did bind.
+        if caps:
+            # Every row, not only the routable ones. The check has to be about
+            # the row this label will actually pair with, and _pair() does not
+            # skip supply rows - so vetting against the nearest *GPIO* row while
+            # the label lands on a VCAP beside it corroborates the wrong thing.
+            # One H743 adopted ADC_RSSI onto VCAP2 that way.
+            rows = list(part.rows)
+            for w in cands:
+                if id(w) in keep or not NET_VOCAB.search(w.text):
+                    continue
+                req = net_requirement(w.text)
+                if not req or not requirement_answerable(caps, req[0]):
+                    continue
+                # A name already spoken for inside the zone is not admitted
+                # again from outside it - that is §1.24's echo, and on a sheet
+                # carrying two MCU symbols it is the *other* symbol's copy. One
+                # H743 draws both, and reading the second set put a duplicate
+                # MOTOR1..4 and an ADC_RSSI onto the rows they happened to sit
+                # level with.
+                if any(v.text.upper() == w.text.upper() for v in keep.values()):
+                    continue
+                pos = w.yc if ALONG[part.rows[0].side] == "y" else w.xc
+                row = min(rows, key=lambda r: abs(r.pos - pos), default=None)
+                if row is None or abs(row.pos - pos) > pitch:
+                    continue
+                if zone_edge - near([w]) > pitch * OUT_OF_ZONE_REACH:
+                    continue
+                # Never displace a label that is already in the zone: the row
+                # this one would land on has to be free. Without it four boards
+                # gain a contradiction apiece from a name that had a better
+                # claimant.
+                if any(abs((v.yc if ALONG[part.rows[0].side] == "y" else v.xc)
+                           - row.pos) <= pitch / 2 for v in keep.values()):
+                    continue
+                if row.gpio and pin_supports(caps, row.pin, req[0], req[1]):
+                    keep[id(w)] = w
         out.extend(keep.values())
     return out
 
@@ -1582,13 +1673,13 @@ def read_symbol(words: Sequence[Word], caps: dict,
     sym = find_symbol(words, page=page)
     if sym is None:
         return None, [], None
-    labels = find_net_labels(words, sym)
+    labels = find_net_labels(words, sym, caps)
     res = resolve(sym, labels, caps)
 
     other = _flip_one_sided(sym)
     if other is None:
         return sym, labels, res
-    alt_labels = find_net_labels(words, other)
+    alt_labels = find_net_labels(words, other, caps)
     alt = resolve(other, alt_labels, caps)
     if (alt.score[0], alt.score[0] - alt.score[1]) > (res.score[0],
                                                       res.score[0] - res.score[1]):
