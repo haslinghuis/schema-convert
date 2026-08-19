@@ -68,7 +68,43 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # above does not cover. Written out rather than allowing any underscore tail,
 # because PIN_RE also decides what is *not* a net label and a net called
 # PC13_LED should stay one.
-PIN_RE = re.compile(r"^(P[A-K]\d{1,2})(?:_C)?(?:-[A-Z0-9_]+)*(?:/(.*))?$")
+#   ...and the rest of the underscore-joined qualifiers, which are the same
+# fixed functions the dash form already carries - PC14_OSC32_IN, PH0_OSC_IN,
+# PA0_WKUP - just punctuated the other way. They are written out one by one for
+# the reason the paragraph above gives, and the corpus says that caution is
+# load-bearing rather than theoretical: one board labels its *nets* PA13_SWDIO,
+# PC0_MOTOR1, PB10_UART3_TX, PA4_CS_FLASH. Allowing any underscore tail would
+# read all 44 of them as pin names, which would take that board's entire net
+# map with it. So only the oscillator and wakeup qualifiers are admitted, and
+# `_C` keeps its place at the head of the list.
+#
+# The cost of not having them was one board's crystal: PH0_OSC_IN / PH1_OSC_OUT
+# did not parse, so the sheet had no PH0 or PH1 row, and PC14_OSC32_IN /
+# PC15_OSC32_OUT went the same way - taking with them the two net labels drawn
+# beside them, which on that board were the CAN controller's RX and standby
+# lines.
+#   ...and the parenthesised form, which is the other way ST's own names are
+# copied onto a symbol: PA13(JTMS/SWDIO)-DEBUG_JTMS-SWDIO, PA15(JTDI),
+# PH0-OSC_IN(PH0)-RCC_OSC_IN, PA0-WKUP(PA0), and PA11(PA9) where the bracket
+# holds a remap note rather than a function. None of it parsed, so those pins
+# were not rows at all - 77 words over 14 boards of this corpus, and the pins
+# went missing silently: absent from the map *and* from the unconnected list, so
+# nothing said the symbol had been read short. On the board this was found on it
+# cost PA13/PA14 (orphaning the SWCLK and SWDIO labels beside them) and PH0/PH1,
+# which is why the crystal could not be tied to the MCU and SYSTEM_HSE_MHZ had
+# to be given by hand.
+#
+# The closing bracket is optional because poppler splits the long form at the
+# slash inside it and returns 'PA14(JTCK' as a word of its own.
+#
+# What the bracket holds is deliberately *not* read as an alternate function:
+# only the slash-separated tail is, and group(2) still captures exactly that. A
+# fixed second function and a remap note are not AFs, and treating them as AFs
+# would put this symbol's word against the firmware tables in afs_support().
+PIN_RE = re.compile(
+    r"^(P[A-K]\d{1,2})"
+    r"(?:_(?:C|OSC(?:32)?_(?:IN|OUT)|WKUP\d?|WAKE_UP|BOOT0))?"
+    r"(?:\([^)]*\)?)?(?:-/?[A-Z0-9_()]+)*(?:/(.*))?$")
 
 # The same name written the other way round: function first, pin last. One
 # vendor's symbol does this down its right-hand column while the left column
@@ -319,8 +355,28 @@ def cluster(items: Sequence[Tuple[float, object]], tol: float) -> List[List[obje
 #
 # The designator letters are spelled out rather than [A-Z]{1,3}, which would
 # also swallow real alternate functions - G4 pin names carry COMP1_OUT.
+#
+# A BGA numbers its pins by ball coordinate rather than sequentially, so the
+# same token comes out as PIU40M11 - pin M11 of U40 - and the trailing \d{1,6}
+# form does not match it, because of the letter in the middle. That is not a
+# cosmetic miss. assemble_pin_names() stops at an annotation; one it does not
+# recognise it *absorbs*, which moves the name's right edge out to where the
+# annotation ends. _unfuse_annotation() then trims the text back and rescales
+# the box by character count, and on a proportional font with a long name that
+# estimate lands up to 5pt short - enough to break the x1 edge cluster in two.
+# A UFBGA176 board split its right-hand column that way: 13 of its rows formed
+# a rival edge, were glued to the supply box as a second part, and every net
+# level with them - five motors, the LED strip, the ADC nets, the gyro
+# interrupt - then paired with nothing while the board still reported 96%
+# agreement on what was left.
+#
+# Recognising the form here means the name is never fused, so its own exact box
+# survives and nothing has to be estimated. The shape is the one
+# FUSED_ANNOT_RE already trusts for the fused case, and it is held to a U
+# designator: only an IC is drawn with ball coordinates.
 ANNOT_RE = re.compile(
     r"^(?:PI|CO)(?:C|R|L|D|Q|U|Y|J|P|X|FB|TP|SW|RN|BT|VR)\d{1,6}$"
+    r"|^(?:PI|CO)U\d{1,4}[A-Z]\d{1,3}$"
     r"|^NL[A-Z0-9_]*$",
 )
 
@@ -992,6 +1048,52 @@ def find_net_labels(words: Sequence[Word], sym: Symbol) -> List[Word]:
     return drop_annotations(out, words)
 
 
+def _label_zone(cols: Sequence[Tuple[int, float, List[Word]]],
+                pitch: float) -> float:
+    """
+    How far out from the symbol this sheet's label columns run, as a `near`.
+
+    The zone used to be a single radius around the strongest column, and the
+    radius was `pitch * 3` - a horizontal distance taken from the *row* pitch,
+    which is a vertical quantity and has nothing to do with how far apart a
+    sheet stacks its label columns. On a UFBGA176 board that put a column of
+    eight net names - the ADC nets, both remaining chip selects, the beeper, the
+    gyro interrupt, the camera control - 15.83pt from the strongest one, against
+    a radius of 15.81pt. The whole column was discarded by two hundredths of a
+    point, and nothing said so.
+
+    A radius is the wrong shape anyway. Where each name is drawn against its own
+    wire the gutter is a *run* of near-parallel columns, and what ends the run is
+    the gap to the next component - whose own labels are often the same nets seen
+    at the far end, and must not be adopted, because they would bind to whatever
+    row they happen to sit level with. So walk outward from the strongest column
+    through label-bearing columns only and stop at the first real break. On that
+    board the run is 343.9 / 356.6 / 372.4 and the break to the microSD socket's
+    own labels at 454.9 is 48pt wide, so the socket stays out while the third
+    column comes in.
+
+    Columns *nearer* than the strongest are still kept unconditionally, as
+    before; only the outward reach is decided here.
+
+    `pitch * 6` is what the 153-schematic corpus chose. Measured against the
+    behaviour before this function existed, it binds 102 more nets across 22
+    boards for one extra mismatch and no board losing a correct one. Tolerances
+    derived from the label widths instead all did worse, and `pitch * 7` is
+    where it turns: nets start falling again and orphans jump by a fifth as
+    columns begin displacing each other.
+    """
+    best_edge = cols[0][1]
+    tol = pitch * 6
+    zone = best_edge
+    for edge in sorted({e for h, e, _ in cols if h}, reverse=True):
+        if edge >= zone:
+            continue
+        if zone - edge > tol:
+            break
+        zone = edge
+    return zone
+
+
 def _labels_for_part(words: Sequence[Word], part: SymbolPart,
                      pitch: float) -> List[Word]:
     pad = pitch * 2
@@ -1059,16 +1161,16 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
         # apart, and keeping only the strongest drops the rest - one board lost
         # its whole I2C2 bus that way while reporting nothing amiss.
         #
-        # So take the neighbouring columns too, but only the words in them that
-        # read like net names on their own. The strongest column is trusted
-        # wholesale because it has already proved itself as a column; the rest
-        # have not, and a BGA sheet fills that same space with ball coordinates
-        # (E10, B10) which would otherwise bind to whatever row they sit level
-        # with.
-        band = pitch * 3
+        # So take the neighbouring columns too, out to where the run of them
+        # ends - see _label_zone() - but only the words in them that read like
+        # net names on their own. The strongest column is trusted wholesale
+        # because it has already proved itself as a column; the rest have not,
+        # and a BGA sheet fills that same space with ball coordinates (E10, B10)
+        # which would otherwise bind to whatever row they sit level with.
+        zone_edge = _label_zone(cols, pitch)
         keep: Dict[int, Word] = {}
         for i, (hits, edge, col) in enumerate(cols):
-            if not hits or best_edge - edge > band:
+            if not hits or edge < zone_edge:
                 continue
             for w in col:
                 if i == 0 or NET_VOCAB.search(w.text):
@@ -1084,14 +1186,14 @@ def _labels_for_part(words: Sequence[Word], part: SymbolPart,
         # ADC_VBAT and a motor that way, and still reported 100% agreement on
         # what was left.
         #
-        # Bounded by the strongest column, which is what establishes where this
-        # sheet's labels live: between it and the symbol is the label zone by
-        # construction, and nothing further out is taken on its own. NET_VOCAB
-        # is what keeps ball coordinates and component values out - the same
-        # filter the neighbouring-column pass above already relies on.
+        # Bounded by the same zone the columns are, which is what establishes
+        # where this sheet's labels live: between it and the symbol is the label
+        # zone by construction, and nothing further out is taken on its own.
+        # NET_VOCAB is what keeps ball coordinates and component values out -
+        # the same filter the neighbouring-column pass above already relies on.
         for w in cands:
             if id(w) not in keep and NET_VOCAB.search(w.text) \
-                    and near([w]) > best_edge:
+                    and near([w]) > zone_edge:
                 keep[id(w)] = w
         out.extend(keep.values())
     return out
@@ -1119,7 +1221,14 @@ NET_VOCAB = re.compile(
     r"SDO\d|\bCS\b|"
     r"CS_|_CS|_NSS|_SS\b|EXTI|CLKIN|CLOCK|LED|BEEP|BUZZ|CAM|VTX|USER\d|PINIO|"
     r"PIO\d|ADC|"
-    r"BATT|CURR|VBAT|RSSI|SWDIO|SWCLK|BOOT|OTG",
+    r"BATT|CURR|VBAT|RSSI|SWDIO|SWCLK|BOOT|OTG|"
+    # classify() places USB_DETECT_PIN and SDCARD_DETECT_PIN from
+    # ^USB[-_]?DETECT$ / ^VBUS[-_]?DETECT$ and ^SD(?:CARD)?[-_]?DET(?:ECT)?$,
+    # and this gate knew neither spelling - only SDCARD/SDIO/SDMMC, which
+    # SD_DET does not contain. Both nets were then dropped out of every column
+    # but the strongest, so a board that draws them one column further out lost
+    # its card-detect and its USB-detect while reporting nothing missing.
+    r"DETECT|SD[-_]?DET\b",
     re.IGNORECASE,
 )
 
@@ -1176,6 +1285,20 @@ NET_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:GYRO|IMU|MPU|ICM)[-_]?\d?[-_]?CLK$"
                 r"|^CLK[-_]?(?:GYRO|IMU|MPU|ICM)[-_]?\d?$"), "timer"),
     (re.compile(r"^ADC[-_].*$|^.*[-_](?:BATT|VBAT|CURR|CURRENT|RSSI)$"), "adc"),
+    # CAN, spelled FDCAN on every ST sheet because that is what ST calls the
+    # peripheral. The index is optional: a part with one instance is drawn as
+    # FDCAN_TX, not FDCAN1_TX, and that is CAN1.
+    #
+    # Only TX and RX are gated here. The transceiver's standby line is a plain
+    # GPIO - canPinConfigure() takes any pin for it - so it constrains nothing
+    # and a rule claiming otherwise would reject boards for no reason. It still
+    # has a role in classify(); this is the half that has a firmware table
+    # behind it.
+    #
+    # CAN_H and CAN_L cannot match, and must not: they are the differential
+    # pair on the far side of the transceiver and never reach the MCU.
+    (re.compile(r"^(?:.*[-_])?(?:FD)?CAN(\d)?[-_]?TX$"), "can_tx"),
+    (re.compile(r"^(?:.*[-_])?(?:FD)?CAN(\d)?[-_]?RX$"), "can_rx"),
 ]
 
 
@@ -1188,6 +1311,25 @@ def net_requirement(net: str) -> Optional[Tuple[str, Optional[str]]]:
             idx = next((g for g in m.groups() if g), None)
             return kind, idx
     return None
+
+
+def requirement_answerable(caps: dict, kind: str) -> bool:
+    """
+    Can this capability data speak to `kind` at all?
+
+    Distinct from "does the pin support it". A table that is simply absent -
+    `can` is missing from anything seeded before CAN was harvested, and from
+    every target whose firmware builds no CAN driver - cannot answer either way,
+    and the honest response is to leave the net unchecked.
+
+    Answering True instead would be worse than cosmetic. `resolve` scores
+    candidate row offsets on the checkable nets, so a requirement that is
+    satisfied at *every* offset is not evidence: it cannot separate a good fit
+    from a bad one and only dilutes the ones that can.
+    """
+    if kind.startswith("can"):
+        return bool(caps.get("can"))
+    return True
 
 
 def afs_support(afs: Sequence[str], kind: str, idx: Optional[str]) -> Optional[bool]:
@@ -1223,6 +1365,9 @@ def afs_support(afs: Sequence[str], kind: str, idx: Optional[str]) -> Optional[b
         return has(r"SPI\d+SCK", r"I2S\d+CK")
     if kind == "spi_data":
         return has(r"SPI\d+MISO", r"SPI\d+MOSI", r"SPI\d+SD[IO]")
+    if kind in ("can_tx", "can_rx"):
+        d = kind.split("_")[1].upper()
+        return has(rf"FDCAN{idx or r'\d*'}{d}", rf"CAN{idx or r'\d*'}{d}")
     return None
 
 
@@ -1244,6 +1389,16 @@ def pin_supports(caps: dict, pin: str, kind: str, idx: Optional[str]) -> bool:
         return any(e["role"] == "sck" for e in caps["spi"].get(pin, []))
     if kind == "spi_data":
         return any(e["role"] in ("sdi", "sdo") for e in caps["spi"].get(pin, []))
+    if kind.startswith("can"):
+        # An absent table is handled by requirement_answerable() before this is
+        # reached, so a caller that gets here has one. Kept as a guard because
+        # this function is called directly elsewhere, and False would read as
+        # "the firmware rejects this pin" rather than "there is nothing to ask".
+        if not caps.get("can"):
+            return True
+        want = kind.split("_")[1]
+        return any(e["dir"] == want and (not idx or e["dev"] == f"CAN{idx}")
+                   for e in caps["can"].get(pin, []))
     return True
 
 
@@ -1529,7 +1684,7 @@ def _resolve_axis(sym: Symbol, labels: Sequence[Word], caps: dict,
                 onpower += 1
             req = net_requirement(w.text)
             ok, checked, sym_ok = True, False, None
-            if req and row.gpio:
+            if req and row.gpio and requirement_answerable(caps, req[0]):
                 checked = True
                 ok = pin_supports(caps, row.pin, req[0], req[1])
                 if not ok:

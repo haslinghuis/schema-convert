@@ -1,10 +1,10 @@
 {
  "schema": 1,
- "generated": "2026-08-08T15:44:28Z",
+ "generated": "2026-08-19T13:11:22Z",
  "firmware": {
-  "rev": "c4f9092c5",
-  "date": "2026-08-06",
-  "branch": "master"
+  "rev": "d6cf400a1",
+  "date": "2026-08-19",
+  "branch": "c562-fdcan"
  },
  "drivers": {
   "gyro": {
@@ -1349,6 +1349,7 @@
      "channel": "15"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -2425,6 +2426,7 @@
      "channel": "15"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -3062,6 +3064,104 @@
      "devices": "12",
      "channel": "13"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB7": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PC13": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD5": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PE1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PC14": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PE0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
@@ -3728,6 +3828,7 @@
      "channel": "13"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -4393,6 +4494,7 @@
      "channel": "13"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -5103,6 +5205,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 4,
     "I2C_PIN_SEL_MAX": 8,
@@ -5845,6 +5948,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 4,
     "I2C_PIN_SEL_MAX": 8,
@@ -6555,6 +6659,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 4,
     "I2C_PIN_SEL_MAX": 8,
@@ -7405,6 +7510,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 4,
     "I2C_PIN_SEL_MAX": 8,
@@ -8261,6 +8367,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 4,
     "I2C_PIN_SEL_MAX": 8,
@@ -8988,6 +9095,92 @@
      "devices": "4",
      "channel": "2"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PB4": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ],
+    "PB3": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 3,
@@ -10055,6 +10248,7 @@
      "channel": "8"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -11121,6 +11315,7 @@
      "channel": "8"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,
@@ -12136,6 +12331,92 @@
      "devices": "1",
      "channel": "2"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
@@ -13153,6 +13434,92 @@
      "channel": "2"
     }
    },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ]
+   },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
     "I2C_PIN_SEL_MAX": 8,
@@ -14168,6 +14535,92 @@
      "devices": "1",
      "channel": "2"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
@@ -15185,6 +15638,92 @@
      "channel": "2"
     }
    },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PA15": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PD13": [
+     {
+      "dev": "CAN3",
+      "dir": "tx"
+     }
+    ],
+    "PA8": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ],
+    "PD12": [
+     {
+      "dev": "CAN3",
+      "dir": "rx"
+     }
+    ]
+   },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
     "I2C_PIN_SEL_MAX": 8,
@@ -16200,6 +16739,68 @@
      "devices": "1",
      "channel": "2"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
@@ -17217,6 +17818,68 @@
      "channel": "2"
     }
    },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ]
+   },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
     "I2C_PIN_SEL_MAX": 8,
@@ -18232,6 +18895,68 @@
      "devices": "1",
      "channel": "2"
     }
+   },
+   "can": {
+    "PA12": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PB9": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PD1": [
+     {
+      "dev": "CAN1",
+      "dir": "tx"
+     }
+    ],
+    "PA11": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB8": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PD0": [
+     {
+      "dev": "CAN1",
+      "dir": "rx"
+     }
+    ],
+    "PB6": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB13": [
+     {
+      "dev": "CAN2",
+      "dir": "tx"
+     }
+    ],
+    "PB5": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ],
+    "PB12": [
+     {
+      "dev": "CAN2",
+      "dir": "rx"
+     }
+    ]
    },
    "limits": {
     "UARTHARDWARE_MAX_PINS": 6,
@@ -19379,6 +20104,7 @@
      "channel": "7"
     }
    },
+   "can": {},
    "limits": {
     "UARTHARDWARE_MAX_PINS": 5,
     "I2C_PIN_SEL_MAX": 8,

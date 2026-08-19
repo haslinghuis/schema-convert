@@ -58,7 +58,7 @@ is in each section below.
 | §1.13 | SPI buses still refused for a missing line | 17 buses on 13 |
 | §1.20 | Net labels genuinely lost, once echoes of mapped names stop being counted (§1.24) | 51 |
 | §1.14 | The VBAT divider drawn as one horizontal and one vertical resistor is not read | 1+ |
-| §3.8 | No golden board for a refused bus, and none at all for C5, N6 or AT32 | — |
+| §3.8 | No golden board for a refused bus, and none for N6 or AT32 (H5 BGA and C5 now covered — §1.30, §2.6) | — |
 | §3.7 | Wire tracing prototyped: settles local structure, does **not** yield a netlist on name-connected sheets | — |
 | §3.5 | Three sheets from one vendor name a part that does not exist (`STM32F743`, a typo for H743); detection correctly fails and the harness then forces the wrong family | 3 |
 | §4.8 | Timer rate clashes: reported and avoided where a legal alternative exists; 5 boards have none | 5 |
@@ -71,6 +71,7 @@ is in each section below.
 | §1.25 | (FINDINGS) A one-column part's side was an artefact of which cluster won; one board read at 40% — DONE | 1 board |
 | §1.26 | (FINDINGS) `net_requirement` knew fewer spellings than `classify`, starving the offset scorer — DONE | 2 boards |
 | §4.5 | `config.c` is neither emitted nor detected as needed | — |
+| §3.10 | **The capability data is seeded from an unmerged branch**, so CAN support is real here and not yet upstream | — |
 
 Not worth prioritising, and the reason matters:
 
@@ -599,6 +600,44 @@ must be smaller than the row pitch (2.88pt on this board, and a 6pt probe put
 the endpoint-on-segment rule does not merge crossings, but it will also miss a
 dotted one.
 
+### 3.10 The capability data is seeded from an unmerged branch
+
+`data/firmware.json` and `tests/fixtures/firmware-frozen.json` are both seeded
+from `c562-fdcan`, a working branch, and not from `master`. That branch is
+betaflight/betaflight#15588, which is what gives the C5 a CAN pin table at all.
+
+This is a deliberate, temporary and *visible* state, not a slip. It is visible
+because `firmware_provenance()` already handles it: every config generated from
+branch-seeded tables carries the branch name in its header and the sentence
+*"if this target relies on a pin only those tables carry, it will not work
+until that change has merged"*. The `c5-can` golden records the same rev.
+
+**What to do when #15588 merges**, in this order:
+
+```bash
+gh repo sync haslinghuis/betaflight --branch master   # if the fork has drifted
+python3 tests/check_seed_drift.py --firmware <tree>   # confirm it is on upstream
+python3 mcu-parser/seed_firmware.py                   # re-seed from master
+python3 tests/update_golden.py --reseed --firmware <tree>
+python3 -m unittest discover tests                    # every digest moves; expect it
+```
+
+Every golden moves, because the firmware revision is part of each generated
+header and so part of each `config_digest`. That is not a regression and the
+diff should show nothing else.
+
+**If #15588 is rejected or changed**, the C562's CAN pins have to come out
+again, and the honest form of that is the warning the generator already emits
+when no CAN table exists for a target — *"the sheet wires a CAN transceiver but
+Betaflight builds no CAN driver for STM32C562xx"* — rather than defines the
+build would ignore.
+
+The same applies to #15589 (camera control on C5/N6), with one difference: that
+one is a makefile change, nothing is harvested from it, so no seeded data
+depends on it. It only decides whether the emitted `CAMERA_CONTROL_PIN` links.
+
+---
+
 ### 3.8 The golden boards did not cover the families the corpus does — PART DONE
 
 A device was emitted pointing at an SPI bus the generator had, in the same run,
@@ -622,12 +661,23 @@ instead of repeating it by hand.
 
 Still open: no fixture exercises a *refused* bus, so the guard added with §1.12
 is covered only by the corpus. Adding a board that legitimately cannot resolve
-one would pin it. Beyond that the sample is still five families out of the
-eight the corpus contains — C5, N6 and AT32 have no golden board.
+one would pin it. Beyond that the sample is now six families out of the eight
+the corpus contains — N6 and AT32 still have no golden board.
+
+C5 is covered as of FINDINGS §2.6: `c5-can`, an STM32C562, which is also the
+only fixture with a CAN bus and so the only one that exercises the CAN path end
+to end. `FROZEN_TARGETS` grew an `STM32C562` with it.
 
 The general point, which is cheap and worth repeating: **an invariant that has
 never been observed to fail on the fixtures is not being tested by them.** Both
 of these were found by running the corpus, not the suite.
+
+FINDINGS §1.30 is the same lesson a third time, and the sharpest of the three:
+four faults that between them lost 17 of one board's 24 right-side nets, and
+when they were fixed **not one of the eight golden boards moved**. A change
+touching 24 corpus boards was invisible to the entire suite. That board is now
+`h5-bga-gutter`, the ninth golden and the first BGA whose pin annotations carry
+ball coordinates rather than pin numbers.
 
 ---
 

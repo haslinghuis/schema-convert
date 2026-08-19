@@ -217,6 +217,24 @@ ROLE_RULES: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"^(?:.*[-_])?RXD[-_]?(\d)$"), "uart_rx"),
     # The bus is settled by the pins, not the name, so the index is optional -
     # plenty of sheets just write SCL / SDA, or SCL1 / SDA1.
+    # CAN. ST calls the peripheral FDCAN and the sheets follow, so both
+    # spellings are read; a part with a single instance is drawn without an
+    # index and that is CAN1. The twin of these lives in netmap.NET_RULES -
+    # except for the standby line, which is deliberately only here.
+    #
+    # The transceiver's standby (or silent) input is a plain GPIO: firmware
+    # takes any pin for CANn_SILENT_PIN, so there is no table to check it
+    # against and no requirement to state. It is still worth emitting - without
+    # it the transceiver may sit in standby and the bus stays dead with a
+    # perfectly correct TX/RX pair.
+    #
+    # An enable line is NOT read as a standby line. They are not the same
+    # signal and their polarities differ by part; guessing would produce a
+    # define that silences the bus exactly when it should talk.
+    (re.compile(r"^(?:.*[-_])?(?:FD)?CAN(\d)?[-_]?TX$"), "can_tx"),
+    (re.compile(r"^(?:.*[-_])?(?:FD)?CAN(\d)?[-_]?RX$"), "can_rx"),
+    (re.compile(r"^(?:.*[-_])?(?:FD)?CAN(\d)?[-_](?:STBY|STB|SILENT)$"),
+     "can_silent"),
     (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SCL[-_]?(\d)?$"), "i2c_scl"),
     (re.compile(r"^(?:I2C[-_]?(\d)?[-_]?)?SDA[-_]?(\d)?$"), "i2c_sda"),
     # Both orderings appear in the wild: ADC-BATT and VBAT_ADC.
@@ -725,6 +743,45 @@ def infer_i2c_bus(caps: dict, scl: Optional[str], sda: Optional[str],
     dev = sorted(common)[0]
     if declared and f"I2C{declared}" != dev:
         notes.append(f"net names say I2C{declared} but the pins are {dev}")
+    return dev, notes
+
+
+def infer_can_bus(caps: dict, tx: Optional[str], rx: Optional[str],
+                  declared: Optional[str]) -> Tuple[Optional[str], List[str]]:
+    """
+    Which CAN instance a TX/RX pair belongs to, from the firmware table.
+
+    The same shape as infer_i2c_bus, and for the same reason: the index in a net
+    name says which nets belong together, not which peripheral they land on. The
+    pins decide, and where the two disagree the disagreement is reported rather
+    than silently resolved either way.
+
+    An empty `can` table is not a board fault. It means this target's firmware
+    builds no CAN driver at all - the family has no FDCAN, or ENABLE_CAN is off
+    for the variant - and the caller turns that into a refusal to emit, because
+    a CANn_TX_PIN a build ignores is worse than no define at all.
+    """
+    notes: List[str] = []
+    if not caps.get("can"):
+        return None, notes
+    sets = []
+    for pin, direction in ((tx, "tx"), (rx, "rx")):
+        if not pin:
+            continue
+        devs = {e["dev"] for e in caps["can"].get(pin, [])
+                if e["dir"] == direction}
+        if devs:
+            sets.append(devs)
+        else:
+            notes.append(f"{pin} has no CAN {direction} function")
+    if not sets:
+        return None, notes
+    common = set.intersection(*sets)
+    if not common:
+        return None, notes + ["CAN TX and RX are not on the same instance"]
+    dev = sorted(common)[0]
+    if declared and f"CAN{declared}" != dev:
+        notes.append(f"net names say CAN{declared} but the pins are {dev}")
     return dev, notes
 
 
@@ -2570,6 +2627,7 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
     motors: Dict[int, str] = {}
     servos: Dict[int, str] = {}
     uart: Dict[Tuple[str, str], str] = {}
+    can_named: Dict[str, Dict[str, str]] = defaultdict(dict)
     # One entry per bus the sheet names, keyed by the index in the net name.
     # A single {scl, sda} could only ever hold one bus, so a board with I2C1 and
     # I2C2 lost whichever came first and the survivor wore the wrong name.
@@ -2637,6 +2695,8 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             servos[int(idx or 1)] = l.pin
         elif role in ("uart_tx", "uart_rx"):
             uart[(idx or "1", role[-2:])] = l.pin
+        elif role in ("can_tx", "can_rx", "can_silent"):
+            can_named[idx or ""][role[4:]] = l.pin
         elif role in ("i2c_scl", "i2c_sda"):
             i2c_named[idx or ""][role[-3:]] = l.pin
         elif role == "spi_bus":
@@ -2884,6 +2944,52 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
             if pin:
                 cfg.define(f"UART{n}_{d.upper()}_PIN", pin)
     if uart:
+        cfg.add()
+
+    # ---- CAN -------------------------------------------------------------
+    #
+    # The instance comes from the pins through the firmware map, exactly as it
+    # does for I2C and SPI; the index in the net name only groups the nets.
+    #
+    # Nothing is emitted where firmware has no CAN table for this target. That
+    # is the §1 rule doing its job rather than a gap: CANn_TX_PIN on a build
+    # whose ENABLE_CAN is 0 compiles perfectly and does nothing at all, so the
+    # board would look finished and the bus would be dead. The refusal is
+    # reported as a warning naming the pins, which is what a firmware PR needs.
+    for declared, pins in sorted(can_named.items()):
+        tx, rx, silent = pins.get("tx"), pins.get("rx"), pins.get("silent")
+        dev, notes = infer_can_bus(caps, tx, rx, declared or None)
+        cfg.notes.extend(notes)
+        if not dev:
+            drawn = ", ".join(f"{r.upper()} on {pin}"
+                              for r, pin in (("tx", tx), ("rx", rx),
+                                             ("silent", silent)) if pin)
+            if not caps.get("can"):
+                cfg.warnings.append(
+                    f"the sheet wires a CAN transceiver ({drawn}) but Betaflight "
+                    f"builds no CAN driver for {caps['mcu']}, so no CANn_*_PIN "
+                    "is emitted: the defines would compile and be ignored. This "
+                    "needs firmware support before the board can use the bus")
+            else:
+                cfg.warnings.append(
+                    f"the sheet wires a CAN transceiver ({drawn}) but the pins do "
+                    "not form a CAN instance in Betaflight's table, so nothing is "
+                    "emitted for it")
+            continue
+        n = dev[3:]
+        if tx:
+            cfg.define(f"CAN{n}_TX_PIN", tx)
+        if rx:
+            cfg.define(f"CAN{n}_RX_PIN", rx)
+        if silent:
+            # A plain GPIO - firmware takes any pin - so it is emitted whenever
+            # the sheet draws one, with no table to check it against.
+            cfg.define(f"CAN{n}_SILENT_PIN", silent)
+        if not (tx and rx):
+            cfg.warnings.append(
+                f"{dev} is emitted with only "
+                f"{'TX' if tx else 'RX'}; canInit() needs both pins configured "
+                "and will refuse the device until the other is supplied")
         cfg.add()
 
     # ---- I2C -------------------------------------------------------------
@@ -3327,6 +3433,21 @@ def build(pdf: Path, board: str, manufacturer: str, target: Optional[str],
         cfg.add()
 
     if "beeper" in simple:
+        # USE_BEEPER is not a firmware default. Every STM32 target.h defines it
+        # except the three C5s and F446, and common_post.h answers its absence
+        # with `#undef BEEPER_PIN` - so on those parts a config that names the
+        # pin without the feature does not merely lose its beeper, it fails to
+        # compile, because the TIMER_PIN_MAP row emitted beside it then expands
+        # IO_TAG() on an undefined symbol.
+        #
+        # That is the §3 shape again: the boards this generator had produced
+        # were all F7/H7, where target.h supplies the define, so the omission
+        # was invisible until a C562 board was converted.
+        #
+        # Defining it here rather than leaving it to the platform is also what
+        # the hand-written configs do - nine shipped ones carry it - and a
+        # second identical #define where target.h already has one is benign.
+        cfg.define("USE_BEEPER", width=29)
         # An NPN/transistor low-side driver sounds when the pin is driven high,
         # which is what BEEPER_INVERTED selects. Bare open-drain buzzers are the
         # exception and would need this removed. 554 of the 582 configs in the

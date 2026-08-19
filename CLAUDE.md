@@ -170,6 +170,17 @@ Both are in sync as of `c18421eb5`, and `tests/check_seed_drift.py --firmware
 fork has drifted again, `gh repo sync haslinghuis/betaflight --branch master`
 then `git pull --ff-only`.
 
+**Right now the seed is deliberately *not* from master.** `data/firmware.json`
+and `tests/fixtures/firmware-frozen.json` both come from the `c562-fdcan`
+branch, which is betaflight/betaflight#15588 - the C5 CAN pin tables. ROADMAP
+§3.10 has the reseed procedure for when it merges, and the generated headers say
+so on every config. Do not "fix" the branch name back to master without
+re-seeding: that silently removes CAN from every board that has it.
+
+A branch seed is legitimate when the PR it names is open and the header says so.
+It is a leak of a different kind if it goes unrecorded, which is why the branch
+is named in three places rather than one.
+
 Only the tree under `../betaflight/master/` is safe to fast-forward. The others
 carry uncommitted work on feature branches — `test-h5-i2c3` had ten dirty files
 throughout this — and must not be touched.

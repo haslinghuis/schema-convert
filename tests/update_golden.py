@@ -47,8 +47,8 @@ import support  # noqa: E402
 # One target per family the fixture boards use. A board whose family is absent
 # from the frozen map fails MCU detection outright rather than skipping, so this
 # has to grow alongside tests/fixtures/boards.json.
-FROZEN_TARGETS = ("STM32F405", "STM32F722", "STM32G474", "STM32H562",
-                  "STM32H743")
+FROZEN_TARGETS = ("STM32C562", "STM32F405", "STM32F722", "STM32G474",
+                  "STM32H562", "STM32H743")
 
 
 def refresh(board: dict) -> dict:

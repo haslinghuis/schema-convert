@@ -1615,3 +1615,251 @@ test fixtures and the non-schematic PDFs that yield nothing; the ROADMAP's
 instrument counts a narrower set. **The delta is the measurement** — both
 columns here were produced by the same script minutes apart, which is the only
 property shape 6 needs.
+
+---
+
+### 1.30 The fix for §1.20 carried its own defect, and a BGA found it — FIXED
+
+A UFBGA176 H5 board read **7 of the 24 net labels** drawn down the right-hand
+side of its MCU symbol, at 96% agreement, with nine of the missing ones reported
+as "matched no pin row" and the other eight not reported at all. Five motors,
+the LED strip, all three ADC nets, the beeper, the gyro interrupt, two of three
+chip selects, card-detect, USB-detect and camera-control were gone. It also
+invented a net: `LED`, the part label of the LED diode D8, bound to `PI8`.
+
+Four independent faults, and they are worth separating because only one of them
+is geometry.
+
+**Fault 1 — §1.20's own fix.** That entry found fused annotations splitting an
+edge and fixed it by trimming the token and rescaling the box *in proportion to
+how much of the text the name is*, calling the error "a fraction of a character
+against a 10pt displacement". On a BGA it is not. Altium numbers a BGA's pins by
+ball coordinate, so the token is `PIU40M11` — pin M11 of U40 — and the letter in
+the middle means `ANNOT_RE` never matched it. `assemble_pin_names()` stops at an
+annotation it recognises and *absorbs* one it does not, so these were fused by
+the very function meant to keep them apart, and then un-fused by proportion:
+
+```
+PH10-TIM8_CH3   raw x1 = 315.93     after proportional un-fusing = 310.92
+```
+
+5pt of error on a 13-character name, against a `cluster()` tolerance of 1pt.
+The right column's x1 spread became 310.9–316.5, `cluster` split it at the 1.34pt
+gap, and the 13 rows below the split were peeled off as a rival edge, glued to
+the supply box as a **second part with `left_edge` 662 and `right_edge` 314**,
+and taken out of the main edge. Labels level with those rows then had no row to
+pair with. `PE11`, `PE13`, `PH6`, `PH10`, `PI2`, `PA0`, `PA1`, `PF11` and `PD4`
+all went that way.
+
+The fix is not a better approximation. It is to teach `ANNOT_RE` the ball-
+coordinate form — the shape `FUSED_ANNOT_RE` already trusted — so the name is
+never fused and its own exact box survives. Nothing is estimated. **A repair
+that reconstructs a measurement is worse than one that stops destroying it.**
+
+**Fault 2 — a horizontal distance taken from a vertical pitch.** The label zone
+was a single radius of `pitch * 3` around the strongest column. `pitch` is the
+*row* pitch. This sheet stacks three staggered label columns at 343.9 / 356.6 /
+372.4, and the third sat **15.83pt** from the strongest against a radius of
+**15.81pt** — a column of eight real net names discarded by two hundredths of a
+point, silently. A radius is also the wrong shape: what ends a gutter is the gap
+to the next component, whose labels are often the same nets seen at the far end
+and must *not* be adopted. `_label_zone()` now walks outward from the strongest
+column through label-bearing columns and stops at the first real break, which
+takes in the third column and leaves the microSD socket's own labels 48pt
+further out where they belong.
+
+**Fault 3 — shape 4, again.** `USB_DETECT` and `SD_DET` were collected into a
+column and then dropped, because `NET_VOCAB` knew `SDCARD`, `SDIO` and `SDMMC`
+but not `DETECT` and not `SD_DET`, while `classify()` has always placed both
+from `^USB[-_]?DETECT$` and `^SD(?:CARD)?[-_]?DET(?:ECT)?$`. Two gates in
+series, two vocabularies. There is a test asserting these agree and it did not
+catch this, because it checks the spellings `classify` knows against
+`net_requirement`, not against `NET_VOCAB`.
+
+**Fault 4 — the parenthesised pin name.** `PA13(JTMS/SWDIO)-DEBUG_JTMS-SWDIO`
+matched no rule, so it was not a row, so `SWCLK` and `SWDIO` orphaned. **77
+words over 14 boards** of this corpus, in six spellings — `PA15(JTDI)`,
+`PA0-WKUP(PA0)`, `PH0-OSC_IN(PH0)-RCC_OSC_IN`, `PA11(PA9)` where the bracket is
+a remap note, and `PA14(JTCK` where poppler split inside the bracket. Those pins
+were missing from the map *and* from the unconnected list, so nothing said the
+symbol had been read short. On this board it also cost `PH0`/`PH1`, which is why
+`SYSTEM_HSE_MHZ` had to be supplied by hand — with the rows present the tool now
+explains itself properly instead: *"every crystal with a frequency is on another
+sheet"*. What the bracket holds is deliberately not read as an alternate
+function; only the slash-separated tail is, as before.
+
+### What the corpus said
+
+153 schematics, 136 of which yield a symbol, before and after, per shape 6:
+
+| | before | after |
+|---|---|---|
+| MCU pins read | 8716 | **8788** |
+| symbol rows | 10420 | **10486** |
+| net labels collected | 6200 | **6379** |
+| nets bound to a pin | 5190 | **5323** |
+| of those, agreeing | 5152 | **5284** |
+| disagreeing | 38 | 39 |
+| orphaned labels | 378 | 390 |
+
+**24 boards improved and two moved the other way**, both checked:
+
+- The motivating board: 7 right-side nets → **24, and no orphans at all**. The
+  false `LED`/`PI8` net is gone with them, because D8's part label now falls
+  outside the zone. Unassisted it emits 60 defines where it emitted 32, and it
+  now resolves `MAX7456_SPI_INSTANCE` and its chip select on its own. The one
+  extra disagreement in the table is this board's `UART4_TX` on `PH13`, which is
+  a *correct* read of a pin Betaflight's H5 tables do not carry.
+- One H743 lost a net: a `BOOT0` label that had been binding to `PE10` while the
+  symbol carried a real `BOOT0` row. A deleted false binding, which the metric
+  can only show as a loss. That board reads badly either way — 5 labels of 36,
+  31 orphans, all of them component pin names.
+
+The multiplier in fault 2 was chosen by the corpus, not by taste: `pitch * 7` is
+where it turns over — nets start falling again and orphans jump by a fifth as
+columns begin displacing each other — and every tolerance derived from the label
+widths instead did worse than `pitch * 6`.
+
+None of the eight golden boards moved, which is the uncomfortable part: a change
+this size touching 24 boards should have been visible to them and was not. The
+motivating board is now golden number nine, `h5-bga-gutter`, recording 138 rows,
+50 labels and zero orphans.
+
+---
+
+## Found by converting one new board
+
+The board is an STM32C562 in LQFP64 — the first C5 to be converted, and the
+first board of any family with a CAN transceiver on it. It read at 100%
+agreement on the first run, which is exactly the condition under which the
+three faults below stayed invisible: none of them lowers the score, and two of
+them cannot, because what they drop is never counted in the first place.
+
+### 1.31 ST's pin qualifiers, joined with an underscore instead of a dash — FIXED
+
+`PIN_RE` had learned the dash form (`PC14-OSC32_IN`), the bracket form
+(`PH0-OSC_IN(PH0)`, §1.30) and the single `_C` suffix of the H7 dual-pad pins.
+This sheet writes the same qualifiers the third way — `PC14_OSC32_IN`,
+`PC15_OSC32_OUT`, `PH0_OSC_IN`, `PH1_OSC_OUT` — and not one of them parsed, so
+the symbol had no such rows. Same shape as §1.30: the pins were missing from
+the map *and* from the unconnected list, so nothing said the symbol had been
+read short.
+
+What it cost here was not the oscillator pins, which nothing routes. It was the
+two net labels drawn level with `PC14` and `PC15` — the CAN controller's **RX
+and standby lines** — which had no row to bind to and were reported only as two
+orphans among many.
+
+The fix is deliberately a whitelist, and the corpus says that caution is
+load-bearing rather than theoretical. Allowing any underscore tail would have
+been one character of regex; it would also have read `PA13_SWDIO`,
+`PC0_MOTOR1`, `PB10_UART3_TX` and `PA4_CS_FLASH` as pin names, and one board
+labels **44 of its nets** that way. Its entire net map would have gone with
+them. So only the oscillator and wakeup qualifiers are admitted, and `_C` keeps
+its place at the head of the list.
+
+`WKUP` and `WAKE_UP` came along for the ride and paid for themselves on three
+unrelated boards — two H743 and an F405 — each of which gained a pin and lost
+an orphan, one of them gaining a checked net that agrees.
+
+### 2.6 CAN was never read at all — FIXED
+
+Neither gate knew the word. `netmap.NET_RULES` had no CAN requirement, so a
+`FDCAN_TX` net constrained nothing and contributed nothing to the offset fit;
+`genconfig.classify` had no CAN role, so the net reached the "no config.h role"
+list and the pin was silently not emitted. `seed_firmware.py` did not harvest
+`canHardware[]`, so there was no table to check against even if it had.
+
+The interesting part is the size of it. This was filed as a one-board feature
+and it is not: **six H7 boards already in the corpus wire a CAN transceiver**,
+and every one of them had been converted with its CAN pins dropped in silence.
+One of them, an H743, now emits a complete `CAN1_TX_PIN` / `CAN1_RX_PIN` /
+`CAN1_SILENT_PIN` where before it emitted nothing.
+
+Three details were worth getting right rather than approximating:
+
+- **The instance comes from the pins**, through the firmware map, exactly as it
+  does for I2C and SPI. The index in a net name only says which nets belong
+  together — a part with one FDCAN is drawn `FDCAN_TX`, not `FDCAN1_TX`.
+- **The standby line is not gated.** `canPinConfigure()` takes any pin for
+  `CANn_SILENT_PIN` — it is a plain GPIO — so there is no table to check it
+  against and a rule claiming otherwise would reject correct boards. It is
+  classified but not made checkable. An *enable* line is deliberately not read
+  as a standby line: they are not the same signal and their polarities differ
+  by part.
+- **An absent table means unanswerable, not satisfied.** Capability data seeded
+  before CAN was harvested has no `can` key, and neither does any target whose
+  firmware builds no CAN driver. Answering "supported" there would be worse
+  than cosmetic: `resolve` scores candidate row offsets on the checkable nets,
+  so a requirement satisfied at *every* offset is not evidence — it cannot
+  separate a good fit from a bad one and only dilutes the ones that can. The
+  first cut of this got it wrong and the golden diff showed it.
+
+### 4.15 A beeper pin without the feature that owns it — FIXED
+
+The generator emitted `BEEPER_PIN`, `BEEPER_INVERTED` and the beeper's
+`TIMER_PIN_MAP` row, and never `USE_BEEPER`. That define is not a firmware
+default: every STM32 `target.h` carries it **except the three C5s and F446**,
+and `common_post.h` answers its absence with `#undef BEEPER_PIN`. So on those
+parts the config does not merely lose its beeper — it fails to compile, because
+the `TIMER_PIN_MAP` row emitted beside it then expands `IO_TAG()` on a symbol
+that no longer exists.
+
+This is §3 of `CLAUDE.md` almost verbatim, and it is the second time: a
+`TIMER_PIN_MAPPING` row naming a define the file does not make. The reason it
+survived is that every board converted until now was F7 or H7, where `target.h`
+supplies the define and the omission is invisible. The tests could not have
+caught it either — they check that a timer row names a define the *file* makes,
+and the file did make it; what removes it is firmware, three headers later.
+
+### 4.16 Two firmware gaps that only a build could find
+
+Both were found by building the generated config rather than by reading
+anything, and both are now PRs upstream.
+
+**CAN was unreachable on every C5.** `ENABLE_CAN` was gated on `STM32C593xx`,
+and no C593 target exists — so `can_stm32c5xx.c` compiled to nothing on both C5
+targets in the tree. The C562 has an FDCAN1 (its datasheet's §3.27; `FDCAN1`
+and `FDCAN1_IT0/IT1_IRQn` are both in `stm32c562xx.h`) and this board uses it.
+The pin lists also had to be split by variant: C593 has two instances and C562
+has one, so `PB5`/`PB6`/`PB12`/`PB13` are FDCAN2 lines on the first and FDCAN1
+lines on the second, and one family-wide list would bind four pins to the wrong
+instance. betaflight/betaflight#15588.
+
+**Camera control does not link on C5 or N6.** `STM32_COMMON.mk` builds
+`common/stm32/camera_control.c` for every STM32, and that file calls
+`cameraControlHardwarePwmInit()`, which lives in a per-family file that F4, F7,
+G4, H5 and H7 each list and C5 and N6 do not. Nothing catches it until a config
+defines `CAMERA_CONTROL_PIN`, because `common_post.h` only sets
+`USE_CAMERA_CONTROL` when that pin and `USE_OSD_SD` are both present — so CI is
+green and the first board to draw a camera-control line fails at link.
+betaflight/betaflight#15589.
+
+Neither is a defect in this tool, and both are worth recording here anyway,
+because in both cases the tool's output was correct and the build was the only
+thing that said so. §2 of `CLAUDE.md` says a green build proves almost nothing;
+the converse also holds, and a build that fails is the cheapest firmware audit
+available.
+
+### What the corpus said
+
+154 schematics, 123 of which yield a bound pin map. Measured before and after
+on the same corpus, from `netmap`'s own report:
+
+| | before | after |
+|---|---|---|
+| MCU pins read | 9435 | **9442** |
+| rows bound to a net | 5374 | **5379** |
+| nets checked against firmware | 2827 | **2840** |
+| of those, agreeing | 2788 | **2801** |
+| disagreeing | 39 | 39 |
+| orphaned labels | 393 | **388** |
+
+**Nine boards improved and none moved the other way.** Every one of the 13
+newly checked nets agrees — the CAN pins six H7 boards and this C562 were
+already drawing were all correct, and all previously unread. Not one board lost
+a row, a checked net or an agreement.
+
+The new board is golden number ten, `c5-can`, at 26/26 agreement and 63 symbol
+rows. It is the first C5 golden, which closes half of ROADMAP §3.8 — that gap
+listed C5, N6 and AT32 as having no golden board at all.

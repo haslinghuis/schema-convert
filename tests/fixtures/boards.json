@@ -26,9 +26,9 @@
   "                          emitted"
  ],
  "recorded_with": {
-  "frozen_firmware_rev": "2d0f789d1",
-  "frozen_firmware_branch": "master",
-  "tool_rev": "1b004b802"
+  "frozen_firmware_rev": "d6cf400a1",
+  "frozen_firmware_branch": "c562-fdcan",
+  "tool_rev": "0a00d71e3"
  },
  "boards": [
   {
@@ -55,7 +55,7 @@
    "warnings": 6,
    "notes": 11,
    "netmap_digest": "d46b96eb33589a849c617f85cf530775f3016c42c2dce8f0252867884165ffa4",
-   "config_digest": "2c2308f65240001ea917e4e5d8f69330bebac64386ffdbf064899e714affecdc",
+   "config_digest": "f0b82bfec2d9b08d4f34df0881ddb27bf0d36fd8fc782b543a5084adda1c02e6",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -90,7 +90,7 @@
    "warnings": 10,
    "notes": 10,
    "netmap_digest": "1fe2b10b24fbf9865d96517375444ca0f71e2ff2109a647cc37a8826751afc26",
-   "config_digest": "245759bdd3731f27708de32e8a434198e09c36c999fee9517cb3b3679dcbf0c8",
+   "config_digest": "a0a3d5c36d29b8f1e6e3103ccc13fe508c6826b7c64d6d6e04f03ed1a51b6c13",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -125,7 +125,7 @@
    "warnings": 6,
    "notes": 11,
    "netmap_digest": "36b20591e52e3f5e8f7b89536af30407eb517a171fd636fda67fb4e5211c0589",
-   "config_digest": "4c952bf77b80b2bb139c312a868799209b6d7c48554ef32eb66e164bd5bae1a7",
+   "config_digest": "ac37e97e0d3a1bfcfee5fe7487ac2835bc458044414f6dc56b9d05ef585c1ff1",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -160,7 +160,7 @@
    "warnings": 8,
    "notes": 17,
    "netmap_digest": "33d41fb4e1987eb12f0af46ab01994a5cd6ef07c11e183b3f8f87a5421a0bd00",
-   "config_digest": "d2c175639eeccf8ecf9ddefda1f253a7f3342f3854e3350fb9b6fa83da5bcb17",
+   "config_digest": "809cf9e45cdd38993122d87cc6a04ff33029dbb31231fa459a9e6fe0495d2b57",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -199,7 +199,7 @@
    "warnings": 10,
    "notes": 12,
    "netmap_digest": "8a941806809289352133a26bcd436162f3752fe6846976c721a0a8c78efa93f5",
-   "config_digest": "b6846a93074858be0456bad9cfb730134be86248d62efb5011a8b0bf7259538e",
+   "config_digest": "c199ad77cf8a64d11f5f4583db02317274f5c56284f0d5fc9f10b890a0d630a2",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -220,8 +220,8 @@
    "net_labels": 82,
    "offset": 0.6,
    "agreement": [
-    32,
-    32
+    34,
+    34
    ],
    "orphan_labels": 1,
    "nets_on_power_pins": 2,
@@ -229,12 +229,12 @@
    "firmware_gaps": 0,
    "schematic_errors": 0,
    "uncorroborated_mismatches": 0,
-   "config_defines": 93,
+   "config_defines": 95,
    "timer_rows": 11,
    "warnings": 13,
    "notes": 19,
-   "netmap_digest": "6b845f6686bb3a1f86afe18ca5679d5e35277676aa9213983a2992189d2048dc",
-   "config_digest": "ff0d8fc08faa1ca2367de91b90ab1923b3b46d94b13995b7f8ad92a5092c1daa",
+   "netmap_digest": "d39383c1947490e0768bd658513e364fab9e9ab41c9f60d08bb955ff160db7ec",
+   "config_digest": "37d4b9d65b6a83528bcbb238e943ed552a92d973b2d0fd72976866ec11bee439",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -271,7 +271,7 @@
    "warnings": 8,
    "notes": 23,
    "netmap_digest": "c9e02b250482e1453073d861fe83f092a46d1fa5f39bdc2183d08f5c49a1b6af",
-   "config_digest": "01e6c9135caee10db5732dba4ffe42db4018f5fb329f7b3484cdc583178c0206",
+   "config_digest": "32a7f99bfdba0ae220411cb6cdbffc95a4220a3866e93097ab7be7fadb941811",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -306,7 +306,7 @@
    "warnings": 7,
    "notes": 21,
    "netmap_digest": "2de0726731ff7cc4e6ee1a441ad30488ff85c17069c84c68996f6c165e753574",
-   "config_digest": "583f8df1ee7b974f2f931ea93592cb017548a860cd32ae0ae5bdab644bee9be7",
+   "config_digest": "5a8a40be529f362dcb193a7fe9e0d6460d26cd627917f7c1567162a807bbdf63",
    "known_defects": {
     "dangling_timer_labels": [],
     "incomplete_spi_buses": [],
@@ -315,6 +315,80 @@
     "timer_rate_class_clashes": [],
     "unaccounted_roles": [
      "unclassified"
+    ],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "h5-bga-gutter",
+   "sha256": "0bc9e1f069218eb459a46d6e8b928e72432dd6113252045347c2afcb98550f80",
+   "note": "UFBGA176. Pin annotations carry ball coordinates rather than pin numbers, and the right gutter is three staggered label columns. Guards FINDINGS 1.30: the four faults that between them lost 17 of this sheet's 24 right-side nets, including the parenthesised pin-name form that yielded no row at all.",
+   "target": "STM32H562",
+   "symbol_rows": 138,
+   "pitch": 5.27,
+   "net_labels": 50,
+   "offset": 0.4392,
+   "agreement": [
+    25,
+    27
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 87,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 2,
+   "config_defines": 52,
+   "timer_rows": 9,
+   "warnings": 14,
+   "notes": 15,
+   "netmap_digest": "7e70e79da4b07f903f3ef6a3db6570c4675154b1775ea2420c63e2042538e598",
+   "config_digest": "e9198e7d673976da7407396f6926fbb7f2357b8d8dc939b2bc6863c537a2997a",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "timer_channel_collisions": [],
+    "timer_rate_class_clashes": [],
+    "unaccounted_roles": [
+     "unclassified"
+    ],
+    "unvalidated_pin_defines": []
+   }
+  },
+  {
+   "id": "c5-can",
+   "sha256": "499405a95d12b1fa79011713346c9516056821d8bc1d3635415edda776e8bd87",
+   "note": "STM32C5, and the first board with a CAN transceiver: FDCAN TX/RX/standby, plus underscore-joined OSC pin names",
+   "target": "STM32C562",
+   "symbol_rows": 63,
+   "pitch": 5.27,
+   "net_labels": 44,
+   "offset": 0.4392,
+   "agreement": [
+    26,
+    26
+   ],
+   "orphan_labels": 0,
+   "nets_on_power_pins": 0,
+   "unmapped_pins": 8,
+   "firmware_gaps": 0,
+   "schematic_errors": 0,
+   "uncorroborated_mismatches": 0,
+   "config_defines": 50,
+   "timer_rows": 7,
+   "warnings": 12,
+   "notes": 10,
+   "netmap_digest": "25868b6cc3dfab853aa8bbef709112202b4ff29e0a3f0deff6f6831e378a8ea7",
+   "config_digest": "114742a5023dd95212aa8b9a662e05c34751143e024d9354eda9b8dc6d36c10c",
+   "known_defects": {
+    "dangling_timer_labels": [],
+    "incomplete_spi_buses": [],
+    "instances_without_pins": [],
+    "timer_channel_collisions": [],
+    "timer_rate_class_clashes": [],
+    "unaccounted_roles": [
+     "spi_bus"
     ],
     "unvalidated_pin_defines": []
    }

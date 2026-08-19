@@ -507,6 +507,100 @@ def parse_i2c(fw: Path, family: str, defs: set) -> Dict[str, List[Dict[str, str]
     return out
 
 
+_SDK_CACHE: Dict[str, set] = {}
+
+
+def _fdcan_instances(fw: Path, mcu: str) -> set:
+    """
+    Which FDCANn macros the CMSIS header for this exact part defines.
+
+    The CAN tables guard their second and third rows on `defined(FDCAN2)` /
+    `defined(FDCAN3)`, which is an SDK peripheral macro rather than one of
+    Betaflight's own - so guards_hold() has no opinion on it and would drop
+    those rows for every part, H743 and C593 included.
+
+    The truthful answer is per variant and lives in the device header: H723
+    defines FDCAN1/2/3, H743 stops at FDCAN2, C562 has only FDCAN1. Read it
+    there rather than inferring an instance count from the family.
+
+    Only the FDCAN names are taken. Admitting every macro the header defines
+    would satisfy unrelated guards elsewhere by accident, and the CAN tables
+    test nothing else.
+    """
+    if mcu in _SDK_CACHE:
+        return _SDK_CACHE[mcu]
+    found: set = set()
+    for hdr in fw.glob(f"lib/**/{mcu.lower()}.h"):
+        found |= set(re.findall(r"^#\s*define\s+(FDCAN\d+)\b",
+                                hdr.read_text(errors="replace"), re.M))
+        break
+    _SDK_CACHE[mcu] = found
+    return found
+
+
+def parse_can(fw: Path, family: str, defs: set, platform: str, mcu: str
+              ) -> Dict[str, List[Dict[str, str]]]:
+    """
+    pin -> [{dev: 'CAN1', dir: 'tx'|'rx'}, ...], or {} where CAN is not built.
+
+    Two gates decide this, and only reading both gives the right answer:
+
+      * `ENABLE_CAN`, which is per *variant* rather than per family. Every C5
+        shares can_stm32c5xx.c, but the C591 has no FDCAN at all, so the whole
+        file sits behind `#if ENABLE_CAN` and platform.h turns that on only for
+        the parts that carry the peripheral. Reading the table without the gate
+        would hand C591 a CAN pin map for hardware it does not have.
+      * the per-row guards inside the table, which is where `#if defined(FDCAN2)`
+        removes the second instance on single-FDCAN parts.
+
+    The variant split is real in the pin lists too, not just in the instance
+    count: a pin that is an FDCAN2 line on a two-instance part is an FDCAN1 line
+    on a one-instance one. Since the cache is already keyed by family|mcu, each
+    variant gets its own harvest and that resolves itself.
+
+    `.silentPins` is deliberately not looked for. The standby/silent line is a
+    plain GPIO in canPinConfigure() - "any pin is valid" - so there is no table
+    to harvest and no pin to check a schematic against.
+    """
+    ph = fw / f"src/platform/{platform}/include/platform/platform.h"
+    if not ph.exists():
+        return {}
+    if _define_value(ph.read_text(errors="replace"), "ENABLE_CAN", defs) != 1:
+        return {}
+
+    src = _platform_file(fw, family, "can_{lower}.c")
+    if not src:
+        return {}
+
+    # ENABLE_CAN has just been resolved to 1, and the rows themselves sit under
+    # it, so it is a fact for this target and belongs in the guard vocabulary
+    # alongside the FDCANn instances the silicon actually carries.
+    defs = defs | {"ENABLE_CAN"} | _fdcan_instances(fw, mcu)
+
+    out: Dict[str, List[Dict[str, str]]] = {}
+    dev: Optional[str] = None
+    direction: Optional[str] = None
+    for line, guards in GuardScanner(src.read_text(errors="replace")):
+        m = re.search(r"\.device\s*=\s*CANDEV_(\d+)", line)
+        if m:
+            dev, direction = f"CAN{m.group(1)}", None
+            continue
+        if ".rxPins" in line:
+            direction = "rx"
+        elif ".txPins" in line:
+            direction = "tx"
+        elif re.match(r"\.\w+\s*=", line) and "Pins" not in line:
+            direction = None
+        if not (dev and direction):
+            continue
+        holds, _ = guards_hold(guards, defs)
+        if not holds:
+            continue
+        for pin in re.findall(rf"DEFIO_TAG_E\(\s*({PIN_RE})\s*\)", line):
+            out.setdefault(pin, []).append({"dev": dev, "dir": direction})
+    return out
+
+
 def parse_adc(fw: Path, family: str, defs: set) -> Dict[str, Dict[str, str]]:
     """pin -> {devices: '123', channel: '11'}"""
     src = _platform_file(fw, family, "adc_{lower}.c")
@@ -774,6 +868,7 @@ def build(fw: Path, quiet: bool = False) -> dict:
                 "spi": parse_spi(fw, family, defs),
                 "i2c": parse_i2c(fw, family, defs),
                 "adc": parse_adc(fw, family, defs),
+                "can": parse_can(fw, family, defs, spec["dir"], info["mcu"]),
                 "limits": parse_limits(fw, defs, spec["dir"]),
             }
             if not quiet:
@@ -786,6 +881,7 @@ def build(fw: Path, quiet: bool = False) -> dict:
                 print(f"  {family:9} {info['mcu']:14} "
                       f"timers={len(c['timers']):3}  uart={len(c['uart']):3}  "
                       f"spi={len(c['spi']):3}  i2c={len(c['i2c']):2}  adc={len(c['adc']):3}"
+                      f"  can={len(c['can']):2}"
                       f"  {shown}")
         per_target[name] = {**info, **cache[key],
                             "sdio": parse_sdio(fw, name, info)}
