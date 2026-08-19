@@ -6,6 +6,7 @@ import { writeTextFile } from "@tauri-apps/plugin-fs";
 import ReportPanel from "./components/ReportPanel.vue";
 import logo from "./assets/bf-logo.svg";
 import type { Report } from "./types";
+import { reportMarkdown } from "./report";
 
 interface Environment {
   bundled: boolean;
@@ -212,6 +213,32 @@ async function saveConfig() {
     filters: [{ name: "Betaflight target", extensions: ["h"] }],
   });
   if (path) await writeTextFile(path, report.value.config);
+}
+
+/**
+ * The report as a file, so it can be read by someone who was not sitting here.
+ *
+ * A conversion is handed on - to a reviewer, to the vendor, to whoever picks
+ * the board up in six months - and until now the only thing that travelled was
+ * config.h, which is the half that cannot say what it does not know. Everything
+ * the pipeline refused to decide lived in this window and nowhere else.
+ */
+async function saveReport() {
+  if (!report.value) return;
+  const name = (board.value.trim() || report.value.meta.target || "conversion")
+    .replace(/[^A-Za-z0-9._-]+/g, "_");
+  const path = await save({
+    defaultPath: `${name}-report.md`,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (!path) return;
+  await writeTextFile(
+    path,
+    reportMarkdown(report.value, {
+      pdfPath: pdf.value,
+      date: new Date().toISOString().slice(0, 10),
+    }),
+  );
 }
 
 async function copyConfig() {
@@ -574,6 +601,12 @@ async function copyConfig() {
               @click="copyConfig"
             >
               {{ copied ? "Copied" : "Copy" }}
+            </button>
+            <button
+              class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500"
+              @click="saveReport"
+            >
+              Save report.md
             </button>
             <button
               class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500"

@@ -31,6 +31,19 @@ not place a device on, a crystal it will not attribute, a polarity no schematic
 states — travels as a warning. Dropping any of them would turn a config that
 says what it does not know into one that looks finished.
 
+## The report is a file too
+
+**Save report.md** writes the whole report out: the numbers the conversion
+rested on, every warning grouped by what has to be done about it, anything
+supplied by hand, the reasoning, the pin map, and the config itself.
+
+It exists because a conversion gets handed on — to a reviewer, to the vendor, to
+whoever picks the board up in six months — and until it did, the only thing that
+travelled was `config.h`, which is precisely the half that cannot say what it
+does not know. Nothing in the file is summarised into a count, and the grouping
+is shared with the on-screen panel rather than reimplemented, so the saved file
+and the window cannot disagree about what was left undecided.
+
 ## What a vendor needs installed
 
 Nothing. An installed build ships the whole converter frozen into one

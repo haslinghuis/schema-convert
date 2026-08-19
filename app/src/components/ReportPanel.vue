@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { Report } from "../types";
+import { groupWarnings } from "../report";
 
 const props = defineProps<{ report: Report }>();
 
@@ -13,48 +14,11 @@ const props = defineProps<{ report: Report }>();
  * what it does not know into one that looks finished, which is the failure this
  * whole tool exists to avoid. So they are grouped by what the reader has to do
  * about them, and none is hidden.
+ *
+ * The grouping itself lives in ../report.ts because the saved Markdown needs
+ * the same one, and two copies would drift.
  */
-const ACTION = [
-  {
-    key: "vendor",
-    label: "Ask the vendor",
-    hint: "Not on the schematic at all. No tool can recover these.",
-    match: /orientation|current meter|ESC shunt|polarity|vendor|confirm it with/i,
-  },
-  {
-    key: "resolve",
-    label: "Needs a decision",
-    hint: "The sheet is ambiguous here; the tool declined rather than guess.",
-    match: /only a CS net|cannot be told|not clear enough|by hand|unknown|second IMU/i,
-  },
-  {
-    key: "clock",
-    label: "Clock and power",
-    hint: "Silent if wrong: the build defaults rather than failing.",
-    match: /HSE|crystal|SYSTEM_HSE_MHZ|VOLTAGE_METER/i,
-  },
-] as const;
-
-const groups = computed(() => {
-  const rest = [...props.report.warnings];
-  const out: { key: string; label: string; hint: string; items: string[] }[] = [];
-  for (const g of ACTION) {
-    const items: string[] = [];
-    for (let i = rest.length - 1; i >= 0; i--) {
-      if (g.match.test(rest[i])) items.unshift(rest.splice(i, 1)[0]);
-    }
-    if (items.length) out.push({ key: g.key, label: g.label, hint: g.hint, items });
-  }
-  if (rest.length) {
-    out.push({
-      key: "other",
-      label: "Other",
-      hint: "",
-      items: rest,
-    });
-  }
-  return out;
-});
+const groups = computed(() => groupWarnings(props.report.warnings));
 
 const agreement = computed(() => Math.round(props.report.meta.agreement * 100));
 const parts = computed(() =>
